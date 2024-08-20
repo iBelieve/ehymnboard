@@ -1,0 +1,4 @@
+Flask
+gunicorn
+Pillow
+str2bool

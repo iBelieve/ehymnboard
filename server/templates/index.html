@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html class="bg-site-bg">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link href="/static/tailwind.css" rel="stylesheet" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orelega+One&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body class="grid grid-cols-2 gap-8 px-8 py-8 h-dvh">
+    <div
+      class="fixed inset-0 opacity-20 bg-cover grayscale-[0.7] brightness-75"
+      style="background-image: url('/static/church-lent.jpg')"
+    ></div>
+    <div class="flex flex-col z-10">
+      <h1 class="text-5xl font-display tracking-wide text-white">Hymnboard</h1>
+      <div class="flex-grow flex flex-col items-center justify-center">
+        <div
+          class="bg-white/40 border-8 border-transparent rounded-2xl overflow-hidden shadow-lg"
+        >
+          <form
+            class="flex flex-col gap-4 max-w-sm mx-auto bg-white p-4"
+            method="POST"
+            action="/images"
+          >
+            {% for line in [1, 2, 3, 4, 5, 6] %}
+            <input
+              type="text"
+              class="input input-bordered input-xl text-center"
+              name="line{{line}}"
+              value="{{lines[line - 1]}}"
+              data-1p-ignore
+            />
+            {% endfor %}
+
+            <div class="mt-4 flex gap-4">
+              <button
+                class="btn btn-primary btn-lg flex-grow"
+                type="submit"
+                name="action"
+                value="apply"
+              >
+                Apply
+              </button>
+              <button
+                class="btn btn-soft btn-error btn-lg flex-grow"
+                type="submit"
+                name="action"
+                value="clear"
+              >
+                Clear
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    {% include 'hymnboard.html' %}
+  </body>
+</html>
