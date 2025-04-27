@@ -33,7 +33,13 @@ int on_wifi_scan_complete(void *env, const cyw43_ev_scan_result_t *result);
 struct WiFiScanResult
 {
     std::string ssid;
+    uint8_t bssid[6];
     int16_t rssi;
+
+    WiFiScanResult(const cyw43_ev_scan_result_t *result) : ssid((char *)result->ssid), rssi(result->rssi)
+    {
+        memcpy(bssid, result->bssid, sizeof(bssid));
+    }
 };
 
 class WiFiScan
@@ -77,7 +83,7 @@ int on_wifi_scan_complete(void *env, const cyw43_ev_scan_result_t *result)
     assert(env);
     WiFiScan *scan = (WiFiScan *)env;
 
-    WiFiScanResult scan_result{(char *)result->ssid, result->rssi};
+    WiFiScanResult scan_result(result);
 
     if (scan_result.ssid.empty())
     {
@@ -85,7 +91,9 @@ int on_wifi_scan_complete(void *env, const cyw43_ev_scan_result_t *result)
         return 0;
     }
 
-    printf(" -> Found SSID: %s, RSSI: %d\n", scan_result.ssid.c_str(), scan_result.rssi);
+    printf(" -> Found SSID: %s, MAC: %02x:%02x:%02x:%02x:%02x:%02x, RSSI: %d\n", scan_result.ssid.c_str(),
+           scan_result.bssid[0], scan_result.bssid[1], scan_result.bssid[2], scan_result.bssid[3], scan_result.bssid[4],
+           scan_result.bssid[5], scan_result.rssi);
 
     auto existingResult = std::find_if(scan->results.begin(), scan->results.end(),
                                        [&scan_result](const WiFiScanResult &r) { return r.ssid == scan_result.ssid; });
@@ -95,6 +103,7 @@ int on_wifi_scan_complete(void *env, const cyw43_ev_scan_result_t *result)
         // Update the existing result if the new one has a stronger signal
         if (scan_result.rssi > existingResult->rssi)
         {
+            memcpy(existingResult->bssid, scan_result.bssid, sizeof(scan_result.bssid));
             existingResult->rssi = scan_result.rssi;
         }
     }
@@ -138,30 +147,39 @@ void setup_wifi()
                 auto ssid = entry->first.c_str();
                 auto password = entry->second.c_str();
 
-                printf("Tring to connect to SSID %s with password %s\n", ssid, password);
+                printf("Tring to connect to SSID %s (MAC %02x:%02x:%02x:%02x:%02x:%02x) with password %s\n", ssid,
+                       result.bssid[0], result.bssid[1], result.bssid[2], result.bssid[3], result.bssid[4],
+                       result.bssid[5], password);
 
-                int res = cyw43_arch_wifi_connect_timeout_ms(ssid, password, CYW43_AUTH_WPA2_AES_PSK, 30000);
+                for (int i = 0; i < 5; i++)
+                {
+                    int res = cyw43_arch_wifi_connect_bssid_timeout_ms(ssid, result.bssid, password,
+                                                                       CYW43_AUTH_WPA2_AES_PSK, 30000);
 
-                if (res == PICO_OK)
-                {
-                    printf("Connected to %s\n", ssid);
-                    return;
-                }
-                else if (res == PICO_ERROR_BADAUTH)
-                {
-                    printf("Bad auth for %s\n", ssid);
-                }
-                else if (res == PICO_ERROR_TIMEOUT)
-                {
-                    printf("Timeout connecting to %s\n", ssid);
-                }
-                else if (res == PICO_ERROR_CONNECT_FAILED)
-                {
-                    printf("Connection failed for %s\n", ssid);
-                }
-                else
-                {
-                    printf("Unknown error connecting to %s: %d\n", ssid, res);
+                    if (res == PICO_OK)
+                    {
+                        printf("- Connected to %s\n", ssid);
+                        return;
+                    }
+                    else if (res == PICO_ERROR_BADAUTH)
+                    {
+                        printf("- Bad auth for %s\n", ssid);
+                    }
+                    else if (res == PICO_ERROR_TIMEOUT)
+                    {
+                        printf("- Timeout connecting to %s\n", ssid);
+                    }
+                    else if (res == PICO_ERROR_CONNECT_FAILED)
+                    {
+                        printf("- Connection failed for %s\n", ssid);
+                    }
+                    else
+                    {
+                        printf("- Unknown error connecting to %s: %d\n", ssid, res);
+                    }
+
+                    sleep_ms(1000);
+                    printf("- Retrying connection...\n", ssid);
                 }
             }
         }
