@@ -37,13 +37,15 @@ BASIC_AUTH_PASSWORD = os.getenv("BASIC_AUTH_PASSWORD")
 
 SCREEN_HEIGHT = 680
 SCREEN_WIDTH = 960
-LINE_HEIGHT = SCREEN_HEIGHT * 0.43
-FONT_NAME = "fonts/OrelegaOne-Regular.ttf"
+LINE_HEIGHT = SCREEN_HEIGHT * 0.45
+FONT_NAME = "fonts/BebasNeue-Regular.ttf"
 HORIZ_PADDING = 50
 MAX_FONT_SIZE = LINE_HEIGHT * 0.9
 MAX_LINE_WIDTH = SCREEN_WIDTH - 2 * HORIZ_PADDING
 
-LINE_HEIGHT
+# Text with this font isn't centered vertically, so we need to adjust the y
+# position to make it look centered. This is a bit of a hack, but it works.
+LINE_OFFSET = 15
 
 LINE1_TOP = 0
 LINE1_BOTTOM = LINE_HEIGHT
@@ -218,6 +220,6 @@ def draw_centered_text(
 
     text_width = draw.textlength(text, font=font)
     x = (SCREEN_WIDTH - text_width) / 2
-    y = center_y - font.size / 2
+    y = center_y - font.size / 2 - LINE_OFFSET
 
     draw.text((x, y), text, font=font, fill=1)
