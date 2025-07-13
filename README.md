@@ -1,6 +1,6 @@
 # eHymnBoard
 
-A digital hymn board using e-ink screens. Designed and built by Michael Spencer and Christopher Spencer.
+A digital hymn board using e-ink screens. Designed and built by Michael Spencer and Christopher Spencer. First used in the Divine Service on Easter Sunday, A+D 2025.
 
 ![Photos of the hymn board](./photos.jpg)
 
