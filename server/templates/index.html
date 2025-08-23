@@ -19,8 +19,11 @@
     ></div>
     <div class="flex flex-col z-10">
       <h1 class="text-5xl font-display tracking-wide text-white max-lg:mb-8">
-        Hymnboard
+        Hymn Board
       </h1>
+
+      {% include 'devices.html' %}
+
       <div class="flex-grow flex flex-col items-center justify-center">
         <div
           class="bg-white/40 border-8 border-transparent rounded-2xl overflow-hidden shadow-lg"
@@ -63,5 +66,9 @@
       </div>
     </div>
     {% include 'hymnboard.html' %}
+
+    <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.6/dist/htmx.min.js" 
+      integrity="sha384-Akqfrbj/HpNVo8k11SXBb6TlBWmXXlYQrCSqEWmyKJe+hDm3Z/B2WVG4smwBkRVm"
+            crossorigin="anonymous"></script>
   </body>
 </html>

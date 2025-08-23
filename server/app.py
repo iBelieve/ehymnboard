@@ -26,6 +26,9 @@ from flask import (
 )
 from PIL import Image, ImageDraw, ImageFont
 from http import HTTPStatus
+from typing import Union, TypedDict
+from collections import OrderedDict
+from datetime import datetime, timezone
 import os
 import hashlib
 import json
@@ -56,6 +59,21 @@ LINE1_CENTER_Y = LINE1_TOP + LINE_HEIGHT / 2
 LINE2_CENTER_Y = LINE2_TOP + LINE_HEIGHT / 2
 
 
+DEVICE_NAMES = OrderedDict(
+    {
+        "E6614103E71F8D26": "Left Hymn Board",
+        "E661A4D41787452B": "Right Hymn Board",
+    }
+)
+
+
+class Device(TypedDict):
+    id: str
+    saved_state_writes: int
+    last_seen: str
+    last_updated_at: Union[str, None]
+
+
 def require_basic_auth(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -81,6 +99,36 @@ def require_basic_auth(f):
     return wrapper
 
 
+@app.template_filter("format_device_name")
+def format_device_name(device_id: str) -> str:
+    return DEVICE_NAMES.get(device_id, device_id)
+
+
+@app.template_filter("prettydate")
+def prettydate(d: Union[str, datetime]) -> str:
+    if isinstance(d, str):
+        d = datetime.fromisoformat(d)
+
+    diff = datetime.now(timezone.utc) - d
+    s = diff.seconds
+    if diff.days > 7 or diff.days < 0:
+        return d.strftime("%d %b %y")
+    elif diff.days == 1:
+        return "1 day ago"
+    elif diff.days > 1:
+        return "{} days ago".format(diff.days)
+    elif s < 60:
+        return "just now"
+    elif s < 120:
+        return "1 minute ago"
+    elif s < 3600:
+        return "{} minutes ago".format(s // 60)
+    elif s < 7200:
+        return "1 hour ago"
+    else:
+        return "{} hours ago".format(s // 3600)
+
+
 @app.get("/ok")
 def ok():
     return Response(status=HTTPStatus.NO_CONTENT)
@@ -95,7 +143,17 @@ def index():
     except OSError:
         lines = []
 
-    return render_template("index.html", lines=lines)
+    devices = get_sorted_devices()
+
+    return render_template("index.html", lines=lines, devices=devices)
+
+
+@app.get("/devices")
+@require_basic_auth
+def devices():
+    devices = get_sorted_devices()
+
+    return render_template("devices.html", devices=devices)
 
 
 @app.post("/images")
@@ -148,16 +206,39 @@ def get_image(image_id):
         image_hash = hashlib.sha1(image_data).hexdigest()
 
     if_none_match = request.headers.get("If-None-Match") or request.args.get("etag")
+    device_id = request.args.get("device_id")
+
+    devices = get_devices()
 
     # Return "Not Modified" status code if the image hasn't changed
     if if_none_match == image_hash:
+        last_updated_at = (
+            devices[device_id]["last_updated_at"] if device_id in devices else None
+        )
         response = make_response("", 304)
     else:
+        print(
+            f"Device {device_id} updating image {image_id} from {if_none_match} to {image_hash}"
+        )
+
         image = Image.open(f"images/{image_id}.png")
         buffer = image_to_buffer(image)
+        last_updated_at = datetime.now(timezone.utc).isoformat()
 
         response = make_response(buffer)
         response.content_type = "application/octet-stream"
+
+    if device_id:
+        saved_state_writes = request.args.get("saved_state_writes")
+        last_seen = datetime.now(timezone.utc)
+
+        devices[device_id] = {
+            "id": device_id,
+            "saved_state_writes": saved_state_writes,
+            "last_seen": last_seen.isoformat(),
+            "last_updated_at": last_updated_at,
+        }
+        save_devices(devices)
 
     response.headers["Etag"] = image_hash
 
@@ -223,3 +304,27 @@ def draw_centered_text(
     y = center_y - font.size / 2 - LINE_OFFSET
 
     draw.text((x, y), text, font=font, fill=1)
+
+
+def get_devices() -> dict[str, Device]:
+    try:
+        with open("images/devices.json", "r") as f:
+            return json.load(f)
+    except OSError:
+        return {}
+
+
+def get_sorted_devices() -> list[Device]:
+    devices = get_devices()
+    return sorted(devices.values(), key=lambda d: get_device_sort_index(d["id"]))
+
+
+def get_device_sort_index(device_id: str) -> int:
+    if device_id in DEVICE_NAMES:
+        return list(DEVICE_NAMES.keys()).index(device_id)
+    return -1
+
+
+def save_devices(devices: dict[str, Device]):
+    with open("images/devices.json", "w") as f:
+        json.dump(devices, f)

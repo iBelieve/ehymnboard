@@ -1,0 +1,15 @@
+<div
+  hx-get="/devices"
+  hx-trigger="load delay:10s"
+  hx-swap="outerHTML"
+>
+    {% if devices|length > 0 %}
+        <div class="text-white lg:mt-4 mb-4 max-lg:mb-8">
+            {% for device in devices %}
+                <div class="flex items-center gap-2 text-lg">
+                    {{ device.id | format_device_name }} (last seen {{ device.last_seen | prettydate }}, last updated {{ device.last_updated_at | prettydate }}, updated {{ device.saved_state_writes }} times)
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+</div>
