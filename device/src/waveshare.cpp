@@ -138,6 +138,7 @@ void Waveshare13K::waitUntilIdle()
         sleep_ms(30);
         count++;
 
+        // Timeout and reboot after 30 seconds (1000 * 30ms)
         if (count > 1000)
         {
             printf("Timeout waiting for busy pin to go low\n");

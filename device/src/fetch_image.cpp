@@ -27,14 +27,14 @@
 
 uintptr_t image_buffer_offset = 0;
 
-struct HttpRequest
+struct FetchImageHttpRequest
 {
     bool complete = false;
     httpc_result_t result;
     u32_t status_code;
     std::string &etag;
 
-    HttpRequest(std::string &etag) : etag(etag)
+    FetchImageHttpRequest(std::string &etag) : etag(etag)
     {
     }
 };
@@ -42,7 +42,7 @@ struct HttpRequest
 err_t on_headers_received(httpc_state_t *connection, void *arg, struct pbuf *hdr, u16_t hdr_len, u32_t content_len)
 {
     assert(arg);
-    HttpRequest *req = (HttpRequest *)arg;
+    FetchImageHttpRequest *req = (FetchImageHttpRequest *)arg;
 
     auto offset = pbuf_strstr(hdr, "Etag: ");
 
@@ -97,9 +97,9 @@ err_t on_http_data_received(void *arg, struct altcp_pcb *conn, struct pbuf *p, e
 void on_http_req_completed(void *arg, httpc_result_t httpc_result, u32_t rx_content_len, u32_t srv_res, err_t err)
 {
     assert(arg);
-    HttpRequest *req = (HttpRequest *)arg;
+    FetchImageHttpRequest *req = (FetchImageHttpRequest *)arg;
 
-    printf("HTTP request completed with result: %d, content length: %d, server "
+    printf("Fetch image HTTP request completed with result: %d, content length: %d, server "
            "response: %d, error: %d\n",
            httpc_result, rx_content_len, srv_res, err);
     req->complete = true;
@@ -121,7 +121,7 @@ FetchImageResult fetch_image(int image, std::string &etag)
         path += "&etag=" + etag;
     }
 
-    HttpRequest req(etag);
+    FetchImageHttpRequest req(etag);
 
     httpc_connection_t settings = {};
     settings.headers_done_fn = on_headers_received;
@@ -134,7 +134,7 @@ FetchImageResult fetch_image(int image, std::string &etag)
 
     if (ret != ERR_OK)
     {
-        printf("Error starting HTTP request: %d\n", ret);
+        printf("Error starting fetch image HTTP request: %d\n", ret);
         return FetchImageResult::ERROR;
     }
 
@@ -146,7 +146,7 @@ FetchImageResult fetch_image(int image, std::string &etag)
 
     if (req.result != HTTPC_RESULT_OK)
     {
-        printf("HTTP request failed with error: %d\n", req.result);
+        printf("Fetch image HTTP request failed with error: %d\n", req.result);
         return FetchImageResult::ERROR;
     }
 
@@ -167,7 +167,7 @@ FetchImageResult fetch_image(int image, std::string &etag)
     }
     else
     {
-        printf("HTTP request failed with status code: %d\n", req.status_code);
+        printf("Fetch image HTTP request failed with status code: %d\n", req.status_code);
         return FetchImageResult::ERROR;
     }
 }

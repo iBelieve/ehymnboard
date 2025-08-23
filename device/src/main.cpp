@@ -29,16 +29,6 @@
 #include <iostream>
 #include <stdio.h>
 
-void stall()
-{
-    printf("Stalling...\n");
-    while (true)
-    {
-        printf(".");
-        sleep_ms(1000);
-    }
-}
-
 bool refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag)
 {
     printf("Refreshing screen %d\n", screen_id);

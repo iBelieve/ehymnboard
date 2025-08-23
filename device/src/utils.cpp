@@ -36,7 +36,7 @@ void reset_pico()
     sleep_ms(30 * 1000);
 
     watchdog_enable(1, 1);
-    while (1)
+    while (true)
     {
         // Do nothing, watchdog should fire and reboot
     }
