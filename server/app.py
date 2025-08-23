@@ -159,7 +159,7 @@ def get_image(image_id):
         response = make_response(buffer)
         response.content_type = "application/octet-stream"
 
-    response.headers["ETag"] = image_hash
+    response.headers["Etag"] = image_hash
 
     return response
 

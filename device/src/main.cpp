@@ -136,9 +136,9 @@ int main()
     );
     std::string etag3 = flash_saved_state->etag3;
 
-    printf("Screen 1 ETag: %s\n", etag1.c_str());
-    printf("Screen 2 ETag: %s\n", etag2.c_str());
-    printf("Screen 3 ETag: %s\n", etag3.c_str());
+    printf("Screen 1 Etag: %s\n", etag1.c_str());
+    printf("Screen 2 Etag: %s\n", etag2.c_str());
+    printf("Screen 3 Etag: %s\n", etag3.c_str());
 
     while (true)
     {
@@ -150,9 +150,9 @@ int main()
         if (updated1 || updated2 || updated3)
         {
             printf("One or more screens updated, saving state...\n");
-            printf("- Screen 1 ETag: %s\n", etag1.c_str());
-            printf("- Screen 2 ETag: %s\n", etag2.c_str());
-            printf("- Screen 3 ETag: %s\n", etag3.c_str());
+            printf("- Screen 1 Etag: %s\n", etag1.c_str());
+            printf("- Screen 2 Etag: %s\n", etag2.c_str());
+            printf("- Screen 3 Etag: %s\n", etag3.c_str());
 
             SavedState new_state(flash_saved_state, etag1, etag2, etag3);
             new_state.save();

@@ -44,11 +44,11 @@ err_t on_headers_received(httpc_state_t *connection, void *arg, struct pbuf *hdr
     assert(arg);
     HttpRequest *req = (HttpRequest *)arg;
 
-    auto offset = pbuf_strstr(hdr, "ETag: ");
+    auto offset = pbuf_strstr(hdr, "Etag: ");
 
     if (offset == 0xFFFF)
     {
-        printf("WARNING: ETag not found in headers\n");
+        printf("WARNING: Etag not found in headers\n");
     }
     else
     {
@@ -57,12 +57,12 @@ err_t on_headers_received(httpc_state_t *connection, void *arg, struct pbuf *hdr
 
         if (etag_end == 0xFFFF)
         {
-            printf("WARNING: End of ETag header not found\n");
+            printf("WARNING: End of Etag header not found\n");
         }
         else
         {
             req->etag.assign((char *)hdr->payload + etag_start, etag_end - etag_start);
-            printf("ETag: %s\n", req->etag.c_str());
+            printf("Etag: %s\n", req->etag.c_str());
         }
     }
 
