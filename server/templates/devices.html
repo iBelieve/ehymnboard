@@ -7,7 +7,7 @@
         <div class="text-white lg:mt-4 mb-4 max-lg:mb-8">
             {% for device in devices %}
                 <div class="flex items-center gap-2 text-lg">
-                    {{ device.id | format_device_name }} (last seen {{ device.last_seen | prettydate }}, last updated {{ device.last_updated_at | prettydate }}, updated {{ device.saved_state_writes }} times)
+                    {{ device.id | format_device_name }} (last seen {{ device.last_seen | prettydate }}{% if device.last_updated_at %}, last updated {{ device.last_updated_at | prettydate }}{% endif %}{% if device.booted_at %}, booted {{ device.booted_at | prettydate }}{% endif %})
                 </div>
             {% endfor %}
         </div>

@@ -17,6 +17,7 @@
  */
 
 #include "fetch_image.h"
+#include "healthchecks.h"
 #include "long_watchdog.h"
 #include "pico/cyw43_arch.h"
 #include "pico/stdlib.h"
@@ -99,6 +100,8 @@ int main()
 
     setup_wifi();
 
+    report_device_booted();
+
     SPI spi(spi0, SPI_1MHZ,
             2, // SCK pin
             3, // MOSI pin
@@ -159,7 +162,9 @@ int main()
             printf("State saved to flash, %d total writes.\n", new_state.write_count);
         }
 
-        printf("Sleeping for 10 seconds...\n");
-        sleep_ms(10000);
+        report_device_healthy();
+
+        printf("Sleeping for 15 seconds...\n");
+        sleep_ms(15000);
     }
 }

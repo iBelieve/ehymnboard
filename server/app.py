@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 import os
 import hashlib
 import json
+import requests
 
 app = Flask(__name__)
 
@@ -66,12 +67,20 @@ DEVICE_NAMES = OrderedDict(
     }
 )
 
+HEALTHCHECKS_PING_URLS = {
+    "E6614103E71F8D26": "https://hc-ping.com/a717c5f0-8a83-45f9-92a7-c79a21a437b4",
+    "E661A4D41787452B": "https://hc-ping.com/6c7ef2cb-71b8-492e-9e11-4ddfacf29d0c",
+}
+
+PING_EVERY_REQUESTS = 10
+
 
 class Device(TypedDict):
     id: str
     saved_state_writes: int
     last_seen: str
     last_updated_at: Union[str, None]
+    booted_at: Union[str, None]
 
 
 def require_basic_auth(f):
@@ -112,7 +121,7 @@ def prettydate(d: Union[str, datetime]) -> str:
     diff = datetime.now(timezone.utc) - d
     s = diff.seconds
     if diff.days > 7 or diff.days < 0:
-        return d.strftime("%d %b %y")
+        return "on {}".format(d.strftime("%d %b %y"))
     elif diff.days == 1:
         return "1 day ago"
     elif diff.days > 1:
@@ -208,41 +217,82 @@ def get_image(image_id):
     if_none_match = request.headers.get("If-None-Match") or request.args.get("etag")
     device_id = request.args.get("device_id")
 
-    devices = get_devices()
-
     # Return "Not Modified" status code if the image hasn't changed
     if if_none_match == image_hash:
-        last_updated_at = (
-            devices[device_id]["last_updated_at"] if device_id in devices else None
-        )
+        last_updated_at = None
         response = make_response("", 304)
     else:
         print(
-            f"Device {device_id} updating image {image_id} from {if_none_match} to {image_hash}"
+            f"Device {get_device_name(device_id)} ({device_id}) updating image {image_id} from {if_none_match} to {image_hash}"
         )
 
         image = Image.open(f"images/{image_id}.png")
         buffer = image_to_buffer(image)
         last_updated_at = datetime.now(timezone.utc).isoformat()
 
+        ping_healthcheck(device_id, path="/log", data=f"Updating image {image_id}")
+
         response = make_response(buffer)
         response.content_type = "application/octet-stream"
 
     if device_id:
         saved_state_writes = request.args.get("saved_state_writes")
-        last_seen = datetime.now(timezone.utc)
+        watchdog_caused_reboot = request.args.get("watchdog_caused_reboot") == "1"
 
-        devices[device_id] = {
-            "id": device_id,
-            "saved_state_writes": saved_state_writes,
-            "last_seen": last_seen.isoformat(),
-            "last_updated_at": last_updated_at,
-        }
-        save_devices(devices)
+        update_device(
+            device_id=device_id,
+            saved_state_writes=saved_state_writes,
+            last_seen=datetime.now(timezone.utc).isoformat(),
+            last_updated_at=last_updated_at,
+        )
 
     response.headers["Etag"] = image_hash
 
     return response
+
+
+@app.get("/device_booted")
+def report_device_booted():
+    device_id = request.args.get("device_id")
+    saved_state_writes = request.args.get("saved_state_writes")
+    watchdog_caused_reboot = request.args.get("watchdog_caused_reboot") == "1"
+
+    if watchdog_caused_reboot:
+        print(
+            f"Device reboot caused by watchdog: {get_device_name(device_id)} ({device_id})"
+        )
+        ping_healthcheck(device_id, path="/failure", data="Watchdog caused reboot")
+    else:
+        print(f"Device booted: {get_device_name(device_id)} ({device_id})")
+        ping_healthcheck(device_id, path="/log", data="Device booted")
+
+    update_device(
+        device_id=device_id,
+        saved_state_writes=saved_state_writes,
+        last_seen=datetime.now(timezone.utc).isoformat(),
+        booted_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+    return "", 204
+
+
+@app.get("/device_healthy")
+def report_device_healthy():
+    device_id = request.args.get("device_id")
+    saved_state_writes = request.args.get("saved_state_writes")
+    watchdog_caused_reboot = request.args.get("watchdog_caused_reboot") == "1"
+
+    print(f"Device healthy: {get_device_name(device_id)} ({device_id})")
+
+    ping_healthcheck(device_id, data="Device healthy")
+
+    update_device(
+        device_id=device_id,
+        saved_state_writes=saved_state_writes,
+        last_seen=datetime.now(timezone.utc).isoformat(),
+    )
+
+    return "", 204
 
 
 def image_to_buffer(image: Image.Image) -> bytes:
@@ -328,3 +378,35 @@ def get_device_sort_index(device_id: str) -> int:
 def save_devices(devices: dict[str, Device]):
     with open("images/devices.json", "w") as f:
         json.dump(devices, f)
+
+
+def update_device(device_id: str, **kwargs):
+    devices = get_devices()
+    device = devices.get(
+        device_id,
+        {
+            "id": device_id,
+        },
+    )
+    updates = {k: v for k, v in kwargs.items() if v is not None}
+
+    device.update(updates)
+    devices[device_id] = device
+    save_devices(devices)
+
+
+def ping_healthcheck(device_id: str, path: str = "", data: str = ""):
+    url = HEALTHCHECKS_PING_URLS.get(device_id)
+
+    if not url:
+        print(f"Warning: No healthcheck URL found for {device_id}")
+        return
+
+    try:
+        requests.post(url + path, data=data)
+    except requests.RequestException:
+        print(f"Warning: Healthcheck ping failed for {device_id}")
+
+
+def get_device_name(device_id: str) -> str:
+    return DEVICE_NAMES.get(device_id, device_id)
