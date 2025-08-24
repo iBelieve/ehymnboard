@@ -35,7 +35,7 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(ehymnboard src/main.cpp src/fetch_image.cpp src/state.cpp src/utils.cpp src/waveshare.cpp src/wifi.cpp)
+add_executable(ehymnboard src/main.cpp src/fetch_image.cpp src/state.cpp src/utils.cpp src/waveshare.cpp src/wifi.cpp src/long_watchdog.cpp)
 
 pico_set_program_name(ehymnboard "ehymnboard")
 pico_set_program_version(ehymnboard "0.1")

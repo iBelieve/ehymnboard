@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "long_watchdog.h"
 #include "pico/cyw43_arch.h"
 #include "pico/stdlib.h"
 #include "secrets.h"
@@ -131,6 +132,8 @@ void setup_wifi()
 
     while (true)
     {
+        long_watchdog_update();
+
         WiFiScan wifi_scan;
         wifi_scan.run();
 
@@ -153,6 +156,8 @@ void setup_wifi()
 
                 for (int i = 0; i < 5; i++)
                 {
+                    long_watchdog_update();
+
                     int res = cyw43_arch_wifi_connect_bssid_timeout_ms(ssid, result.bssid, password,
                                                                        CYW43_AUTH_WPA2_AES_PSK, 30000);
 
@@ -184,6 +189,8 @@ void setup_wifi()
             }
         }
 
+        long_watchdog_update();
+
         if (found_ssid)
         {
             printf("All attempts to connect to known SSIDs failed. Sleeping "
@@ -193,8 +200,8 @@ void setup_wifi()
         }
         else
         {
-            printf("No known SSIDs found. Sleeping for 60s then rescanning...\n");
-            sleep_ms(60 * 1000);
+            printf("No known SSIDs found. Sleeping for 30s then rescanning...\n");
+            sleep_ms(30 * 1000);
         }
     }
 }

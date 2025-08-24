@@ -112,7 +112,8 @@ FetchImageResult fetch_image(int image, std::string &etag)
     auto context = cyw43_arch_async_context();
 
     std::string path = "/images/" + std::to_string(image) + "?device_id=" + unique_board_id +
-                       "&saved_state_writes=" + std::to_string(flash_saved_state->write_count);
+                       "&saved_state_writes=" + std::to_string(flash_saved_state->write_count) +
+                       "&watchdog_caused_reboot=" + std::to_string(watchdog_caused_reboot());
 
     // Yeah, yeah, this should be a If-None-Match header, but the http_client
     // library doesn't support custom headers.

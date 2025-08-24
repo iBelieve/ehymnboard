@@ -17,7 +17,7 @@
  */
 
 #include "fetch_image.h"
-#include "hardware/watchdog.h"
+#include "long_watchdog.h"
 #include "pico/cyw43_arch.h"
 #include "pico/stdlib.h"
 #include "pico/unique_id.h"
@@ -31,6 +31,8 @@
 
 bool refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag)
 {
+    long_watchdog_update();
+
     printf("Refreshing screen %d\n", screen_id);
     auto ret = fetch_image(screen_id, etag);
 
@@ -64,6 +66,8 @@ int main()
 {
     stdio_init_all();
 
+    long_watchdog_enable(60 /* seconds */);
+
     unique_board_id = get_unique_board_id();
 
     sleep_ms(3000);
@@ -87,6 +91,11 @@ int main()
     }
 
     printf("Saved state version=%d, write count=%d\n", flash_saved_state->version, flash_saved_state->write_count);
+
+    if (watchdog_caused_reboot())
+    {
+        printf("Rebooted due to watchdog timeout!\n");
+    }
 
     setup_wifi();
 
