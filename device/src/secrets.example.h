@@ -19,5 +19,6 @@
 #pragma once
 
 #include <map>
+#include <string>
 
-const std::map<const char *, const char *> WIFI_SSIDS = {{"SSID_1", "PASSPHRASE_1"}, {"SSID_2", "PASSPHRASE_2"}};
+const std::map<std::string, std::string> WIFI_SSIDS = {{"SSID_1", "PASSPHRASE_1"}, {"SSID_2", "PASSPHRASE_2"}};
