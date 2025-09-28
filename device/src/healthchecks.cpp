@@ -71,8 +71,11 @@ void send_healthcheck_request(const std::string &path)
     httpc_connection_t settings = {};
     settings.result_fn = on_healthcheck_request_completed;
 
+    async_context_acquire_lock_blocking(context);
+
     auto ret = httpc_get_file_dns("api.hymnboard.sonrise.io", 80, full_path.c_str(), &settings,
                                   on_healthcheck_data_received, &req, nullptr);
+    async_context_release_lock(context);
 
     if (ret != ERR_OK)
     {

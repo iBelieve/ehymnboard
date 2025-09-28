@@ -130,9 +130,12 @@ FetchImageResult fetch_image(int image, std::string &etag)
 
     image_buffer_offset = 0;
 
+    async_context_acquire_lock_blocking(context);
+
     auto ret = httpc_get_file_dns("api.hymnboard.sonrise.io", 80, path.c_str(), &settings, on_http_data_received, &req,
                                   nullptr);
 
+    async_context_release_lock(context);
     if (ret != ERR_OK)
     {
         printf("Error starting fetch image HTTP request: %d\n", ret);
