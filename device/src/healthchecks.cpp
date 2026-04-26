@@ -71,8 +71,10 @@ void send_healthcheck_request(const std::string &path)
     httpc_connection_t settings = {};
     settings.result_fn = on_healthcheck_request_completed;
 
+    cyw43_arch_lwip_begin();
     auto ret = httpc_get_file_dns("api.hymnboard.sonrise.io", 80, full_path.c_str(), &settings,
                                   on_healthcheck_data_received, &req, nullptr);
+    cyw43_arch_lwip_end();
 
     if (ret != ERR_OK)
     {
@@ -80,10 +82,17 @@ void send_healthcheck_request(const std::string &path)
         return;
     }
 
+    auto request_start = get_absolute_time();
+
     while (!req.complete)
     {
-        async_context_poll(context);
         async_context_wait_for_work_ms(context, 1000);
+
+        if (absolute_time_diff_us(request_start, get_absolute_time()) > 60 * 1000 * 1000ll)
+        {
+            printf("Healthcheck HTTP request timed out after 60s waiting for completion\n");
+            return;
+        }
     }
 
     if (req.result != HTTPC_RESULT_OK)

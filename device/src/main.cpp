@@ -30,7 +30,10 @@
 #include <iostream>
 #include <stdio.h>
 
-bool refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag)
+// Refresh a single screen. On transient HTTP failures we just log and bail out
+// for this iteration — the next loop will retry. The main loop tracks a "no
+// success in too long" timeout to reset us if the network stays broken.
+FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag)
 {
     long_watchdog_update();
 
@@ -43,24 +46,17 @@ bool refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag)
         screen.init();
         screen.display(image_buffer);
         screen.shutdown();
-        return true;
     }
     else if (ret == FetchImageResult::NO_CHANGE)
     {
         printf("No change for screen %d\n", screen_id);
     }
-    else if (ret == FetchImageResult::ERROR)
-    {
-        printf("Refreshing screen %d failed: %d\n", screen_id, ret);
-        reset_pico();
-    }
     else
     {
-        printf("Unknown result for screen %d: %d\n", screen_id, ret);
-        reset_pico();
+        printf("Refreshing screen %d failed (ret=%d), will retry on next loop\n", screen_id, ret);
     }
 
-    return false;
+    return ret;
 }
 
 int main()
@@ -142,14 +138,31 @@ int main()
     printf("Screen 2 Etag: %s\n", etag2.c_str());
     printf("Screen 3 Etag: %s\n", etag3.c_str());
 
+    // If every screen fetch fails for this long, give up and reboot to start
+    // fresh. Picks up cleanly from a borked WiFi/DNS state without rebooting
+    // on transient blips.
+    constexpr int64_t NO_SUCCESS_REBOOT_TIMEOUT_US = 3LL * 60 * 1000 * 1000;
+
+    uint32_t loop_count = 0;
+    auto start_time = get_absolute_time();
+    auto last_success_time = start_time;
+
     while (true)
     {
-        printf("Refreshing screens...\n");
-        bool updated1 = refresh_screen(1, screen1, etag1);
-        bool updated2 = refresh_screen(2, screen2, etag2);
-        bool updated3 = refresh_screen(3, screen3, etag3);
+        loop_count++;
+        auto uptime_s = absolute_time_diff_us(start_time, get_absolute_time()) / 1000000;
+        printf("Refreshing screens (loop=%lu, uptime=%llds)...\n", loop_count, uptime_s);
 
-        if (updated1 || updated2 || updated3)
+        auto r1 = refresh_screen(1, screen1, etag1);
+        auto r2 = refresh_screen(2, screen2, etag2);
+        auto r3 = refresh_screen(3, screen3, etag3);
+
+        bool any_updated = (r1 == FetchImageResult::NEW_IMAGE) || (r2 == FetchImageResult::NEW_IMAGE) ||
+                           (r3 == FetchImageResult::NEW_IMAGE);
+        bool any_success = (r1 != FetchImageResult::ERROR) || (r2 != FetchImageResult::ERROR) ||
+                           (r3 != FetchImageResult::ERROR);
+
+        if (any_updated)
         {
             printf("One or more screens updated, saving state...\n");
             printf("- Screen 1 Etag: %s\n", etag1.c_str());
@@ -160,6 +173,22 @@ int main()
             new_state.save();
 
             printf("State saved to flash, %d total writes.\n", new_state.write_count);
+        }
+
+        if (any_success)
+        {
+            last_success_time = get_absolute_time();
+        }
+        else
+        {
+            auto since_success_s = absolute_time_diff_us(last_success_time, get_absolute_time()) / 1000000;
+            printf("WARNING: no successful fetch for %llds\n", since_success_s);
+
+            if (absolute_time_diff_us(last_success_time, get_absolute_time()) > NO_SUCCESS_REBOOT_TIMEOUT_US)
+            {
+                printf("All fetches have failed for >3 minutes, rebooting to recover\n");
+                reset_pico();
+            }
         }
 
         report_device_healthy();
