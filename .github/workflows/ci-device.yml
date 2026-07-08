@@ -1,0 +1,111 @@
+name: CI (device)
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "device/**"
+      - ".github/workflows/ci-device.yml"
+  pull_request:
+    paths:
+      - "device/**"
+      - ".github/workflows/ci-device.yml"
+
+concurrency:
+  group: ci-device-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PICO_SDK_VERSION: "2.1.1"
+  ARM_GCC_VERSION: "14.2.Rel1"
+
+defaults:
+  run:
+    working-directory: device
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v8.3.2
+
+      - name: Check formatting
+        run: git ls-files 'src/*.cpp' 'src/*.h' | xargs uv run clang-format --dry-run --Werror
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: ${{ env.ARM_GCC_VERSION }}
+
+      - name: Cache pico-sdk
+        id: cache-pico-sdk
+        uses: actions/cache@v6
+        with:
+          path: pico-sdk
+          key: pico-sdk-${{ env.PICO_SDK_VERSION }}
+
+      - name: Checkout pico-sdk
+        if: steps.cache-pico-sdk.outputs.cache-hit != 'true'
+        uses: actions/checkout@v7
+        with:
+          repository: raspberrypi/pico-sdk
+          ref: ${{ env.PICO_SDK_VERSION }}
+          path: pico-sdk
+          submodules: recursive
+
+      - name: Install ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Create secrets.h
+        run: cp src/secrets.example.h src/secrets.h
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DPICO_SDK_PATH="$GITHUB_WORKSPACE/pico-sdk"
+          -DWERROR=ON
+
+      - name: Build
+        run: ninja -C build
+
+      - uses: astral-sh/setup-uv@v8.3.2
+
+      - name: Run clang-tidy
+        run: |
+          TOOLCHAIN_DIR="$(dirname "$(dirname "$(command -v arm-none-eabi-gcc)")")"
+          GCC_VER="$(ls "$TOOLCHAIN_DIR/arm-none-eabi/include/c++")"
+          uv run clang-tidy -p build --quiet \
+            --extra-arg=--target=armv6m-none-eabi \
+            --extra-arg=-isystem --extra-arg="$TOOLCHAIN_DIR/arm-none-eabi/include/c++/$GCC_VER" \
+            --extra-arg=-isystem --extra-arg="$TOOLCHAIN_DIR/arm-none-eabi/include/c++/$GCC_VER/arm-none-eabi/thumb/v6-m/nofp" \
+            --extra-arg=-isystem --extra-arg="$TOOLCHAIN_DIR/arm-none-eabi/include" \
+            src/*.cpp
+
+  python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v8.3.2
+
+      - name: Check lockfile is up to date
+        run: uv lock --check
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Check formatting
+        if: success() || failure()
+        run: uv run ruff format --check .
