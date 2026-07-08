@@ -32,11 +32,10 @@ struct FetchImageHttpRequest
     bool complete = false;
     httpc_result_t result;
     u32_t status_code;
-    std::string &etag;
 
-    FetchImageHttpRequest(std::string &etag) : etag(etag)
-    {
-    }
+    // Captured from the response headers; only adopted by the caller once
+    // the full image body has been received.
+    std::string new_etag;
 };
 
 err_t on_headers_received(httpc_state_t *connection, void *arg, struct pbuf *hdr, u16_t hdr_len, u32_t content_len)
@@ -61,8 +60,8 @@ err_t on_headers_received(httpc_state_t *connection, void *arg, struct pbuf *hdr
         }
         else
         {
-            req->etag.assign((char *)hdr->payload + etag_start, etag_end - etag_start);
-            printf("Etag: %s\n", req->etag.c_str());
+            req->new_etag.assign((char *)hdr->payload + etag_start, etag_end - etag_start);
+            printf("Etag: %s\n", req->new_etag.c_str());
         }
     }
 
@@ -122,7 +121,7 @@ FetchImageResult fetch_image(int image, std::string &etag)
         path += "&etag=" + etag;
     }
 
-    FetchImageHttpRequest req(etag);
+    FetchImageHttpRequest req;
 
     httpc_connection_t settings = {};
     settings.headers_done_fn = on_headers_received;
@@ -167,6 +166,14 @@ FetchImageResult fetch_image(int image, std::string &etag)
             printf("Image buffer not full, only %d bytes received, %d expected\n", image_buffer_offset,
                    image_buffer.size());
             return FetchImageResult::ERROR;
+        }
+
+        // Only adopt the new etag once the full image has arrived — adopting
+        // it on a truncated body would make the server 304 us forever for an
+        // image we never displayed.
+        if (!req.new_etag.empty())
+        {
+            etag = req.new_etag;
         }
 
         return FetchImageResult::NEW_IMAGE;
