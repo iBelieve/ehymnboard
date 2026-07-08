@@ -26,7 +26,7 @@ from flask import (
 )
 from PIL import Image, ImageDraw, ImageFont
 from http import HTTPStatus
-from typing import Union, TypedDict
+from typing import Union, TypedDict, cast
 from collections import OrderedDict
 from datetime import datetime, timezone
 import os
@@ -237,7 +237,6 @@ def get_image(image_id):
 
     if device_id:
         saved_state_writes = request.args.get("saved_state_writes")
-        watchdog_caused_reboot = request.args.get("watchdog_caused_reboot") == "1"
 
         update_device(
             device_id=device_id,
@@ -280,7 +279,6 @@ def report_device_booted():
 def report_device_healthy():
     device_id = request.args.get("device_id")
     saved_state_writes = request.args.get("saved_state_writes")
-    watchdog_caused_reboot = request.args.get("watchdog_caused_reboot") == "1"
 
     print(f"Device healthy: {get_device_name(device_id)} ({device_id})")
 
@@ -299,6 +297,7 @@ def image_to_buffer(image: Image.Image) -> bytes:
     buffer = bytearray(int(image.width / 8) * image.height)
     image = image.convert("1")
     pixels = image.load()
+    assert pixels is not None
 
     for y in range(image.height):
         for x in range(image.width):
@@ -380,23 +379,22 @@ def save_devices(devices: dict[str, Device]):
         json.dump(devices, f)
 
 
-def update_device(device_id: str, **kwargs):
+def update_device(device_id: Union[str, None], **kwargs):
+    if not device_id:
+        print("Warning: Ignoring device update without a device_id")
+        return
+
     devices = get_devices()
-    device = devices.get(
-        device_id,
-        {
-            "id": device_id,
-        },
-    )
-    updates = {k: v for k, v in kwargs.items() if v is not None}
+    device = devices.get(device_id) or cast(Device, {"id": device_id})
+    updates = cast(Device, {k: v for k, v in kwargs.items() if v is not None})
 
     device.update(updates)
     devices[device_id] = device
     save_devices(devices)
 
 
-def ping_healthcheck(device_id: str, path: str = "", data: str = ""):
-    url = HEALTHCHECKS_PING_URLS.get(device_id)
+def ping_healthcheck(device_id: Union[str, None], path: str = "", data: str = ""):
+    url = HEALTHCHECKS_PING_URLS.get(device_id) if device_id else None
 
     if not url:
         print(f"Warning: No healthcheck URL found for {device_id}")
@@ -408,5 +406,7 @@ def ping_healthcheck(device_id: str, path: str = "", data: str = ""):
         print(f"Warning: Healthcheck ping failed for {device_id}")
 
 
-def get_device_name(device_id: str) -> str:
+def get_device_name(device_id: Union[str, None]) -> str:
+    if not device_id:
+        return "unknown"
     return DEVICE_NAMES.get(device_id, device_id)
