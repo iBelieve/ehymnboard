@@ -159,8 +159,8 @@ int main()
 
         bool any_updated = (r1 == FetchImageResult::NEW_IMAGE) || (r2 == FetchImageResult::NEW_IMAGE) ||
                            (r3 == FetchImageResult::NEW_IMAGE);
-        bool any_success = (r1 != FetchImageResult::ERROR) || (r2 != FetchImageResult::ERROR) ||
-                           (r3 != FetchImageResult::ERROR);
+        bool any_success =
+            (r1 != FetchImageResult::ERROR) || (r2 != FetchImageResult::ERROR) || (r3 != FetchImageResult::ERROR);
 
         if (any_updated)
         {
