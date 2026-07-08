@@ -27,6 +27,7 @@
 
 constexpr auto FLASH_TARGET_OFFSET = PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
 
+// NOLINTNEXTLINE(performance-no-int-to-ptr): memory-mapped flash address
 const SavedState *flash_saved_state = (const SavedState *)(XIP_BASE + FLASH_TARGET_OFFSET);
 
 int flash_safe_execute(std::function<void()> func, uint32_t enter_exit_timeout_ms)
@@ -39,16 +40,17 @@ int flash_safe_execute(std::function<void()> func, uint32_t enter_exit_timeout_m
         &func, enter_exit_timeout_ms);
 }
 
-SavedState::SavedState(const SavedState *prev_state, std::string etag1, std::string etag2, std::string etag3)
+SavedState::SavedState(const SavedState *prev_state, const std::string &etag1, const std::string &etag2,
+                       const std::string &etag3)
     : write_count(prev_state->write_count + 1)
 {
     hard_assert(etag1.length() <= 40);
     hard_assert(etag2.length() <= 40);
     hard_assert(etag3.length() <= 40);
 
-    strcpy(this->etag1, etag1.c_str());
-    strcpy(this->etag2, etag2.c_str());
-    strcpy(this->etag3, etag3.c_str());
+    snprintf(this->etag1, sizeof(this->etag1), "%s", etag1.c_str());
+    snprintf(this->etag2, sizeof(this->etag2), "%s", etag2.c_str());
+    snprintf(this->etag3, sizeof(this->etag3), "%s", etag3.c_str());
 }
 
 void SavedState::save()

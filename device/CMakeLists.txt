@@ -44,6 +44,15 @@ pico_set_program_version(ehymnboard "0.1")
 pico_enable_stdio_uart(ehymnboard 0)
 pico_enable_stdio_usb(ehymnboard 1)
 
+target_compile_options(ehymnboard PRIVATE -Wall -Wextra)
+
+# CI passes -DWERROR=ON; warnings are treated as errors there, so fix any
+# warnings before pushing
+option(WERROR "Treat compiler warnings as errors" OFF)
+if (WERROR)
+    target_compile_options(ehymnboard PRIVATE -Werror)
+endif()
+
 # Add the standard library to the build
 target_link_libraries(ehymnboard
         pico_stdlib)

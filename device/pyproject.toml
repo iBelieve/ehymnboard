@@ -7,3 +7,9 @@ requires-python = ">=3.13"
 dependencies = [
     "pyserial>=3.5",
 ]
+
+[dependency-groups]
+dev = [
+    "clang-format>=22.1.5",
+    "clang-tidy>=22.1.7",
+]

@@ -53,7 +53,7 @@ FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std::string
     }
     else
     {
-        printf("Refreshing screen %d failed (ret=%d), will retry on next loop\n", screen_id, ret);
+        printf("Refreshing screen %d failed (ret=%d), will retry on next loop\n", screen_id, (int)ret);
     }
 
     return ret;
@@ -151,7 +151,7 @@ int main()
     {
         loop_count++;
         auto uptime_s = absolute_time_diff_us(start_time, get_absolute_time()) / 1000000;
-        printf("Refreshing screens (loop=%lu, uptime=%llds)...\n", loop_count, uptime_s);
+        printf("Refreshing screens (loop=%lu, uptime=%llds)...\n", (unsigned long)loop_count, uptime_s);
 
         auto r1 = refresh_screen(1, screen1, etag1);
         auto r2 = refresh_screen(2, screen2, etag2);

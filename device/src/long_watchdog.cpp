@@ -27,7 +27,7 @@ uint8_t seconds_until_watchdog_reset = 0;
 
 repeating_timer_t watcher_timer;
 
-bool watchdog_task(repeating_timer_t *rt)
+bool watchdog_task([[maybe_unused]] repeating_timer_t *rt)
 {
     if (seconds_until_watchdog_reset > 0)
     {

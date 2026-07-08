@@ -19,12 +19,13 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <string>
 
 #include "lwip/apps/http_client.h"
 #include "pico/stdlib.h"
 
-enum class FetchImageResult
+enum class FetchImageResult : uint8_t
 {
     NEW_IMAGE,
     NO_CHANGE,

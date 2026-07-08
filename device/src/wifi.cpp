@@ -128,8 +128,6 @@ void setup_wifi()
     // Enable wifi station
     cyw43_arch_enable_sta_mode();
 
-    bool scan_in_progress = false;
-
     while (true)
     {
         long_watchdog_update();
@@ -150,7 +148,7 @@ void setup_wifi()
                 auto ssid = entry->first.c_str();
                 auto password = entry->second.c_str();
 
-                printf("Tring to connect to SSID %s (MAC %02x:%02x:%02x:%02x:%02x:%02x) with password %s\n", ssid,
+                printf("Trying to connect to SSID %s (MAC %02x:%02x:%02x:%02x:%02x:%02x) with password %s\n", ssid,
                        result.bssid[0], result.bssid[1], result.bssid[2], result.bssid[3], result.bssid[4],
                        result.bssid[5], password);
 
@@ -184,7 +182,7 @@ void setup_wifi()
                     }
 
                     sleep_ms(1000);
-                    printf("- Retrying connection...\n", ssid);
+                    printf("- Retrying connection...\n");
                 }
             }
         }

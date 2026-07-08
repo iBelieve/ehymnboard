@@ -1,0 +1,10 @@
+# FixedAddressDereference is disabled because dereferencing fixed addresses
+# is exactly how memory-mapped hardware registers work.
+Checks: >
+  clang-analyzer-*,
+  -clang-analyzer-core.FixedAddressDereference,
+  bugprone-*,
+  performance-*,
+  -bugprone-easily-swappable-parameters
+WarningsAsErrors: '*'
+HeaderFilterRegex: '.*/device/src/.*'

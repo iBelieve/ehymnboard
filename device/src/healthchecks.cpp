@@ -33,20 +33,22 @@ struct HealthcheckRequest
     u32_t status_code;
 };
 
-void on_healthcheck_request_completed(void *arg, httpc_result_t httpc_result, u32_t rx_content_len, u32_t srv_res,
-                                      err_t err)
+void on_healthcheck_request_completed(void *arg, httpc_result_t httpc_result, [[maybe_unused]] u32_t rx_content_len,
+                                      u32_t srv_res, err_t err)
 {
     assert(arg);
     HealthcheckRequest *req = (HealthcheckRequest *)arg;
 
-    printf("Healthcheck completed with result: %d, server response: %d, error: %d\n", httpc_result, srv_res, err);
+    printf("Healthcheck completed with result: %d, server response: %lu, error: %d\n", httpc_result,
+           (unsigned long)srv_res, err);
 
     req->complete = true;
     req->status_code = srv_res;
     req->result = httpc_result;
 }
 
-err_t on_healthcheck_data_received(void *arg, struct altcp_pcb *conn, struct pbuf *p, err_t err)
+err_t on_healthcheck_data_received([[maybe_unused]] void *arg, struct altcp_pcb *conn, struct pbuf *p,
+                                   [[maybe_unused]] err_t err)
 {
     assert(arg);
 
@@ -88,7 +90,7 @@ void send_healthcheck_request(const std::string &path)
     {
         async_context_wait_for_work_ms(context, 1000);
 
-        if (absolute_time_diff_us(request_start, get_absolute_time()) > 60 * 1000 * 1000ll)
+        if (absolute_time_diff_us(request_start, get_absolute_time()) > 60ll * 1000 * 1000)
         {
             printf("Healthcheck HTTP request timed out after 60s waiting for completion\n");
             return;
@@ -107,7 +109,7 @@ void send_healthcheck_request(const std::string &path)
     }
     else
     {
-        printf("Failed to report healthcheck: status=%d\n", req.status_code);
+        printf("Failed to report healthcheck: status=%lu\n", (unsigned long)req.status_code);
     }
 }
 

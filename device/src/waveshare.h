@@ -67,7 +67,4 @@ class Waveshare13K
     OutputPin dc;
     OutputPin reset;
     InputPin busy;
-
-    const uint16_t width = 960;
-    const uint16_t height = 680;
 };

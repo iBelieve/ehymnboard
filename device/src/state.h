@@ -41,7 +41,8 @@ struct SavedState
         etag3[0] = '\0';
     }
 
-    SavedState(const SavedState *prev_state, std::string etag1, std::string etag2, std::string etag3);
+    SavedState(const SavedState *prev_state, const std::string &etag1, const std::string &etag2,
+               const std::string &etag3);
 
     void save();
 

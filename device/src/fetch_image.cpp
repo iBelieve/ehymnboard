@@ -25,7 +25,7 @@
 #include "state.h"
 #include "utils.h"
 
-uintptr_t image_buffer_offset = 0;
+size_t image_buffer_offset = 0;
 
 struct FetchImageHttpRequest
 {
@@ -38,7 +38,8 @@ struct FetchImageHttpRequest
     std::string new_etag;
 };
 
-err_t on_headers_received(httpc_state_t *connection, void *arg, struct pbuf *hdr, u16_t hdr_len, u32_t content_len)
+err_t on_headers_received([[maybe_unused]] httpc_state_t *connection, void *arg, struct pbuf *hdr,
+                          [[maybe_unused]] u16_t hdr_len, [[maybe_unused]] u32_t content_len)
 {
     assert(arg);
     FetchImageHttpRequest *req = (FetchImageHttpRequest *)arg;
@@ -68,7 +69,8 @@ err_t on_headers_received(httpc_state_t *connection, void *arg, struct pbuf *hdr
     return ERR_OK;
 }
 
-err_t on_http_data_received(void *arg, struct altcp_pcb *conn, struct pbuf *p, err_t err)
+err_t on_http_data_received([[maybe_unused]] void *arg, struct altcp_pcb *conn, struct pbuf *p,
+                            [[maybe_unused]] err_t err)
 {
     assert(arg);
 
@@ -85,7 +87,7 @@ err_t on_http_data_received(void *arg, struct altcp_pcb *conn, struct pbuf *p, e
 
     image_buffer_offset += bytes_copied;
 
-    printf("Received %d, copied %d, total %d bytes\n", p->tot_len, bytes_copied, image_buffer_offset);
+    printf("Received %d, copied %d, total %u bytes\n", p->tot_len, bytes_copied, (unsigned)image_buffer_offset);
 
     altcp_recved(conn, p->tot_len);
     pbuf_free(p);
@@ -98,9 +100,9 @@ void on_http_req_completed(void *arg, httpc_result_t httpc_result, u32_t rx_cont
     assert(arg);
     FetchImageHttpRequest *req = (FetchImageHttpRequest *)arg;
 
-    printf("Fetch image HTTP request completed with result: %d, content length: %d, server "
-           "response: %d, error: %d\n",
-           httpc_result, rx_content_len, srv_res, err);
+    printf("Fetch image HTTP request completed with result: %d, content length: %lu, server "
+           "response: %lu, error: %d\n",
+           httpc_result, (unsigned long)rx_content_len, (unsigned long)srv_res, err);
     req->complete = true;
     req->status_code = srv_res;
     req->result = httpc_result;
@@ -146,7 +148,7 @@ FetchImageResult fetch_image(int image, std::string &etag)
     {
         async_context_wait_for_work_ms(context, 1000);
 
-        if (absolute_time_diff_us(request_start, get_absolute_time()) > 60 * 1000 * 1000ll)
+        if (absolute_time_diff_us(request_start, get_absolute_time()) > 60ll * 1000 * 1000)
         {
             printf("Fetch image HTTP request timed out after 60s waiting for completion\n");
             return FetchImageResult::ERROR;
@@ -163,8 +165,8 @@ FetchImageResult fetch_image(int image, std::string &etag)
     {
         if (image_buffer_offset != image_buffer.size())
         {
-            printf("Image buffer not full, only %d bytes received, %d expected\n", image_buffer_offset,
-                   image_buffer.size());
+            printf("Image buffer not full, only %u bytes received, %u expected\n", (unsigned)image_buffer_offset,
+                   (unsigned)image_buffer.size());
             return FetchImageResult::ERROR;
         }
 
@@ -184,7 +186,7 @@ FetchImageResult fetch_image(int image, std::string &etag)
     }
     else
     {
-        printf("Fetch image HTTP request failed with status code: %d\n", req.status_code);
+        printf("Fetch image HTTP request failed with status code: %lu\n", (unsigned long)req.status_code);
         return FetchImageResult::ERROR;
     }
 }
