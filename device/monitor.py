@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import contextlib
 import os
 import time
 from datetime import datetime
@@ -17,7 +18,7 @@ def find_device():
 
 
 def emit(line: str, log_file):
-    stamped = f"{datetime.now().strftime('%H:%M:%S')} | {line}"
+    stamped = f"{datetime.now().astimezone().strftime('%H:%M:%S')} | {line}"
     print(stamped, flush=True)
     if log_file is not None:
         log_file.write(stamped + "\n")
@@ -46,23 +47,23 @@ def main():
     )
     args = parser.parse_args()
 
-    log_file = open(args.log, "a", buffering=1) if args.log else None
+    with contextlib.ExitStack() as stack:
+        log_file = (
+            stack.enter_context(open(args.log, "a", buffering=1)) if args.log else None
+        )
 
-    try:
-        while True:
-            device = find_device()
+        try:
+            while True:
+                device = find_device()
 
-            if device:
-                device_loop(device, log_file)
-            else:
-                emit("Device not found, retrying in 1s...", log_file)
-                time.sleep(1)
-    except KeyboardInterrupt:
-        # Graceful exit on Ctrl+C
-        print("Exiting...")
-    finally:
-        if log_file is not None:
-            log_file.close()
+                if device:
+                    device_loop(device, log_file)
+                else:
+                    emit("Device not found, retrying in 1s...", log_file)
+                    time.sleep(1)
+        except KeyboardInterrupt:
+            # Graceful exit on Ctrl+C
+            print("Exiting...")
 
 
 if __name__ == "__main__":
