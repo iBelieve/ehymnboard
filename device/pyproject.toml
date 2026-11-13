@@ -10,7 +10,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "clang-format>=22.1.5",
+    "clang-format>=23.1.5",
     "clang-tidy>=22.1.7",
     "ruff>=0.15.20",
 ]
