@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.13"
 
 [[package]]
@@ -29,21 +29,21 @@ wheels = [
 
 [[package]]
 name = "clang-tidy"
-version = "22.1.7"
+version = "23.1.4"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c4/ab/a9c1e33958d64b769c971377ea1529a260c63b431045b43d0ead3e4609f0/clang_tidy-22.1.7.tar.gz", hash = "sha256:291c3612ef942e5d107ff518c17daa4a8fe457c30c6b9602fd0aadb4a49d26ff", size = 11359, upload-time = "2026-06-14T20:31:22.134Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/22/f1/ce2407dc5ca76d5ada9449fa4203ac563f4f563224f29fa06bcd88a3959a/clang_tidy-23.1.4.tar.gz", hash = "sha256:71ec19e17c485cdb1d80f9c631f525b0b0e5f8a0429f164df75b3869ae61ab44", size = 12404, upload-time = "2026-10-26T08:37:15.954Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bc/4e/de59bc2bda314fa0622b967d0542e16c78e156038827422740fc9749a3b0/clang_tidy-22.1.7-py2.py3-none-macosx_10_9_x86_64.whl", hash = "sha256:37094b7f8606b6d9eeff4d9b4ff5423791e891ffdffb57c60218da4231dea0d1", size = 30221293, upload-time = "2026-06-14T20:30:51.003Z" },
-    { url = "https://files.pythonhosted.org/packages/e2/eb/bd4179187eb12348350d9de3a3124fb1466f0fd5ff33619ed45575752683/clang_tidy-22.1.7-py2.py3-none-macosx_11_0_arm64.whl", hash = "sha256:bfa4279c8f3c790c3f4d7b8ba250fd08d8b42442cb01eb7b3655d3921ad4f047", size = 29317304, upload-time = "2026-06-14T20:30:53.989Z" },
-    { url = "https://files.pythonhosted.org/packages/27/8d/f21976010dfd1746d5eac80bccaa364f56df61ab968c6d9279513e21f945/clang_tidy-22.1.7-py2.py3-none-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ccefb0832dbac7ee3cf17677f429d1b868c49542879a020991139ecd980e0727", size = 40362272, upload-time = "2026-06-14T20:30:56.369Z" },
-    { url = "https://files.pythonhosted.org/packages/43/69/3be98747ee4e8aedcfc4525a8e0c1576118bcd4de9a560d84a2a398158ce/clang_tidy-22.1.7-py2.py3-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:cff22f68ae7a3d8bf1b99ed77b9b81f8027f093c3e7b02f1d31dab76e0761433", size = 42212449, upload-time = "2026-06-14T20:30:59.382Z" },
-    { url = "https://files.pythonhosted.org/packages/cf/fd/47736e5aa78773d515927745cb9387de97c3b2e8b61b348dac681bb5858e/clang_tidy-22.1.7-py2.py3-none-manylinux_2_28_i686.whl", hash = "sha256:8a4ccaa7a76ef3cdea3df1f74ac400c3e89a8b57619ec39c9db12dca1fcafb7e", size = 47703202, upload-time = "2026-06-14T20:31:02.21Z" },
-    { url = "https://files.pythonhosted.org/packages/78/45/e61bf27e5eb09f40e42a1be55da6384db20a27abe8eecf8cc31c393aca8b/clang_tidy-22.1.7-py2.py3-none-manylinux_2_31_armv7l.whl", hash = "sha256:00cb0c1eeba6cf4cc1c70eaf569d602c96cff0ce8ec90cc7ce09ab4d19f60b70", size = 38811957, upload-time = "2026-06-14T20:31:05.184Z" },
-    { url = "https://files.pythonhosted.org/packages/7e/78/0473466ab54a462133d6e1cf6d2b79c5703f5bf1b9f664fe20cdd62a4057/clang_tidy-22.1.7-py2.py3-none-musllinux_1_2_armv7l.whl", hash = "sha256:c6206dbe50de71e0455bad0c7e68b64d529e4de48960a92eb6ddecdc8bffb5b2", size = 39646050, upload-time = "2026-06-14T20:31:07.92Z" },
-    { url = "https://files.pythonhosted.org/packages/59/1f/05874ef73802eec281547bf4d5c529ef06c592c0e98c2b8c95050ca33c70/clang_tidy-22.1.7-py2.py3-none-musllinux_1_2_i686.whl", hash = "sha256:d684849f24e22e571658832753ab03032bf5c01dd810e0d50642b63c5ef4536c", size = 49885785, upload-time = "2026-06-14T20:31:10.734Z" },
-    { url = "https://files.pythonhosted.org/packages/3a/15/6ca6636cc65696814b671f99af4ae463247cfab9cbf4e4f944e5c3c051e4/clang_tidy-22.1.7-py2.py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:6c80bdef06bbf73e5e97471c84684229001130deb60051777c7eb2b233cfd525", size = 44845051, upload-time = "2026-06-14T20:31:13.378Z" },
-    { url = "https://files.pythonhosted.org/packages/e5/da/f46f0551e1ce75b1a5a8abcf330e31dd065552c8c074c21cde457051f212/clang_tidy-22.1.7-py2.py3-none-win32.whl", hash = "sha256:09eda5486883379193991d196a45e888217ab68d74977eeb8137a80f7c198d3d", size = 22177549, upload-time = "2026-06-14T20:31:16.747Z" },
-    { url = "https://files.pythonhosted.org/packages/51/9b/755d77e51e8aebd03e287dc19727d5c4ca286fd419ff4cf5bd904f7b0366/clang_tidy-22.1.7-py2.py3-none-win_amd64.whl", hash = "sha256:3c135de4bde262938d9b66d578b42bebfa253503d5f8736a8338bfd316895b6a", size = 25105047, upload-time = "2026-06-14T20:31:19.151Z" },
+    { url = "https://files.pythonhosted.org/packages/aa/18/581961a934c9df0861fa91dcf2e6c553e1d4e194de10fd80c1c633b731be/clang_tidy-23.1.4-py2.py3-none-macosx_10_9_x86_64.whl", hash = "sha256:16be65b3396d096826cda8b94e7734913b4e2ffe0053fac6b8ccb2efc8d68cb1", size = 33090266, upload-time = "2026-10-26T08:36:39.686Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/59/637ce45a6cfa15ddb926e1feeee8077b9ebeb2956548375f24e16d51a908/clang_tidy-23.1.4-py2.py3-none-macosx_11_0_arm64.whl", hash = "sha256:08e977575e9f800c1c806f2001a3cdfd01323491aec05e86dd24be9a5c2585f4", size = 32338052, upload-time = "2026-10-26T08:36:43.098Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/95/ba9463f94319dddd0c3a9d3f65d432ddf71fe9b203dcd7ea63bcff8999e2/clang_tidy-23.1.4-py2.py3-none-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:87596cd77dedfdea23ced1d13e57e869dcaee99745bfe942796196da3c197671", size = 43724944, upload-time = "2026-10-26T08:36:46.323Z" },
+    { url = "https://files.pythonhosted.org/packages/80/85/9b483f300124a9245ec6da8975612f1841e26da13b27ad8d17f2006e13bd/clang_tidy-23.1.4-py2.py3-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:6bb31e4f319ecbe14acb75f23c3050d0f1d4b1d92ea1c66091bc76e4eac2c1ac", size = 45608750, upload-time = "2026-10-26T08:36:49.483Z" },
+    { url = "https://files.pythonhosted.org/packages/af/32/4856b0bb395031bb1b8ef6866747ced3428006f05e3b26db0a4eadb57405/clang_tidy-23.1.4-py2.py3-none-manylinux_2_28_i686.whl", hash = "sha256:84b9021905a851948c7f0735baea4d00a7fffd87437bdd106a339e76f6cd7b13", size = 51180158, upload-time = "2026-10-26T08:36:53.432Z" },
+    { url = "https://files.pythonhosted.org/packages/3c/c0/28da9c922d84e968e67fb826c4c3a6e3a631ef667474df858c5ca921a420/clang_tidy-23.1.4-py2.py3-none-manylinux_2_31_armv7l.whl", hash = "sha256:8d20ac0cf4dbed1526493e02316796bffc075e05e393519e953261909ba2c8e6", size = 41813066, upload-time = "2026-10-26T08:36:56.54Z" },
+    { url = "https://files.pythonhosted.org/packages/32/46/c8487562afaabba832be98bc4eeb39a13b5f5f5a270b4e2547043ada4ea5/clang_tidy-23.1.4-py2.py3-none-musllinux_1_2_armv7l.whl", hash = "sha256:900276dcb577ed8cb411958efc64feb1ba7334e3c9e70ea5d2e6b5c29aa5335f", size = 42757090, upload-time = "2026-10-26T08:37:00.151Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/2b/1103bf0e0ae41f3682a4825ce6c7b6290852c4677b2aa4e632b2c43ac60c/clang_tidy-23.1.4-py2.py3-none-musllinux_1_2_i686.whl", hash = "sha256:f428092411271394559c70f7bed218e20409bbd2ee16d0c4cc93f7c6361a595a", size = 53434463, upload-time = "2026-10-26T08:37:03.631Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/89/f8a6c51ce1caf68ad4d9b1abf2f8b3b81490f8c9d959c6b3fee1c490d64b/clang_tidy-23.1.4-py2.py3-none-musllinux_1_2_x86_64.whl", hash = "sha256:7c34a8ec573e747412a15a4fea3cd65221b03b2da9a6462f17cbc8bfd47dc7fb", size = 48308787, upload-time = "2026-10-26T08:37:07.276Z" },
+    { url = "https://files.pythonhosted.org/packages/0e/98/39eb001e1d1e9742d4d77aefcb438a44145f262f868892e7cd4ff6e31e65/clang_tidy-23.1.4-py2.py3-none-win32.whl", hash = "sha256:c25f8689d48e6f7909f12a17f6019e572970836e1a6570f8a1f70d84008e5db7", size = 25091276, upload-time = "2026-10-26T08:37:10.081Z" },
+    { url = "https://files.pythonhosted.org/packages/c0/49/b2adbdedbe430d0cce9b354a679d57e28692ce2fb59a575486784d438125/clang_tidy-23.1.4-py2.py3-none-win_amd64.whl", hash = "sha256:8107e05930f53dc477dbb5fb8108d7c10464176fc95d3e58f4ee7317887aed59", size = 28544052, upload-time = "2026-10-26T08:37:13.193Z" },
 ]
 
 [[package]]
@@ -67,7 +67,7 @@ requires-dist = [{ name = "pyserial", specifier = ">=3.5" }]
 [package.metadata.requires-dev]
 dev = [
     { name = "clang-format", specifier = ">=22.1.5" },
-    { name = "clang-tidy", specifier = ">=22.1.7" },
+    { name = "clang-tidy", specifier = ">=23.1.4" },
     { name = "ruff", specifier = ">=0.15.20" },
 ]
 
