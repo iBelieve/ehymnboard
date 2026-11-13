@@ -11,7 +11,7 @@ COPY --link templates ./templates
 
 RUN npm run build
 
-FROM python:3.14-slim
+FROM python:3.15-slim
 
 COPY --from=ghcr.io/astral-sh/uv:0.10 /uv /uvx /bin/
 
