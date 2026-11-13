@@ -47,6 +47,24 @@ jobs:
         if: success() || failure()
         run: uv run pyright
 
+  assets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: server/.node-version
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build assets
+        run: npm run build
+
   docker:
     runs-on: ubuntu-latest
     timeout-minutes: 20
