@@ -11,6 +11,6 @@ dependencies = [
 [dependency-groups]
 dev = [
     "clang-format>=22.1.5",
-    "clang-tidy>=22.1.7",
+    "clang-tidy>=23.1.4",
     "ruff>=0.15.20",
 ]
