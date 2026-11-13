@@ -6,8 +6,8 @@
     "build": "tailwindcss -i ./assets/tailwind.css -o ./static/tailwind.css"
   },
   "devDependencies": {
-    "daisyui": "^5.0.27",
-    "tailwindcss": "^4.1.4",
-    "@tailwindcss/cli": "^4.1.4"
+    "daisyui": "^5.7.50",
+    "tailwindcss": "^4.3.5",
+    "@tailwindcss/cli": "^4.3.5"
   }
 }
