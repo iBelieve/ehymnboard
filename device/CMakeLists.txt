@@ -33,12 +33,54 @@ project(ehymnboard C CXX ASM)
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
+# Over-the-air updates: pico_fota_bootloader keeps an application slot and a
+# download slot in flash and swaps them on reboot, rolling back if the new
+# firmware doesn't commit itself. See README.md ("OTA updates").
+#
+# The OTA image is AES encrypted (it contains the WiFi passphrases from
+# secrets.h and is served over plain HTTP), so builds need a key. Put it in
+# secrets.cmake (see secrets.example.cmake) or pass -DPFB_AES_KEY=...
+include(${CMAKE_CURRENT_LIST_DIR}/secrets.cmake OPTIONAL)
+if (NOT PFB_AES_KEY)
+    message(FATAL_ERROR "PFB_AES_KEY is not set: copy secrets.example.cmake to secrets.cmake and set a key")
+elseif (PFB_AES_KEY STREQUAL "CHANGEME")
+    message(WARNING "PFB_AES_KEY is the example key: don't install this build on a board")
+endif()
+set(PFB_WITH_IMAGE_ENCRYPTION ON)
+set(PFB_WITH_SHA256_HASHING ON)
+# The last flash sector holds SavedState (see state.cpp). 8 KB rather than 4 KB
+# because the two slots must each be a multiple of 4 KB. Changing this moves
+# the slots, so boards would need the bootloader reflashed over USB.
+set(PFB_RESERVED_FILESYSTEM_SIZE_KB 8)
+# The bootloader's image encryption script needs pycryptodome, a uv dev
+# dependency: use the uv environment (`uv sync`) when there is one
+if (NOT Python_EXECUTABLE AND EXISTS ${CMAKE_CURRENT_LIST_DIR}/.venv/bin/python)
+    set(Python_EXECUTABLE ${CMAKE_CURRENT_LIST_DIR}/.venv/bin/python)
+endif()
+add_subdirectory(lib/pico_fota_bootloader)
+
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(ehymnboard src/main.cpp src/fetch_image.cpp src/state.cpp src/utils.cpp src/waveshare.cpp src/wifi.cpp src/long_watchdog.cpp src/healthchecks.cpp)
+add_executable(ehymnboard src/main.cpp src/fetch_image.cpp src/state.cpp src/utils.cpp src/waveshare.cpp src/wifi.cpp src/long_watchdog.cpp src/healthchecks.cpp src/ota.cpp)
 
 pico_set_program_name(ehymnboard "ehymnboard")
-pico_set_program_version(ehymnboard "0.1")
+
+# Regenerate the firmware version on every build (the image and its reported
+# version must always match). Also written to firmware_version.txt for
+# uploading alongside the OTA image.
+add_custom_target(ehymnboard_firmware_version
+    COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_DIR=${CMAKE_CURRENT_LIST_DIR}
+        -DOUTPUT_HEADER=${CMAKE_CURRENT_BINARY_DIR}/generated/firmware_version.h
+        -DOUTPUT_TEXT=${CMAKE_CURRENT_BINARY_DIR}/firmware_version.txt
+        -P ${CMAKE_CURRENT_LIST_DIR}/cmake/firmware_version.cmake
+    BYPRODUCTS
+        ${CMAKE_CURRENT_BINARY_DIR}/generated/firmware_version.h
+        ${CMAKE_CURRENT_BINARY_DIR}/firmware_version.txt
+    COMMENT "Generating firmware version"
+)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/generated)
+add_dependencies(ehymnboard ehymnboard_firmware_version)
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(ehymnboard 0)
@@ -60,6 +102,7 @@ target_link_libraries(ehymnboard
 # Add the standard include files to the build
 target_include_directories(ehymnboard PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}/src
+        ${CMAKE_CURRENT_BINARY_DIR}/generated
 )
 
 # Add any user requested libraries
@@ -68,6 +111,13 @@ target_link_libraries(ehymnboard
         pico_cyw43_arch_lwip_threadsafe_background
         pico_lwip_http
         pico_unique_id
+        pico_fota_bootloader_lib
         )
 
+# Links the app at the application slot and produces
+# ehymnboard_fota_image_encrypted.bin, the file to upload to the server
+pfb_compile_with_bootloader(ehymnboard)
+# Passed as an input file, so it adds to the linker script instead of
+# replacing it
+target_link_options(ehymnboard PRIVATE ${CMAKE_CURRENT_LIST_DIR}/cmake/app_extra.ld)
 pico_add_extra_outputs(ehymnboard)

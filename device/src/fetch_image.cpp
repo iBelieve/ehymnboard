@@ -132,8 +132,8 @@ FetchImageResult fetch_image(int image, std::string &etag)
     image_buffer_offset = 0;
 
     cyw43_arch_lwip_begin();
-    auto ret = httpc_get_file_dns("api.hymnboard.sonrise.io", 80, path.c_str(), &settings, on_http_data_received, &req,
-                                  nullptr);
+    auto ret =
+        httpc_get_file_dns(SERVER_HOST, SERVER_PORT, path.c_str(), &settings, on_http_data_received, &req, nullptr);
     cyw43_arch_lwip_end();
 
     if (ret != ERR_OK)

@@ -51,11 +51,32 @@ SavedState::SavedState(const SavedState *prev_state, const std::string &etag1, c
     snprintf(this->etag1, sizeof(this->etag1), "%s", etag1.c_str());
     snprintf(this->etag2, sizeof(this->etag2), "%s", etag2.c_str());
     snprintf(this->etag3, sizeof(this->etag3), "%s", etag3.c_str());
+
+    memcpy(ota_attempted_version, prev_state->ota_attempted_version, sizeof(ota_attempted_version));
+    memcpy(ota_rejected_version, prev_state->ota_rejected_version, sizeof(ota_rejected_version));
+    ota_attempted_version[sizeof(ota_attempted_version) - 1] = '\0';
+    ota_rejected_version[sizeof(ota_rejected_version) - 1] = '\0';
 }
+
+void save_ota_state(const std::string &attempted_version, const std::string &rejected_version)
+{
+    hard_assert(attempted_version.length() < OTA_VERSION_SIZE);
+    hard_assert(rejected_version.length() < OTA_VERSION_SIZE);
+
+    SavedState new_state(flash_saved_state, flash_saved_state->etag1, flash_saved_state->etag2,
+                         flash_saved_state->etag3);
+
+    snprintf(new_state.ota_attempted_version, sizeof(new_state.ota_attempted_version), "%s", attempted_version.c_str());
+    snprintf(new_state.ota_rejected_version, sizeof(new_state.ota_rejected_version), "%s", rejected_version.c_str());
+
+    new_state.save();
+}
+
+static_assert(sizeof(SavedState) <= FLASH_PAGE_SIZE, "SavedState must fit in one flash page");
 
 void SavedState::save()
 {
-    uint8_t page_buf[FLASH_PAGE_SIZE];
+    uint8_t page_buf[FLASH_PAGE_SIZE] = {};
 
     memcpy(page_buf, this, sizeof(SavedState));
 
