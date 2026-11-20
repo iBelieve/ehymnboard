@@ -117,4 +117,7 @@ target_link_libraries(ehymnboard
 # Links the app at the application slot and produces
 # ehymnboard_fota_image_encrypted.bin, the file to upload to the server
 pfb_compile_with_bootloader(ehymnboard)
+# Passed as an input file, so it adds to the linker script instead of
+# replacing it
+target_link_options(ehymnboard PRIVATE ${CMAKE_CURRENT_LIST_DIR}/cmake/app_extra.ld)
 pico_add_extra_outputs(ehymnboard)
