@@ -18,8 +18,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  PICO_SDK_VERSION: "2.1.1"
-  ARM_GCC_VERSION: "14.2.Rel1"
+  PICO_SDK_VERSION: "2.3.1"
+  ARM_GCC_VERSION: "15.2.Rel1"
 
 defaults:
   run:
@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@v10.4.0
 
       - name: Check formatting
         run: git ls-files 'src/*.cpp' 'src/*.h' | xargs uv run clang-format --dry-run --Werror
@@ -78,7 +78,7 @@ jobs:
       - name: Build
         run: ninja -C build
 
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@v10.4.0
 
       - name: Run clang-tidy
         run: |
@@ -97,7 +97,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v8.3.2
+      - uses: astral-sh/setup-uv@v10.4.0
 
       - name: Check lockfile is up to date
         run: uv lock --check
