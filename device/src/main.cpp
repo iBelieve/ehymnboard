@@ -17,8 +17,11 @@
  */
 
 #include "fetch_image.h"
+#include "firmware_version.h"
 #include "healthchecks.h"
 #include "long_watchdog.h"
+#include "ota.h"
+#include "pico/binary_info.h"
 #include "pico/cyw43_arch.h"
 #include "pico/stdlib.h"
 #include "pico/unique_id.h"
@@ -59,6 +62,9 @@ FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std::string
     return ret;
 }
 
+// Shown by `picotool info`
+bi_decl(bi_program_version_string(FIRMWARE_VERSION));
+
 int main()
 {
     stdio_init_all();
@@ -93,6 +99,8 @@ int main()
     {
         printf("Rebooted due to watchdog timeout!\n");
     }
+
+    ota_handle_boot();
 
     setup_wifi();
 
@@ -143,6 +151,10 @@ int main()
     // on transient blips.
     constexpr int64_t NO_SUCCESS_REBOOT_TIMEOUT_US = 3LL * 60 * 1000 * 1000;
 
+    // Check for firmware updates on the first loop and then about every 10
+    // minutes (each loop is at least 15 seconds)
+    constexpr uint32_t OTA_CHECK_EVERY_LOOPS = 40;
+
     uint32_t loop_count = 0;
     auto start_time = get_absolute_time();
     auto last_success_time = start_time;
@@ -178,6 +190,10 @@ int main()
         if (any_success)
         {
             last_success_time = get_absolute_time();
+
+            // Reaching the server proves a newly installed firmware works;
+            // until it's committed, any reboot rolls it back
+            ota_commit_firmware();
         }
         else
         {
@@ -192,6 +208,11 @@ int main()
         }
 
         report_device_healthy();
+
+        if (any_success && loop_count % OTA_CHECK_EVERY_LOOPS == 1)
+        {
+            ota_check_for_update();
+        }
 
         printf("Sleeping for 15 seconds...\n");
         sleep_ms(15000);

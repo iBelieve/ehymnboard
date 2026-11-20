@@ -24,14 +24,17 @@ from flask import (
     send_from_directory,
     redirect,
 )
+from werkzeug.datastructures import FileStorage
 from PIL import Image, ImageDraw, ImageFont
 from http import HTTPStatus
 from typing import Union, TypedDict, cast
 from collections import OrderedDict
 from datetime import datetime, timezone
 import os
+import re
 import hashlib
 import json
+import tempfile
 import requests
 
 app = Flask(__name__)
@@ -74,6 +77,17 @@ HEALTHCHECKS_PING_URLS = {
 
 PING_EVERY_REQUESTS = 10
 
+# OTA firmware. Lives next to devices.json, which is on persistent storage.
+FIRMWARE_DIR = "images/firmware"
+FIRMWARE_IMAGE_NAME = "firmware.bin"
+FIRMWARE_INFO_PATH = f"{FIRMWARE_DIR}/firmware.json"
+# Must match the device: images are written to flash in 256-byte pages, the
+# download slot is 1000 KB (see device/CMakeLists.txt), and versions are at
+# most 47 characters (device/cmake/firmware_version.cmake)
+FIRMWARE_PAGE_SIZE = 256
+FIRMWARE_MAX_SIZE = 1000 * 1024
+FIRMWARE_VERSION_PATTERN = re.compile(r"^[0-9A-Za-z._-]{1,47}$")
+
 
 class Device(TypedDict):
     id: str
@@ -81,6 +95,17 @@ class Device(TypedDict):
     last_seen: str
     last_updated_at: Union[str, None]
     booted_at: Union[str, None]
+    firmware_version: Union[str, None]
+    ota_status: Union[str, None]
+    ota_version: Union[str, None]
+    ota_at: Union[str, None]
+
+
+class FirmwareInfo(TypedDict):
+    version: str
+    size: int
+    sha256: str
+    uploaded_at: str
 
 
 def require_basic_auth(f):
@@ -154,7 +179,9 @@ def index():
 
     devices = get_sorted_devices()
 
-    return render_template("index.html", lines=lines, devices=devices)
+    return render_template(
+        "index.html", lines=lines, devices=devices, firmware=get_firmware_info()
+    )
 
 
 @app.get("/devices")
@@ -162,7 +189,9 @@ def index():
 def devices():
     devices = get_sorted_devices()
 
-    return render_template("devices.html", devices=devices)
+    return render_template(
+        "devices.html", devices=devices, firmware=get_firmware_info()
+    )
 
 
 @app.post("/images")
@@ -255,8 +284,36 @@ def report_device_booted():
     device_id = request.args.get("device_id")
     saved_state_writes = request.args.get("saved_state_writes")
     watchdog_caused_reboot = request.args.get("watchdog_caused_reboot") == "1"
+    firmware_version = request.args.get("firmware_version")
+    ota_status = request.args.get("ota_status")
+    ota_version = request.args.get("ota_version")
+    ota_at = None
 
-    if watchdog_caused_reboot:
+    if ota_status == "updated":
+        ota_at = datetime.now(timezone.utc).isoformat()
+        print(
+            f"Device installed firmware {ota_version}: {get_device_name(device_id)} ({device_id})"
+        )
+        ping_healthcheck(
+            device_id, path="/log", data=f"Installed firmware {ota_version}"
+        )
+    elif ota_status == "rolled_back":
+        ota_at = datetime.now(timezone.utc).isoformat()
+        print(
+            f"Device rolled back firmware {ota_version}: {get_device_name(device_id)} ({device_id})"
+        )
+        ping_healthcheck(
+            device_id,
+            path="/failure",
+            data=f"Firmware {ota_version} failed and was rolled back",
+        )
+    else:
+        ota_status = None
+        ota_version = None
+
+    # Installing an update (and the reboot that triggers a rollback) reboots
+    # through the watchdog, which the OTA status above already reports
+    if watchdog_caused_reboot and not ota_status:
         print(
             f"Device reboot caused by watchdog: {get_device_name(device_id)} ({device_id})"
         )
@@ -270,6 +327,10 @@ def report_device_booted():
         saved_state_writes=saved_state_writes,
         last_seen=datetime.now(timezone.utc).isoformat(),
         booted_at=datetime.now(timezone.utc).isoformat(),
+        firmware_version=firmware_version,
+        ota_status=ota_status,
+        ota_version=ota_version,
+        ota_at=ota_at,
     )
 
     return "", 204
@@ -288,9 +349,85 @@ def report_device_healthy():
         device_id=device_id,
         saved_state_writes=saved_state_writes,
         last_seen=datetime.now(timezone.utc).isoformat(),
+        firmware_version=request.args.get("firmware_version"),
     )
 
     return "", 204
+
+
+@app.post("/firmware")
+@require_basic_auth
+def upload_firmware():
+    """Upload the OTA image (build/ehymnboard_fota_image_encrypted.bin) and its
+    version (build/firmware_version.txt). Every board running a different
+    version installs it."""
+    version = request.form.get("version", "").strip()
+    image = request.files.get("image")
+
+    if not FIRMWARE_VERSION_PATTERN.match(version):
+        return "Invalid or missing version\n", HTTPStatus.BAD_REQUEST
+
+    if not isinstance(image, FileStorage):
+        return "Missing image\n", HTTPStatus.BAD_REQUEST
+
+    data = image.read()
+    error = validate_firmware_image(data)
+    if error:
+        return f"{error}\n", HTTPStatus.BAD_REQUEST
+
+    info = save_firmware(version, data)
+    print(f"Firmware {version} uploaded ({info['size']} bytes)")
+
+    return f"Uploaded firmware {version}\n", HTTPStatus.CREATED
+
+
+@app.get("/firmware/latest")
+def get_latest_firmware():
+    """Called by boards: 204 if the board should keep its firmware, otherwise
+    200 with the version it should install."""
+    device_id = request.args.get("device_id")
+    version = request.args.get("version")
+    info = get_firmware_info()
+
+    update_device(device_id=device_id, firmware_version=version)
+
+    if not info or info["version"] == version:
+        return "", HTTPStatus.NO_CONTENT
+
+    response = make_response(info["version"])
+    response.content_type = "text/plain"
+    return response
+
+
+@app.get("/firmware/image")
+def get_firmware_image():
+    """Called by boards to download the image for target_version. The image is
+    AES encrypted with the boards' key, so it's safe to serve publicly."""
+    device_id = request.args.get("device_id")
+    target_version = request.args.get("target_version")
+    info = get_firmware_info()
+
+    if not info:
+        return "", HTTPStatus.NOT_FOUND
+
+    # A new upload since the board's version check: make it check again
+    if target_version != info["version"]:
+        return "", HTTPStatus.CONFLICT
+
+    print(
+        f"Device {get_device_name(device_id)} ({device_id}) downloading firmware {info['version']}"
+    )
+    ping_healthcheck(
+        device_id, path="/log", data=f"Downloading firmware {info['version']}"
+    )
+
+    return send_from_directory(
+        FIRMWARE_DIR,
+        FIRMWARE_IMAGE_NAME,
+        mimetype="application/octet-stream",
+        conditional=False,
+        etag=False,
+    )
 
 
 def image_to_buffer(image: Image.Image) -> bytes:
@@ -355,6 +492,53 @@ def draw_centered_text(
     draw.text((x, y), text, font=font, fill=1)
 
 
+def validate_firmware_image(data: bytes) -> Union[str, None]:
+    if not data:
+        return "Image is empty"
+    if len(data) % FIRMWARE_PAGE_SIZE != 0:
+        return f"Image size must be a multiple of {FIRMWARE_PAGE_SIZE} bytes"
+    if len(data) > FIRMWARE_MAX_SIZE:
+        return f"Image is larger than {FIRMWARE_MAX_SIZE} bytes"
+    return None
+
+
+def get_firmware_info() -> Union[FirmwareInfo, None]:
+    try:
+        with open(FIRMWARE_INFO_PATH, "r") as f:
+            return json.load(f)
+    except OSError, ValueError:
+        return None
+
+
+def save_firmware(version: str, data: bytes) -> FirmwareInfo:
+    os.makedirs(FIRMWARE_DIR, exist_ok=True)
+
+    info: FirmwareInfo = {
+        "version": version,
+        "size": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    # Image first, then the info that makes boards download it; each replaced
+    # atomically so a board never reads a partial file
+    write_file_atomically(f"{FIRMWARE_DIR}/{FIRMWARE_IMAGE_NAME}", data)
+    write_file_atomically(FIRMWARE_INFO_PATH, json.dumps(info).encode())
+
+    return info
+
+
+def write_file_atomically(path: str, data: bytes):
+    fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(path))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp_path, path)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
+
+
 def get_devices() -> dict[str, Device]:
     try:
         with open("images/devices.json", "r") as f:
@@ -375,6 +559,7 @@ def get_device_sort_index(device_id: str) -> int:
 
 
 def save_devices(devices: dict[str, Device]):
+    os.makedirs("images", exist_ok=True)
     with open("images/devices.json", "w") as f:
         json.dump(devices, f)
 

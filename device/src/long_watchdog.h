@@ -23,3 +23,9 @@
 void long_watchdog_enable(uint8_t timeout_seconds);
 
 void long_watchdog_update();
+
+// Stops the hardware watchdog around flash operations (such as erasing the
+// OTA download slot) that keep interrupts, and so the timer feeding the
+// watchdog, disabled for longer than its timeout
+void long_watchdog_pause();
+void long_watchdog_resume();

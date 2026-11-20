@@ -22,6 +22,8 @@
 #include "pico/stdlib.h"
 #include <stdio.h>
 
+constexpr uint32_t HARDWARE_WATCHDOG_TIMEOUT_MS = 5000;
+
 uint8_t long_watchdog_timeout_seconds = 0;
 uint8_t seconds_until_watchdog_reset = 0;
 
@@ -47,11 +49,22 @@ void long_watchdog_enable(uint8_t timeout_seconds)
     long_watchdog_timeout_seconds = timeout_seconds;
     seconds_until_watchdog_reset = long_watchdog_timeout_seconds;
 
-    watchdog_enable(5000, true /* pause on debugger */);
+    watchdog_enable(HARDWARE_WATCHDOG_TIMEOUT_MS, true /* pause on debugger */);
     add_repeating_timer_ms(1000, watchdog_task, nullptr, &watcher_timer);
 }
 
 void long_watchdog_update()
 {
     seconds_until_watchdog_reset = long_watchdog_timeout_seconds;
+}
+
+void long_watchdog_pause()
+{
+    watchdog_disable();
+}
+
+void long_watchdog_resume()
+{
+    long_watchdog_update();
+    watchdog_enable(HARDWARE_WATCHDOG_TIMEOUT_MS, true /* pause on debugger */);
 }

@@ -20,7 +20,9 @@
 
 #include <string>
 
+#include "firmware_version.h"
 #include "lwip/apps/http_client.h"
+#include "ota.h"
 #include "pico/async_context.h"
 #include "pico/cyw43_arch.h"
 #include "state.h"
@@ -60,13 +62,14 @@ err_t on_healthcheck_data_received([[maybe_unused]] void *arg, struct altcp_pcb 
     return ERR_OK;
 }
 
-void send_healthcheck_request(const std::string &path)
+void send_healthcheck_request(const std::string &path, const std::string &extra_query = "")
 {
     auto context = cyw43_arch_async_context();
 
     std::string full_path = path + "?device_id=" + unique_board_id +
                             "&saved_state_writes=" + std::to_string(flash_saved_state->write_count) +
-                            "&watchdog_caused_reboot=" + std::to_string(watchdog_caused_reboot());
+                            "&watchdog_caused_reboot=" + std::to_string(watchdog_caused_reboot()) +
+                            "&firmware_version=" + FIRMWARE_VERSION + extra_query;
 
     HealthcheckRequest req;
 
@@ -74,8 +77,8 @@ void send_healthcheck_request(const std::string &path)
     settings.result_fn = on_healthcheck_request_completed;
 
     cyw43_arch_lwip_begin();
-    auto ret = httpc_get_file_dns("api.hymnboard.sonrise.io", 80, full_path.c_str(), &settings,
-                                  on_healthcheck_data_received, &req, nullptr);
+    auto ret = httpc_get_file_dns(SERVER_HOST, SERVER_PORT, full_path.c_str(), &settings, on_healthcheck_data_received,
+                                  &req, nullptr);
     cyw43_arch_lwip_end();
 
     if (ret != ERR_OK)
@@ -115,7 +118,14 @@ void send_healthcheck_request(const std::string &path)
 
 void report_device_booted()
 {
-    send_healthcheck_request("/device_booted");
+    std::string extra_query;
+
+    if (!ota_boot_status.empty())
+    {
+        extra_query = "&ota_status=" + ota_boot_status + "&ota_version=" + ota_boot_version;
+    }
+
+    send_healthcheck_request("/device_booted", extra_query);
 }
 
 void report_device_healthy()

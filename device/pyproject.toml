@@ -12,5 +12,10 @@ dependencies = [
 dev = [
     "clang-format>=22.1.5",
     "clang-tidy>=22.1.7",
+    "pycryptodome>=4.5.0",
     "ruff>=0.15.20",
 ]
+
+[tool.ruff]
+# Third-party submodules
+extend-exclude = ["lib"]

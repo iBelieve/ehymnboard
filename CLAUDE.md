@@ -19,7 +19,9 @@ All checks below must pass; run them locally before committing.
   (CI checks with `--dry-run --Werror`; clang-format is a uv dev dependency)
 - Build: configure with `-DWERROR=ON` and build; needs pico-sdk 2.1.1 and
   arm-none-eabi-gcc 14.2.Rel1 (the VS Code Pico extension installs both under
-  `~/.pico-sdk`)
+  `~/.pico-sdk`), the `lib/pico_fota_bootloader` submodule, `uv sync` (the
+  OTA image encryption uses pycryptodome from the uv env) and
+  `secrets.cmake` (copy `secrets.example.cmake`, as CI does)
 - clang-tidy: `uv run clang-tidy` (a uv dev dependency), config in
   `device/.clang-tidy`, all findings are errors; runs against the build's
   `compile_commands.json` (see the workflow for the cross-compile include

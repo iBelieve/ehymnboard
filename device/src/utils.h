@@ -25,6 +25,9 @@
 #include "hardware/watchdog.h"
 #include "pico/stdlib.h"
 
+inline constexpr const char *SERVER_HOST = "api.hymnboard.sonrise.io";
+inline constexpr uint16_t SERVER_PORT = 80;
+
 inline std::string unique_board_id;
 
 std::string get_unique_board_id();
