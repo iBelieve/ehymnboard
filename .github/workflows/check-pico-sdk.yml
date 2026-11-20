@@ -1,0 +1,102 @@
+name: Check Pico SDK version
+
+# Dependabot can't track the Pico SDK or the Arm toolchain (they are pinned in
+# ci-device.yml and device/CMakeLists.txt, not in a package manifest), so this
+# job keeps a single tracking issue, labelled pico-sdk-update, while a newer
+# raspberrypi/pico-sdk release is out. A later release updates that issue in
+# place (keeping its comments) and the issue is closed once the pin catches up.
+# Closing the issue by hand skips that release until a newer one appears.
+
+on:
+  schedule:
+    - cron: "0 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+# Overlapping runs (cron plus a manual run) could otherwise both create an issue.
+concurrency:
+  group: check-pico-sdk
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compare pinned and latest Pico SDK versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LABEL: pico-sdk-update
+        run: |
+          pinned="$(sed -n "s/^ *PICO_SDK_VERSION: *[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\} *$/\1/p" .github/workflows/ci-device.yml)"
+          cmake_pinned="$(sed -n 's/^set(sdkVersion \(.*\))$/\1/p' device/CMakeLists.txt)"
+          latest="$(gh release view --repo raspberrypi/pico-sdk --json tagName --jq .tagName)"
+          echo "Pinned: $pinned (CMakeLists.txt: $cmake_pinned), latest: $latest"
+
+          if [ -z "$pinned" ] || [ -z "$cmake_pinned" ] || [ -z "$latest" ]; then
+            echo "::error::Could not read a Pico SDK version; check PICO_SDK_VERSION in ci-device.yml and sdkVersion in device/CMakeLists.txt."
+            exit 1
+          fi
+          if [ "$pinned" != "$cmake_pinned" ]; then
+            echo "::error::ci-device.yml pins Pico SDK $pinned but device/CMakeLists.txt pins $cmake_pinned; bump them together."
+            exit 1
+          fi
+
+          issue="$(gh issue list --label "$LABEL" --state open --limit 1 --json number --jq '.[0].number // empty')"
+
+          newest="$(printf '%s\n%s\n' "$pinned" "$latest" | sort -V | tail -n1)"
+          if [ "$newest" = "$pinned" ]; then
+            echo "Pico SDK is up to date."
+            if [ -n "$issue" ]; then
+              gh issue close "$issue" --reason completed \
+                --comment "The pinned Pico SDK is now $pinned, the latest release. Closing."
+            fi
+            exit 0
+          fi
+
+          title="Update Pico SDK to $latest"
+
+          # Closing the issue for a release without bumping the pin means
+          # "skip this release": don't reopen it until a newer one is out.
+          if [ -z "$issue" ] && gh issue list --label "$LABEL" --state closed --json title --jq '.[].title' | grep -qxF "$title"; then
+            echo "The issue for $latest was closed without updating; skipping until a newer release."
+            exit 0
+          fi
+
+          body="$(cat <<EOF
+          raspberrypi/pico-sdk [$latest](https://github.com/raspberrypi/pico-sdk/releases/tag/$latest) is out; this repo pins $pinned.
+
+          To update, bump the versions together:
+
+          - \`PICO_SDK_VERSION\` (and \`ARM_GCC_VERSION\` if the SDK's recommended toolchain changed) in \`.github/workflows/ci-device.yml\`
+          - \`sdkVersion\`, \`toolchainVersion\` and \`picotoolVersion\` in \`device/CMakeLists.txt\`
+          - the \`~/.pico-sdk\` paths in \`device/.vscode/*.json\`
+          - the versions in \`CLAUDE.md\`
+
+          The Raspberry Pi Pico VS Code extension's \`data/<version>/versionBundles.json\` lists the matching toolchain, picotool, CMake and Ninja versions for each SDK release.
+
+          _This issue is kept up to date by \`.github/workflows/check-pico-sdk.yml\` and closes itself once the pin reaches the latest release._
+          EOF
+          )"
+
+          if [ -z "$issue" ]; then
+            gh label create "$LABEL" --color 0e8a16 \
+              --description "Tracks a newer Pico SDK release" --force
+            gh issue create --title "$title" --body "$body" --label "$LABEL"
+            exit 0
+          fi
+
+          current_title="$(gh issue view "$issue" --json title --jq .title)"
+          if [ "$current_title" = "$title" ]; then
+            echo "Issue #$issue already tracks $latest."
+            exit 0
+          fi
+
+          gh issue edit "$issue" --title "$title" --body "$body"
+          gh issue comment "$issue" \
+            --body "Pico SDK [$latest](https://github.com/raspberrypi/pico-sdk/releases/tag/$latest) is now out, so this issue now tracks it (previously: ${current_title#Update Pico SDK to })."

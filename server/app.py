@@ -14,28 +14,29 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import hashlib
+import json
+import os
+import re
+import tempfile
+from collections import OrderedDict
+from datetime import UTC, datetime
 from functools import wraps
+from http import HTTPStatus
+from typing import TypedDict, cast
+
+import requests
 from flask import (
     Flask,
     Response,
-    request,
     make_response,
-    render_template,
-    send_from_directory,
     redirect,
+    render_template,
+    request,
+    send_from_directory,
 )
-from werkzeug.datastructures import FileStorage
 from PIL import Image, ImageDraw, ImageFont
-from http import HTTPStatus
-from typing import Union, TypedDict, cast
-from collections import OrderedDict
-from datetime import datetime, timezone
-import os
-import re
-import hashlib
-import json
-import tempfile
-import requests
+from werkzeug.datastructures import FileStorage
 
 app = Flask(__name__)
 
@@ -93,12 +94,12 @@ class Device(TypedDict):
     id: str
     saved_state_writes: int
     last_seen: str
-    last_updated_at: Union[str, None]
-    booted_at: Union[str, None]
-    firmware_version: Union[str, None]
-    ota_status: Union[str, None]
-    ota_version: Union[str, None]
-    ota_at: Union[str, None]
+    last_updated_at: str | None
+    booted_at: str | None
+    firmware_version: str | None
+    ota_status: str | None
+    ota_version: str | None
+    ota_at: str | None
 
 
 class FirmwareInfo(TypedDict):
@@ -139,28 +140,28 @@ def format_device_name(device_id: str) -> str:
 
 
 @app.template_filter("prettydate")
-def prettydate(d: Union[str, datetime]) -> str:
+def prettydate(d: str | datetime) -> str:
     if isinstance(d, str):
         d = datetime.fromisoformat(d)
 
-    diff = datetime.now(timezone.utc) - d
+    diff = datetime.now(UTC) - d
     s = diff.seconds
     if diff.days > 7 or diff.days < 0:
         return "on {}".format(d.strftime("%d %b %y"))
     elif diff.days == 1:
         return "1 day ago"
     elif diff.days > 1:
-        return "{} days ago".format(diff.days)
+        return f"{diff.days} days ago"
     elif s < 60:
         return "just now"
     elif s < 120:
         return "1 minute ago"
     elif s < 3600:
-        return "{} minutes ago".format(s // 60)
+        return f"{s // 60} minutes ago"
     elif s < 7200:
         return "1 hour ago"
     else:
-        return "{} hours ago".format(s // 3600)
+        return f"{s // 3600} hours ago"
 
 
 @app.get("/ok")
@@ -257,7 +258,7 @@ def get_image(image_id):
 
         image = Image.open(f"images/{image_id}.png")
         buffer = image_to_buffer(image)
-        last_updated_at = datetime.now(timezone.utc).isoformat()
+        last_updated_at = datetime.now(UTC).isoformat()
 
         ping_healthcheck(device_id, path="/log", data=f"Updating image {image_id}")
 
@@ -270,7 +271,7 @@ def get_image(image_id):
         update_device(
             device_id=device_id,
             saved_state_writes=saved_state_writes,
-            last_seen=datetime.now(timezone.utc).isoformat(),
+            last_seen=datetime.now(UTC).isoformat(),
             last_updated_at=last_updated_at,
         )
 
@@ -290,7 +291,7 @@ def report_device_booted():
     ota_at = None
 
     if ota_status == "updated":
-        ota_at = datetime.now(timezone.utc).isoformat()
+        ota_at = datetime.now(UTC).isoformat()
         print(
             f"Device installed firmware {ota_version}: {get_device_name(device_id)} ({device_id})"
         )
@@ -298,7 +299,7 @@ def report_device_booted():
             device_id, path="/log", data=f"Installed firmware {ota_version}"
         )
     elif ota_status == "rolled_back":
-        ota_at = datetime.now(timezone.utc).isoformat()
+        ota_at = datetime.now(UTC).isoformat()
         print(
             f"Device rolled back firmware {ota_version}: {get_device_name(device_id)} ({device_id})"
         )
@@ -325,8 +326,8 @@ def report_device_booted():
     update_device(
         device_id=device_id,
         saved_state_writes=saved_state_writes,
-        last_seen=datetime.now(timezone.utc).isoformat(),
-        booted_at=datetime.now(timezone.utc).isoformat(),
+        last_seen=datetime.now(UTC).isoformat(),
+        booted_at=datetime.now(UTC).isoformat(),
         firmware_version=firmware_version,
         ota_status=ota_status,
         ota_version=ota_version,
@@ -348,7 +349,7 @@ def report_device_healthy():
     update_device(
         device_id=device_id,
         saved_state_writes=saved_state_writes,
-        last_seen=datetime.now(timezone.utc).isoformat(),
+        last_seen=datetime.now(UTC).isoformat(),
         firmware_version=request.args.get("firmware_version"),
     )
 
@@ -492,7 +493,7 @@ def draw_centered_text(
     draw.text((x, y), text, font=font, fill=1)
 
 
-def validate_firmware_image(data: bytes) -> Union[str, None]:
+def validate_firmware_image(data: bytes) -> str | None:
     if not data:
         return "Image is empty"
     if len(data) % FIRMWARE_PAGE_SIZE != 0:
@@ -502,7 +503,7 @@ def validate_firmware_image(data: bytes) -> Union[str, None]:
     return None
 
 
-def get_firmware_info() -> Union[FirmwareInfo, None]:
+def get_firmware_info() -> FirmwareInfo | None:
     try:
         with open(FIRMWARE_INFO_PATH, "r") as f:
             return json.load(f)
@@ -517,7 +518,7 @@ def save_firmware(version: str, data: bytes) -> FirmwareInfo:
         "version": version,
         "size": len(data),
         "sha256": hashlib.sha256(data).hexdigest(),
-        "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        "uploaded_at": datetime.now(UTC).isoformat(),
     }
 
     # Image first, then the info that makes boards download it; each replaced
@@ -564,7 +565,7 @@ def save_devices(devices: dict[str, Device]):
         json.dump(devices, f)
 
 
-def update_device(device_id: Union[str, None], **kwargs):
+def update_device(device_id: str | None, **kwargs):
     if not device_id:
         print("Warning: Ignoring device update without a device_id")
         return
@@ -578,7 +579,7 @@ def update_device(device_id: Union[str, None], **kwargs):
     save_devices(devices)
 
 
-def ping_healthcheck(device_id: Union[str, None], path: str = "", data: str = ""):
+def ping_healthcheck(device_id: str | None, path: str = "", data: str = ""):
     url = HEALTHCHECKS_PING_URLS.get(device_id) if device_id else None
 
     if not url:
@@ -591,7 +592,7 @@ def ping_healthcheck(device_id: Union[str, None], path: str = "", data: str = ""
         print(f"Warning: Healthcheck ping failed for {device_id}")
 
 
-def get_device_name(device_id: Union[str, None]) -> str:
+def get_device_name(device_id: str | None) -> str:
     if not device_id:
         return "unknown"
     return DEVICE_NAMES.get(device_id, device_id)
