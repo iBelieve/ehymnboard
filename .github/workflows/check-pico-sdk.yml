@@ -2,7 +2,9 @@ name: Check Pico SDK version
 
 # Dependabot can't track the Pico SDK or the Arm toolchain (they are pinned in
 # ci-device.yml and device/CMakeLists.txt, not in a package manifest), so this
-# job opens an issue when raspberrypi/pico-sdk publishes a newer release.
+# job keeps a single tracking issue, labelled pico-sdk-update, while a newer
+# raspberrypi/pico-sdk release is out. A later release updates that issue in
+# place (keeping its comments) and the issue is closed once the pin catches up.
 
 on:
   schedule:
@@ -23,24 +25,26 @@ jobs:
       - name: Compare pinned and latest Pico SDK versions
         env:
           GH_TOKEN: ${{ github.token }}
+          LABEL: pico-sdk-update
         run: |
           pinned="$(sed -n 's/^ *PICO_SDK_VERSION: *"\(.*\)"/\1/p' .github/workflows/ci-device.yml)"
           latest="$(gh release view --repo raspberrypi/pico-sdk --json tagName --jq .tagName)"
           echo "Pinned: $pinned, latest: $latest"
 
+          issue="$(gh issue list --label "$LABEL" --state open --limit 1 --json number --jq '.[0].number // empty')"
+
           newest="$(printf '%s\n%s\n' "$pinned" "$latest" | sort -V | tail -n1)"
           if [ "$newest" = "$pinned" ]; then
             echo "Pico SDK is up to date."
+            if [ -n "$issue" ]; then
+              gh issue close "$issue" --reason completed \
+                --comment "The pinned Pico SDK is now $pinned, the latest release. Closing."
+            fi
             exit 0
           fi
 
           title="Update Pico SDK to $latest"
-          if gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[].number' | grep -q .; then
-            echo "Issue already open."
-            exit 0
-          fi
-
-          gh issue create --title "$title" --body "$(cat <<EOF
+          body="$(cat <<EOF
           raspberrypi/pico-sdk [$latest](https://github.com/raspberrypi/pico-sdk/releases/tag/$latest) is out; this repo pins $pinned.
 
           To update, bump the versions together:
@@ -51,5 +55,24 @@ jobs:
           - the versions in \`CLAUDE.md\`
 
           The Raspberry Pi Pico VS Code extension's \`data/<version>/versionBundles.json\` lists the matching toolchain, picotool, CMake and Ninja versions for each SDK release.
+
+          _This issue is kept up to date by \`.github/workflows/check-pico-sdk.yml\` and closes itself once the pin reaches the latest release._
           EOF
           )"
+
+          if [ -z "$issue" ]; then
+            gh label create "$LABEL" --color 0e8a16 \
+              --description "Tracks a newer Pico SDK release" --force
+            gh issue create --title "$title" --body "$body" --label "$LABEL"
+            exit 0
+          fi
+
+          current_title="$(gh issue view "$issue" --json title --jq .title)"
+          if [ "$current_title" = "$title" ]; then
+            echo "Issue #$issue already tracks $latest."
+            exit 0
+          fi
+
+          gh issue edit "$issue" --title "$title" --body "$body"
+          gh issue comment "$issue" \
+            --body "Pico SDK [$latest](https://github.com/raspberrypi/pico-sdk/releases/tag/$latest) is now out, so this issue now tracks it (previously: ${current_title#Update Pico SDK to })."
