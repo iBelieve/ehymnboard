@@ -5,6 +5,7 @@ name: Check Pico SDK version
 # job keeps a single tracking issue, labelled pico-sdk-update, while a newer
 # raspberrypi/pico-sdk release is out. A later release updates that issue in
 # place (keeping its comments) and the issue is closed once the pin catches up.
+# Closing the issue by hand skips that release until a newer one appears.
 
 on:
   schedule:
@@ -14,6 +15,11 @@ on:
 permissions:
   contents: read
   issues: write
+
+# Overlapping runs (cron plus a manual run) could otherwise both create an issue.
+concurrency:
+  group: check-pico-sdk
+  cancel-in-progress: false
 
 jobs:
   check:
@@ -27,9 +33,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           LABEL: pico-sdk-update
         run: |
-          pinned="$(sed -n 's/^ *PICO_SDK_VERSION: *"\(.*\)"/\1/p' .github/workflows/ci-device.yml)"
+          pinned="$(sed -n "s/^ *PICO_SDK_VERSION: *[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\} *$/\1/p" .github/workflows/ci-device.yml)"
+          cmake_pinned="$(sed -n 's/^set(sdkVersion \(.*\))$/\1/p' device/CMakeLists.txt)"
           latest="$(gh release view --repo raspberrypi/pico-sdk --json tagName --jq .tagName)"
-          echo "Pinned: $pinned, latest: $latest"
+          echo "Pinned: $pinned (CMakeLists.txt: $cmake_pinned), latest: $latest"
+
+          if [ -z "$pinned" ] || [ -z "$cmake_pinned" ] || [ -z "$latest" ]; then
+            echo "::error::Could not read a Pico SDK version; check PICO_SDK_VERSION in ci-device.yml and sdkVersion in device/CMakeLists.txt."
+            exit 1
+          fi
+          if [ "$pinned" != "$cmake_pinned" ]; then
+            echo "::error::ci-device.yml pins Pico SDK $pinned but device/CMakeLists.txt pins $cmake_pinned; bump them together."
+            exit 1
+          fi
 
           issue="$(gh issue list --label "$LABEL" --state open --limit 1 --json number --jq '.[0].number // empty')"
 
@@ -44,6 +60,14 @@ jobs:
           fi
 
           title="Update Pico SDK to $latest"
+
+          # Closing the issue for a release without bumping the pin means
+          # "skip this release": don't reopen it until a newer one is out.
+          if [ -z "$issue" ] && gh issue list --label "$LABEL" --state closed --json title --jq '.[].title' | grep -qxF "$title"; then
+            echo "The issue for $latest was closed without updating; skipping until a newer release."
+            exit 0
+          fi
+
           body="$(cat <<EOF
           raspberrypi/pico-sdk [$latest](https://github.com/raspberrypi/pico-sdk/releases/tag/$latest) is out; this repo pins $pinned.
 
