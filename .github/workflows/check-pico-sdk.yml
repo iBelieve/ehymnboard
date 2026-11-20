@@ -1,0 +1,55 @@
+name: Check Pico SDK version
+
+# Dependabot can't track the Pico SDK or the Arm toolchain (they are pinned in
+# ci-device.yml and device/CMakeLists.txt, not in a package manifest), so this
+# job opens an issue when raspberrypi/pico-sdk publishes a newer release.
+
+on:
+  schedule:
+    - cron: "0 14 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compare pinned and latest Pico SDK versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pinned="$(sed -n 's/^ *PICO_SDK_VERSION: *"\(.*\)"/\1/p' .github/workflows/ci-device.yml)"
+          latest="$(gh release view --repo raspberrypi/pico-sdk --json tagName --jq .tagName)"
+          echo "Pinned: $pinned, latest: $latest"
+
+          newest="$(printf '%s\n%s\n' "$pinned" "$latest" | sort -V | tail -n1)"
+          if [ "$newest" = "$pinned" ]; then
+            echo "Pico SDK is up to date."
+            exit 0
+          fi
+
+          title="Update Pico SDK to $latest"
+          if gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[].number' | grep -q .; then
+            echo "Issue already open."
+            exit 0
+          fi
+
+          gh issue create --title "$title" --body "$(cat <<EOF
+          raspberrypi/pico-sdk [$latest](https://github.com/raspberrypi/pico-sdk/releases/tag/$latest) is out; this repo pins $pinned.
+
+          To update, bump the versions together:
+
+          - \`PICO_SDK_VERSION\` (and \`ARM_GCC_VERSION\` if the SDK's recommended toolchain changed) in \`.github/workflows/ci-device.yml\`
+          - \`sdkVersion\`, \`toolchainVersion\` and \`picotoolVersion\` in \`device/CMakeLists.txt\`
+          - the \`~/.pico-sdk\` paths in \`device/.vscode/*.json\`
+          - the versions in \`CLAUDE.md\`
+
+          The Raspberry Pi Pico VS Code extension's \`data/<version>/versionBundles.json\` lists the matching toolchain, picotool, CMake and Ninja versions for each SDK release.
+          EOF
+          )"

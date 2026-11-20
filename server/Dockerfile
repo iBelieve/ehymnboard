@@ -1,10 +1,12 @@
+FROM ghcr.io/astral-sh/uv:0.13 AS uv
+
 FROM node:26-slim AS assets
 
 WORKDIR /app
 
 COPY --link package.json package-lock.json ./
 
-RUN npm install
+RUN npm ci
 
 COPY --link assets ./assets
 COPY --link templates ./templates
@@ -13,7 +15,7 @@ RUN npm run build
 
 FROM python:3.15-slim
 
-COPY --from=ghcr.io/astral-sh/uv:0.10 /uv /uvx /bin/
+COPY --from=uv /uv /uvx /bin/
 
 WORKDIR /app
 
