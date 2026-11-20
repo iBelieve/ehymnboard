@@ -35,6 +35,7 @@ All checks below must pass; run them locally before committing.
 - Assets: pnpm, pinned by `packageManager` in `package.json`; `pnpm install`
   then `pnpm run build` (CI uses `--frozen-lockfile`). New dependency build
   scripts must be allowed or denied under `allowBuilds` in
-  `pnpm-workspace.yaml`, or install fails
+  `pnpm-workspace.yaml`, or install fails. `minimumReleaseAge` there rejects
+  releases under a day old, so don't pin a version published today
 - Docker: CI builds the image (`docker build server`); the tailwind/pnpm asset
   build runs inside it
