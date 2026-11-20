@@ -1,0 +1,19 @@
+{
+  "threshold": 0,
+  "minTokens": 50,
+  "mode": "weak",
+  "reporters": [
+    "console"
+  ],
+  "gitignore": true,
+  "ignore": [
+    "**/build*/**",
+    "**/node_modules/**",
+    "**/.venv/**",
+    "**/*.lock",
+    "**/package-lock.json",
+    "**/static/**",
+    "**/*.svg"
+  ],
+  "absolute": false
+}

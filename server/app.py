@@ -14,25 +14,28 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import hashlib
+import json
+import os
+import unicodedata
+from collections import OrderedDict
+from datetime import UTC, datetime
 from functools import wraps
+from http import HTTPStatus
+from typing import TypedDict, cast
+
+import requests
 from flask import (
     Flask,
     Response,
-    request,
+    abort,
     make_response,
-    render_template,
-    send_from_directory,
     redirect,
+    render_template,
+    request,
+    send_from_directory,
 )
 from PIL import Image, ImageDraw, ImageFont
-from http import HTTPStatus
-from typing import Union, TypedDict, cast
-from collections import OrderedDict
-from datetime import datetime, timezone
-import os
-import hashlib
-import json
-import requests
 
 app = Flask(__name__)
 
@@ -52,9 +55,7 @@ MAX_LINE_WIDTH = SCREEN_WIDTH - 2 * HORIZ_PADDING
 LINE_OFFSET = 15
 
 LINE1_TOP = 0
-LINE1_BOTTOM = LINE_HEIGHT
 LINE2_TOP = SCREEN_HEIGHT - LINE_HEIGHT
-LINE2_BOTTOM = SCREEN_HEIGHT
 
 LINE1_CENTER_Y = LINE1_TOP + LINE_HEIGHT / 2
 LINE2_CENTER_Y = LINE2_TOP + LINE_HEIGHT / 2
@@ -72,15 +73,17 @@ HEALTHCHECKS_PING_URLS = {
     "E661A4D41787452B": "https://hc-ping.com/6c7ef2cb-71b8-492e-9e11-4ddfacf29d0c",
 }
 
-PING_EVERY_REQUESTS = 10
+# Healthcheck pings run inline in the request, so don't let a slow
+# healthchecks.io stall a gunicorn worker (and the device waiting on it).
+HEALTHCHECK_TIMEOUT_SECONDS = 10
 
 
 class Device(TypedDict):
     id: str
     saved_state_writes: int
     last_seen: str
-    last_updated_at: Union[str, None]
-    booted_at: Union[str, None]
+    last_updated_at: str | None
+    booted_at: str | None
 
 
 def require_basic_auth(f):
@@ -114,28 +117,27 @@ def format_device_name(device_id: str) -> str:
 
 
 @app.template_filter("prettydate")
-def prettydate(d: Union[str, datetime]) -> str:
+def prettydate(d: str | datetime) -> str:  # noqa: PLR0911
     if isinstance(d, str):
         d = datetime.fromisoformat(d)
 
-    diff = datetime.now(timezone.utc) - d
+    diff = datetime.now(UTC) - d
     s = diff.seconds
     if diff.days > 7 or diff.days < 0:
         return "on {}".format(d.strftime("%d %b %y"))
-    elif diff.days == 1:
+    if diff.days == 1:
         return "1 day ago"
-    elif diff.days > 1:
-        return "{} days ago".format(diff.days)
-    elif s < 60:
+    if diff.days > 1:
+        return f"{diff.days} days ago"
+    if s < 60:
         return "just now"
-    elif s < 120:
+    if s < 120:
         return "1 minute ago"
-    elif s < 3600:
-        return "{} minutes ago".format(s // 60)
-    elif s < 7200:
+    if s < 3600:
+        return f"{s // 60} minutes ago"
+    if s < 7200:
         return "1 hour ago"
-    else:
-        return "{} hours ago".format(s // 3600)
+    return f"{s // 3600} hours ago"
 
 
 @app.get("/ok")
@@ -147,7 +149,7 @@ def ok():
 @require_basic_auth
 def index():
     try:
-        with open("images/lines.json", "r") as f:
+        with open("images/lines.json") as f:
             lines = json.load(f)
     except OSError:
         lines = []
@@ -185,7 +187,7 @@ def create_image():
         line5 = ""
         line6 = ""
     else:
-        raise ValueError("Invalid action")
+        abort(HTTPStatus.BAD_REQUEST, "Invalid action")
 
     generate_image("1", line1, line2)
     generate_image("2", line3, line4)
@@ -202,7 +204,9 @@ def get_image_png(image_id):
     if not os.path.exists(f"images/{image_id}.png"):
         generate_image(image_id, "", "")
 
-    return send_from_directory("images", f"{image_id}.png")
+    # Resolve against the working directory like every other images/ access;
+    # Flask would otherwise resolve a relative path against the app's root.
+    return send_from_directory(os.path.abspath("images"), f"{image_id}.png")
 
 
 @app.get("/images/<int:image_id>")
@@ -212,7 +216,7 @@ def get_image(image_id):
 
     with open(f"images/{image_id}.png", "rb") as file:
         image_data = file.read()
-        image_hash = hashlib.sha1(image_data).hexdigest()
+        image_hash = hashlib.sha1(image_data, usedforsecurity=False).hexdigest()
 
     if_none_match = request.headers.get("If-None-Match") or request.args.get("etag")
     device_id = request.args.get("device_id")
@@ -223,12 +227,13 @@ def get_image(image_id):
         response = make_response("", 304)
     else:
         print(
-            f"Device {get_device_name(device_id)} ({device_id}) updating image {image_id} from {if_none_match} to {image_hash}"
+            f"Device {get_device_name(device_id)} ({device_id}) updating image "
+            f"{image_id} from {if_none_match} to {image_hash}"
         )
 
         image = Image.open(f"images/{image_id}.png")
         buffer = image_to_buffer(image)
-        last_updated_at = datetime.now(timezone.utc).isoformat()
+        last_updated_at = datetime.now(UTC).isoformat()
 
         ping_healthcheck(device_id, path="/log", data=f"Updating image {image_id}")
 
@@ -241,7 +246,7 @@ def get_image(image_id):
         update_device(
             device_id=device_id,
             saved_state_writes=saved_state_writes,
-            last_seen=datetime.now(timezone.utc).isoformat(),
+            last_seen=datetime.now(UTC).isoformat(),
             last_updated_at=last_updated_at,
         )
 
@@ -258,7 +263,8 @@ def report_device_booted():
 
     if watchdog_caused_reboot:
         print(
-            f"Device reboot caused by watchdog: {get_device_name(device_id)} ({device_id})"
+            "Device reboot caused by watchdog: "
+            f"{get_device_name(device_id)} ({device_id})"
         )
         ping_healthcheck(device_id, path="/failure", data="Watchdog caused reboot")
     else:
@@ -268,8 +274,8 @@ def report_device_booted():
     update_device(
         device_id=device_id,
         saved_state_writes=saved_state_writes,
-        last_seen=datetime.now(timezone.utc).isoformat(),
-        booted_at=datetime.now(timezone.utc).isoformat(),
+        last_seen=datetime.now(UTC).isoformat(),
+        booted_at=datetime.now(UTC).isoformat(),
     )
 
     return "", 204
@@ -287,7 +293,7 @@ def report_device_healthy():
     update_device(
         device_id=device_id,
         saved_state_writes=saved_state_writes,
-        last_seen=datetime.now(timezone.utc).isoformat(),
+        last_seen=datetime.now(UTC).isoformat(),
     )
 
     return "", 204
@@ -297,7 +303,8 @@ def image_to_buffer(image: Image.Image) -> bytes:
     buffer = bytearray(int(image.width / 8) * image.height)
     image = image.convert("1")
     pixels = image.load()
-    assert pixels is not None
+    if pixels is None:
+        raise ValueError("Could not load image pixels")
 
     for y in range(image.height):
         for x in range(image.width):
@@ -307,8 +314,21 @@ def image_to_buffer(image: Image.Image) -> bytes:
     return bytes(buffer)
 
 
+def clean_line(text: str) -> str:
+    """Make arbitrary form input safe to render as a single line.
+
+    Pillow can't lay out newlines, carriage returns or other control
+    characters on one line (it raises), so fold whitespace and drop them.
+    """
+    text = " ".join(text.split())
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Cc")
+
+
 def generate_image(name: int | str, line1: str, line2: str):
     os.makedirs("images", exist_ok=True)
+
+    line1 = clean_line(line1)
+    line2 = clean_line(line2)
 
     image = Image.new("1", (960, 680), 0)
     draw = ImageDraw.Draw(image)
@@ -336,7 +356,9 @@ def calculate_font_size(draw: ImageDraw.ImageDraw, text: str, font_name: str):
         font = ImageFont.truetype(font_name, font_size)
         text_width = draw.textlength(text, font=font)
 
-    return ImageFont.truetype(font_name, font_size - 1)
+    # Text too wide even at 1pt still renders (clipped) rather than asking
+    # Pillow for a 0pt font, which raises.
+    return ImageFont.truetype(font_name, max(font_size - 1, 1))
 
 
 def draw_centered_text(
@@ -357,7 +379,7 @@ def draw_centered_text(
 
 def get_devices() -> dict[str, Device]:
     try:
-        with open("images/devices.json", "r") as f:
+        with open("images/devices.json") as f:
             return json.load(f)
     except OSError:
         return {}
@@ -375,11 +397,14 @@ def get_device_sort_index(device_id: str) -> int:
 
 
 def save_devices(devices: dict[str, Device]):
+    # A board can check in before any image has been generated on a fresh
+    # deploy, when images/ doesn't exist yet.
+    os.makedirs("images", exist_ok=True)
     with open("images/devices.json", "w") as f:
         json.dump(devices, f)
 
 
-def update_device(device_id: Union[str, None], **kwargs):
+def update_device(device_id: str | None, **kwargs):
     if not device_id:
         print("Warning: Ignoring device update without a device_id")
         return
@@ -393,7 +418,7 @@ def update_device(device_id: Union[str, None], **kwargs):
     save_devices(devices)
 
 
-def ping_healthcheck(device_id: Union[str, None], path: str = "", data: str = ""):
+def ping_healthcheck(device_id: str | None, path: str = "", data: str = ""):
     url = HEALTHCHECKS_PING_URLS.get(device_id) if device_id else None
 
     if not url:
@@ -401,12 +426,12 @@ def ping_healthcheck(device_id: Union[str, None], path: str = "", data: str = ""
         return
 
     try:
-        requests.post(url + path, data=data)
+        requests.post(url + path, data=data, timeout=HEALTHCHECK_TIMEOUT_SECONDS)
     except requests.RequestException:
         print(f"Warning: Healthcheck ping failed for {device_id}")
 
 
-def get_device_name(device_id: Union[str, None]) -> str:
+def get_device_name(device_id: str | None) -> str:
     if not device_id:
         return "unknown"
     return DEVICE_NAMES.get(device_id, device_id)

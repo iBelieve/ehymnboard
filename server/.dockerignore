@@ -3,3 +3,9 @@ __pycache__
 images
 node_modules
 static/tailwind.css
+tests
+e2e
+.hypothesis
+.pytest_cache
+.coverage
+coverage.xml

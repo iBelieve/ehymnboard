@@ -33,7 +33,7 @@
 // Refresh a single screen. On transient HTTP failures we just log and bail out
 // for this iteration — the next loop will retry. The main loop tracks a "no
 // success in too long" timeout to reset us if the network stays broken.
-FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag)
+static FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag)
 {
     long_watchdog_update();
 
@@ -157,9 +157,9 @@ int main()
         auto r2 = refresh_screen(2, screen2, etag2);
         auto r3 = refresh_screen(3, screen3, etag3);
 
-        bool any_updated = (r1 == FetchImageResult::NEW_IMAGE) || (r2 == FetchImageResult::NEW_IMAGE) ||
-                           (r3 == FetchImageResult::NEW_IMAGE);
-        bool any_success =
+        const bool any_updated = (r1 == FetchImageResult::NEW_IMAGE) || (r2 == FetchImageResult::NEW_IMAGE) ||
+                                 (r3 == FetchImageResult::NEW_IMAGE);
+        const bool any_success =
             (r1 != FetchImageResult::ERROR) || (r2 != FetchImageResult::ERROR) || (r3 != FetchImageResult::ERROR);
 
         if (any_updated)

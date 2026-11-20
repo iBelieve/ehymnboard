@@ -22,12 +22,12 @@
 #include "pico/stdlib.h"
 #include <stdio.h>
 
-uint8_t long_watchdog_timeout_seconds = 0;
-uint8_t seconds_until_watchdog_reset = 0;
+static uint8_t long_watchdog_timeout_seconds = 0;
+static uint8_t seconds_until_watchdog_reset = 0;
 
-repeating_timer_t watcher_timer;
+static repeating_timer_t watcher_timer;
 
-bool watchdog_task([[maybe_unused]] repeating_timer_t *rt)
+static bool watchdog_task([[maybe_unused]] repeating_timer_t *rt)
 {
     if (seconds_until_watchdog_reset > 0)
     {

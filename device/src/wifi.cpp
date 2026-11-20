@@ -29,12 +29,15 @@
 #include "secrets.h"
 #include "utils.h"
 
+namespace
+{
+
 int on_wifi_scan_complete(void *env, const cyw43_ev_scan_result_t *result);
 
 struct WiFiScanResult
 {
     std::string ssid;
-    uint8_t bssid[6];
+    uint8_t bssid[6] = {};
     int16_t rssi;
 
     WiFiScanResult(const cyw43_ev_scan_result_t *result) : ssid((char *)result->ssid), rssi(result->rssi)
@@ -116,6 +119,8 @@ int on_wifi_scan_complete(void *env, const cyw43_ev_scan_result_t *result)
     return 0;
 }
 
+} // namespace
+
 void setup_wifi()
 {
     // Initialise the Wi-Fi chip
@@ -156,8 +161,8 @@ void setup_wifi()
                 {
                     long_watchdog_update();
 
-                    int res = cyw43_arch_wifi_connect_bssid_timeout_ms(ssid, result.bssid, password,
-                                                                       CYW43_AUTH_WPA2_AES_PSK, 30000);
+                    const int res = cyw43_arch_wifi_connect_bssid_timeout_ms(ssid, result.bssid, password,
+                                                                             CYW43_AUTH_WPA2_AES_PSK, 30000);
 
                     if (res == PICO_OK)
                     {

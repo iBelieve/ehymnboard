@@ -24,10 +24,14 @@
 
 #include "hardware/watchdog.h"
 #include "pico/stdlib.h"
+#include "request_path.h"
 
 inline std::string unique_board_id;
 
 std::string get_unique_board_id();
+
+// This board's ID, flash write count and why it last booted.
+DeviceStatus current_device_status();
 
 void reset_pico();
 void stall_spin();

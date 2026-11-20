@@ -12,5 +12,33 @@ dependencies = [
 dev = [
     "clang-format>=22.1.5",
     "clang-tidy>=22.1.7",
+    "gcovr>=8.8",
+    "lizard>=1.26.1",
     "ruff>=0.15.20",
+    "vulture>=2.16",
 ]
+
+[tool.ruff.lint]
+# On top of the defaults (E4, E7, E9, F): style, import order, bug-prone
+# patterns, security (bandit), complexity, simplifications and pylint.
+extend-select = [
+    "E",
+    "W",
+    "I",
+    "B",
+    "UP",
+    "S",
+    "C90",
+    "SIM",
+    "RET",
+    "PERF",
+    "PL",
+    "RUF",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.vulture]
+paths = ["monitor.py"]
+min_confidence = 60
