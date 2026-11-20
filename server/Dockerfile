@@ -4,14 +4,16 @@ FROM node:26-slim AS assets
 
 WORKDIR /app
 
-COPY --link package.json package-lock.json ./
+COPY --link package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
-RUN npm ci
+# Install the pnpm version pinned in package.json's packageManager field.
+RUN npm install -g "$(node -p 'require("./package.json").packageManager')" \
+    && pnpm install --frozen-lockfile
 
 COPY --link assets ./assets
 COPY --link templates ./templates
 
-RUN npm run build
+RUN pnpm run build
 
 FROM python:3.15-slim
 
