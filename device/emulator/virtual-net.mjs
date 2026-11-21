@@ -332,7 +332,7 @@ export class VirtualNetwork {
 
   respond(c) {
     const [requestLine, ...headerLines] = c.request.split('\r\n');
-    const [method, target] = requestLine.split(' ');
+    const [method, target = ''] = requestLine.split(' ');
     const [path, qs = ''] = target.split('?');
     const query = Object.fromEntries(new URLSearchParams(qs));
     const hostLine = headerLines.find((h) => h.toLowerCase().startsWith('host:'));
@@ -358,10 +358,11 @@ export class VirtualNetwork {
     const head = `HTTP/1.1 ${status} ${STATUS_TEXT[status] ?? 'Status'}\r\n${Object.entries(headers)
       .map(([k, v]) => `${k}: ${v}\r\n`)
       .join('')}\r\n`;
-    const full = new Uint8Array(head.length + body.length);
-    full.set(new TextEncoder().encode(head));
-    full.set(body, head.length);
-    c.out = res.truncateAt !== undefined ? full.subarray(0, head.length + res.truncateAt) : full;
+    const headBytes = new TextEncoder().encode(head);
+    const full = new Uint8Array(headBytes.length + body.length);
+    full.set(headBytes);
+    full.set(body, headBytes.length);
+    c.out = res.truncateAt !== undefined ? full.subarray(0, headBytes.length + res.truncateAt) : full;
     this.scheduleResend(c);
   }
 

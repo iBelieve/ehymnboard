@@ -26,7 +26,6 @@ import { FakeCYW43 } from './fake-cyw43.mjs';
 
 const FLASH_BASE = 0x10000000;
 const WATCHDOG_BASE = 0x40058;
-const WATCHDOG_REASON_TIMER = 1;
 const GSPI_NANOS_PER_BYTE = 8 * 32; // ~31 MHz bus clock
 
 // Pins from main.cpp for screens 1-3
@@ -35,6 +34,8 @@ const PANELS = [
   { id: 2, power: 14, cs: 10, dc: 11, reset: 12, busy: 13 },
   { id: 3, power: 26, cs: 19, dc: 20, reset: 21, busy: 22 },
 ];
+
+const hex = (n) => `0x${(n >>> 0).toString(16).padStart(8, '0')}`;
 
 /** Finds a function in the bootrom's lookup table by its two-letter code. */
 function romFunction(bootrom, code) {
@@ -110,6 +111,7 @@ export class Board {
   /** (Re)creates the RP2040 and its peripherals, keeping flash and the time. */
   powerOn(watchdogReason) {
     this.boots++;
+    const oldWatchdog = this.mcu?.peripherals[WATCHDOG_BASE];
     // A fresh clock, so the old chip's timer and watchdog alarms die with it.
     // rp2040js doesn't export SimulationClock, so borrow a Simulator's.
     // Its time is set directly: tick() would run every alarm in between.
@@ -131,8 +133,12 @@ export class Board {
     }
 
     const watchdog = mcu.peripherals[WATCHDOG_BASE];
+    // A watchdog reset keeps the scratch registers and records why it fired.
     if (watchdogReason) {
       watchdog.reason = watchdogReason;
+    }
+    if (oldWatchdog) {
+      watchdog.scratchData.set(oldWatchdog.scratchData);
     }
     watchdog.onWatchdogTrigger = () => {
       // rp2040js reschedules the alarm after it fires, and at a count of 0
@@ -140,7 +146,8 @@ export class Board {
       // A real reset stops the watchdog, so stop it here too.
       watchdog.alarm.enable = false;
       if (!this.pendingReboot) {
-        this.pendingReboot = true;
+        // rp2040js has just set REASON: TIMER for a timeout, FORCE for a trigger.
+        this.pendingReboot = watchdog.reason;
         this.emit('reboot', { reason: 'watchdog' });
       }
     };
@@ -244,10 +251,11 @@ export class Board {
     const end = this.clock.nanos + ms * 1e6;
     while (this.clock.nanos < end) {
       if (this.pendingReboot) {
-        this.pendingReboot = false;
-        this.powerOn(WATCHDOG_REASON_TIMER);
+        const reason = this.pendingReboot;
+        this.pendingReboot = 0;
+        this.powerOn(reason);
       }
-      this.step(20_000);
+      this.step(20_000, end);
       if (stop()) {
         return true;
       }
@@ -255,12 +263,16 @@ export class Board {
     return false;
   }
 
-  step(instructions) {
+  /**
+   * Runs up to `instructions` instructions, stopping early at a watchdog reset
+   * (so the old chip runs no further) or once simulated time reaches `end`.
+   */
+  step(instructions, end = Infinity) {
     const { mcu, clock } = this;
     const { core } = mcu;
     const cycleNanos = 1e9 / (mcu.clocks.sysFreq || 125_000_000);
     const romEnd = 0x4000;
-    for (let i = 0; i < instructions; i++) {
+    for (let i = 0; i < instructions && !this.pendingReboot && clock.nanos < end; i++) {
       // PIO only matters while the WiFi chip is selected; skipping it the
       // rest of the time lets sleeps jump straight to the next timer alarm.
       const busActive = this.chip.csActive;
@@ -277,7 +289,11 @@ export class Board {
       } else if (busActive) {
         cycles = 8;
       } else {
-        clock.tick(clock.nanosToNextAlarm);
+        // Asleep: jump to the next alarm, but no further than `end`.
+        if (!clock.nextAlarm) {
+          throw new Error(`CPU asleep at ${hex(core.PC)} with no timer alarm to wake it`);
+        }
+        clock.tick(Math.min(clock.nanosToNextAlarm, end - clock.nanos));
         continue;
       }
       clock.tick(cycles * cycleNanos);

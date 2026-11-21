@@ -384,8 +384,8 @@ export class EPaperPanel {
     }
     // Only the first `gates` rows are scanned; the rest keep their old image.
     const image = Uint8Array.from(this.ram);
+    const rows = Math.min(this.regs.gates, HEIGHT) * ROW_BYTES;
     this.busyFor(this.refreshMs, () => {
-      const rows = Math.min(this.regs.gates, HEIGHT) * ROW_BYTES;
       this.shown.set(image.subarray(0, rows));
       this.refreshes++;
       this.onDisplay({ image: Uint8Array.from(this.shown), updateControl: control });

@@ -131,6 +131,12 @@ export class FakeCYW43 {
   }
 
   reset() {
+    // Timers from before a power cycle (a scan or join in progress) must not
+    // fire into the new session.
+    this.generation = (this.generation ?? 0) + 1;
+    if (this.joined) {
+      this.onLinkChange?.(null);
+    }
     this.word32 = false;
     this.busRegs = new Uint8Array(0x40);
     this.f1Regs = new Map();
@@ -148,7 +154,12 @@ export class FakeCYW43 {
 
   /** Runs fn after ms of simulated time. */
   after(ms, fn) {
-    const alarm = this.mcu.clock.createAlarm(fn);
+    const generation = this.generation;
+    const alarm = this.mcu.clock.createAlarm(() => {
+      if (generation === this.generation) {
+        fn();
+      }
+    });
     alarm.schedule(ms * 1e6);
   }
 
