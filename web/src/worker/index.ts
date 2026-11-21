@@ -206,7 +206,7 @@ async function getState(env: Env): Promise<BoardState> {
     screens,
     devices: devices
       .map((device) => ({ ...device, name: getDeviceName(device.id) }))
-      .sort((a, b) => deviceSortIndex(a.id) - deviceSortIndex(b.id)),
+      .toSorted((a, b) => deviceSortIndex(a.id) - deviceSortIndex(b.id)),
     firmware,
   };
 }

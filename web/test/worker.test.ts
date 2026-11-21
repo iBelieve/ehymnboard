@@ -159,20 +159,20 @@ describe("admin API", () => {
   });
 });
 
-describe("OTA firmware", () => {
-  function upload(version: string, size: number) {
-    const form = new FormData();
-    form.set("version", version);
-    form.set("image", new File([new Uint8Array(size).fill(7)], "fw.bin"));
-    return exports.default.fetch(
-      new Request("http://api.hymnboard.sonrise.io/firmware", {
-        method: "POST",
-        headers: AUTH,
-        body: form,
-      }),
-    );
-  }
+function upload(version: string, size: number) {
+  const form = new FormData();
+  form.set("version", version);
+  form.set("image", new File([new Uint8Array(size).fill(7)], "fw.bin"));
+  return exports.default.fetch(
+    new Request("http://api.hymnboard.sonrise.io/firmware", {
+      method: "POST",
+      headers: AUTH,
+      body: form,
+    }),
+  );
+}
 
+describe("OTA firmware", () => {
   test("validates uploads", async () => {
     expect((await upload("bad version!", 512)).status).toBe(400);
     expect((await upload("v1", 100)).status).toBe(400);
