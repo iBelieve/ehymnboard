@@ -18,22 +18,23 @@
 
 // Puts it all together: the emulated board, the fake AP's LAN and a mock of
 // the hymn board server, plus helpers for tests to drive and observe them.
-import fs from 'node:fs';
-import { Board } from './board.mjs';
-import { VirtualNetwork } from './virtual-net.mjs';
+import fs from "node:fs";
+import { Board, type BoardEvents } from "./board.ts";
+import type { AccessPoint } from "./fake-cyw43.ts";
+import { type HttpRequest, type HttpResponse, VirtualNetwork } from "./virtual-net.ts";
 
-export const SERVER_HOST = 'api.hymnboard.sonrise.io';
+export const SERVER_HOST = "api.hymnboard.sonrise.io";
 export const IMAGE_BYTES = 81600;
 
-const BOOTROM = new URL('./bootrom-b1.bin', import.meta.url);
+const BOOTROM = new URL("./bootrom-b1.bin", import.meta.url);
 
-function elfFor(uf2, pioBus) {
-  const elf = uf2.replace(/\.uf2$/, '.elf');
+function elfFor(uf2: string, pioBus: boolean | undefined) {
+  const elf = uf2.replace(/\.uf2$/, ".elf");
   return !pioBus && elf !== uf2 && fs.existsSync(elf) ? fs.readFileSync(elf) : undefined;
 }
 
 /** A recognizable image for a screen: every byte is (screen * 16 + version). */
-export function testImage(screen, version) {
+export function testImage(screen: number, version: number) {
   return new Uint8Array(IMAGE_BYTES).fill((screen * 16 + version) & 0xff);
 }
 
@@ -42,17 +43,19 @@ export function testImage(screen, version) {
  * and the two healthchecks. `override` lets a test answer a request itself.
  */
 export class MockServer {
-  constructor() {
-    this.images = new Map([1, 2, 3].map((s) => [s, { etag: `v1-${s}`, body: testImage(s, 1) }]));
-    /** @type {null | ((req: object) => object | undefined)} */
-    this.override = null;
-  }
+  images = new Map(
+    [1, 2, 3].map((s): [number, { etag: string; body: Uint8Array }] => [
+      s,
+      { etag: `v1-${s}`, body: testImage(s, 1) },
+    ]),
+  );
+  override: ((req: HttpRequest) => HttpResponse | undefined) | null = null;
 
-  setImage(screen, version) {
+  setImage(screen: number, version: number) {
     this.images.set(screen, { etag: `v${version}-${screen}`, body: testImage(screen, version) });
   }
 
-  handle(req) {
+  handle(req: HttpRequest): HttpResponse {
     const custom = this.override?.(req);
     if (custom) {
       return custom;
@@ -71,45 +74,62 @@ export class MockServer {
       }
       return { status: 200, headers: { Etag: image.etag }, body: image.body };
     }
-    if (req.path === '/device_booted' || req.path === '/device_healthy') {
+    if (req.path === "/device_booted" || req.path === "/device_healthy") {
       return { status: 204 };
     }
     return { status: 404 };
   }
 }
 
-export class Emulator {
+export interface EmulatorOptions {
+  firmware: string;
+  /** Defaults to one WPA2 network matching secrets.example.h. */
+  aps?: AccessPoint[];
+  quiet?: boolean;
+  trace?: boolean;
+  /** Copies the firmware's serial output to stdout. */
+  echo?: boolean;
   /**
-   * @param {{ firmware: string, aps?: object[], quiet?: boolean, trace?: boolean, echo?: boolean,
-   *           pioBus?: boolean }} opts
-   *   aps defaults to one WPA2 network matching secrets.example.h. echo
-   *   copies the firmware's serial output to stdout. The firmware's .elf next
-   *   to its .uf2 enables the fast WiFi bus path; pioBus forces the real PIO
-   *   bus driver instead.
+   * The firmware's .elf next to its .uf2 enables the fast WiFi bus path;
+   * pioBus forces the real PIO bus driver instead.
    */
-  constructor(opts) {
-    this.logLines = [];
-    const log = (msg) => {
+  pioBus?: boolean;
+}
+
+export type Display = BoardEvents["display"] & { atMs: number };
+
+export class Emulator {
+  readonly logLines: string[] = [];
+  readonly server = new MockServer();
+  readonly board: Board;
+  readonly net: VirtualNetwork;
+  readonly displays: Display[] = [];
+  reboots = 0;
+
+  constructor(opts: EmulatorOptions) {
+    const log = (msg: string) => {
       this.logLines.push(msg);
       if (!opts.quiet) {
         console.log(msg);
       }
     };
-    this.server = new MockServer();
+    const stamp = () => this.board.simMs.toFixed(0).padStart(7);
     this.board = new Board({
       firmware: fs.readFileSync(opts.firmware),
       elf: elfFor(opts.firmware, opts.pioBus),
       bootrom: fs.readFileSync(BOOTROM),
-      aps: opts.aps ?? [{ ssid: 'SSID_1', password: 'PASSPHRASE_1', bssid: [2, 0x11, 0x22, 0x33, 0x44, 0x55] }],
+      aps: opts.aps ?? [
+        { ssid: "SSID_1", password: "PASSPHRASE_1", bssid: [2, 0x11, 0x22, 0x33, 0x44, 0x55] },
+      ],
       trace: opts.trace,
-      log: (msg) => log(`[cyw43 ${this.board.simMs.toFixed(0).padStart(7)}ms] ${msg}`),
+      log: (msg) => log(`[cyw43 ${stamp()}ms] ${msg}`),
     });
     this.net = new VirtualNetwork({
       after: (ms, fn) => this.board.after(ms, fn),
       send: (frame) => this.board.chip.sendEthernet(frame),
       dns: { [SERVER_HOST]: true },
       http: (req) => this.server.handle(req),
-      log: (msg) => log(`[net   ${this.board.simMs.toFixed(0).padStart(7)}ms] ${msg}`),
+      log: (msg) => log(`[net   ${stamp()}ms] ${msg}`),
     });
     this.board.chip.onEthernetFromHost = (frame) => this.net.receive(frame);
     this.board.chip.onLinkChange = (ap) => {
@@ -117,18 +137,16 @@ export class Emulator {
         this.net.reset();
       }
     };
-    this.displays = [];
-    this.board.on('display', (d) => {
+    this.board.on("display", (d) => {
       this.displays.push({ ...d, atMs: this.board.simMs });
-      log(`[panel ${this.board.simMs.toFixed(0).padStart(7)}ms] screen ${d.screen} refreshed (${d.frame.length} bytes)`);
+      log(`[panel ${stamp()}ms] screen ${d.screen} refreshed (${d.frame.length} bytes)`);
     });
-    this.reboots = 0;
-    this.board.on('reboot', () => {
+    this.board.on("reboot", () => {
       this.reboots++;
-      log(`[board ${this.board.simMs.toFixed(0).padStart(7)}ms] watchdog reset`);
+      log(`[board ${stamp()}ms] watchdog reset`);
     });
     if (opts.echo) {
-      this.board.on('serial', (text) => process.stdout.write(text));
+      this.board.on("serial", (text) => process.stdout.write(text));
     }
   }
 
@@ -141,7 +159,7 @@ export class Emulator {
   }
 
   /** Runs for `ms` of simulated time. */
-  run(ms) {
+  run(ms: number) {
     this.board.run(ms);
   }
 
@@ -149,14 +167,14 @@ export class Emulator {
    * Runs until the serial output (after `fromIndex`) contains `text` (a string
    * or RegExp). Returns the index just past the match; throws after `ms`.
    */
-  waitForSerial(text, ms, fromIndex = 0) {
+  waitForSerial(text: string | RegExp, ms: number, fromIndex = 0) {
     let found = -1;
     const search = () => {
-      if (typeof text === 'string') {
+      if (typeof text === "string") {
         const i = this.serial.indexOf(text, fromIndex);
         found = i < 0 ? -1 : i + text.length;
       } else {
-        const m = new RegExp(text.source, text.flags.replace('g', '') + 'g');
+        const m = new RegExp(text.source, text.flags.replace("g", "") + "g");
         m.lastIndex = fromIndex;
         const r = m.exec(this.serial);
         found = r ? r.index + r[0].length : -1;
@@ -165,15 +183,19 @@ export class Emulator {
     };
     if (!this.board.run(ms, search)) {
       const tail = this.serial.slice(-2000);
-      throw new Error(`no ${text} on serial after ${ms} ms of simulated time; last output:\n${tail}`);
+      throw new Error(
+        `no ${String(text)} on serial after ${ms} ms of simulated time; last output:\n${tail}`,
+      );
     }
     return found;
   }
 
   /** Runs until a condition holds; throws after `ms`. */
-  waitFor(what, condition, ms) {
+  waitFor(what: string, condition: () => boolean, ms: number) {
     if (!this.board.run(ms, condition)) {
-      throw new Error(`timed out after ${ms} ms of simulated time waiting for ${what}; last output:\n${this.serial.slice(-2000)}`);
+      throw new Error(
+        `timed out after ${ms} ms of simulated time waiting for ${what}; last output:\n${this.serial.slice(-2000)}`,
+      );
     }
   }
 

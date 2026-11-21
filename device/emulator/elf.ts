@@ -17,15 +17,15 @@
  */
 
 // Reads function addresses from a 32-bit little-endian ELF's symbol table.
-export function elfSymbols(elf) {
+export function elfSymbols(elf: Uint8Array): Map<string, number> {
   const v = new DataView(elf.buffer, elf.byteOffset, elf.byteLength);
   if (v.getUint32(0) !== 0x7f454c46 || elf[4] !== 1 || elf[5] !== 1) {
-    throw new Error('not a 32-bit little-endian ELF');
+    throw new Error("not a 32-bit little-endian ELF");
   }
   const shoff = v.getUint32(0x20, true);
   const shentsize = v.getUint16(0x2e, true);
   const shnum = v.getUint16(0x30, true);
-  const section = (i) => {
+  const section = (i: number) => {
     const o = shoff + i * shentsize;
     return {
       type: v.getUint32(o + 4, true),
@@ -36,7 +36,7 @@ export function elfSymbols(elf) {
     };
   };
   const SHT_SYMTAB = 2;
-  const symbols = new Map();
+  const symbols = new Map<string, number>();
   for (let i = 0; i < shnum; i++) {
     const s = section(i);
     if (s.type !== SHT_SYMTAB) {

@@ -38,6 +38,13 @@ All checks below must pass; run them locally before committing.
   `.jscpd.json`, zero tolerance)
 - Python: `uv run ruff check .`, `uv run ruff format --check .` and
   `uv run vulture`
+- Emulator (`device/emulator/`, TypeScript run directly by Node, no build
+  step): `pnpm install`, then `pnpm run typecheck` (tsc 7), `pnpm run lint`
+  (oxlint with type-aware rules via tsrs, all errors), `pnpm run format:check`
+  (Prettier) and `pnpm test`, which boots `../build/ehymnboard.uf2` (or
+  `$FIRMWARE_UF2`) in rp2040js and runs the scenario tests. Only erasable
+  TypeScript syntax (no enums or parameter properties); import with `.ts`
+  extensions
 
 ### server/
 

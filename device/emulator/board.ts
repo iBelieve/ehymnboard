@@ -19,26 +19,65 @@
 // The eHymnBoard around the Pico W: an emulated RP2040 with the fake CYW43,
 // three e-paper panels on SPI0, and flash that survives reboots. A watchdog
 // reset rebuilds the RP2040 from the same flash, like a real reboot.
-import { ConsoleLogger, GPIOPinState, LogLevel, RP2040, Simulator, USBCDC } from 'rp2040js';
-import { elfSymbols } from './elf.mjs';
-import { EPaperPanel } from './epaper.mjs';
-import { FakeCYW43 } from './fake-cyw43.mjs';
+import { ConsoleLogger, GPIOPinState, LogLevel, RP2040, Simulator, USBCDC } from "rp2040js";
+import { elfSymbols } from "./elf.ts";
+import { EPaperPanel } from "./epaper.ts";
+import { type AccessPoint, FakeCYW43 } from "./fake-cyw43.ts";
+
+type SimulationClock = Simulator["clock"]; // not exported by rp2040js
+
+/**
+ * rp2040js internals the board reaches into: its types mark these private.
+ * nanosCounter sets a fresh clock's time without running alarms, nextAlarm
+ * tells "no alarm" from "an alarm due now", and the watchdog's REASON can
+ * only be set this way.
+ */
+interface ClockInternals {
+  nanosCounter: number;
+  nextAlarm: object | null;
+}
+interface WatchdogInternals {
+  reason: number;
+  readonly scratchData: Uint32Array;
+  readonly alarm: { enable: boolean };
+  onWatchdogTrigger: () => void;
+}
 
 const FLASH_BASE = 0x10000000;
 const WATCHDOG_BASE = 0x40058;
 const GSPI_NANOS_PER_BYTE = 8 * 32; // ~31 MHz bus clock
 
 // Pins from main.cpp for screens 1-3
-const PANELS = [
+interface PanelPins {
+  id: number;
+  power: number;
+  cs: number;
+  dc: number;
+  reset: number;
+  busy: number;
+}
+
+const PANELS: PanelPins[] = [
   { id: 1, power: 9, cs: 5, dc: 6, reset: 7, busy: 8 },
   { id: 2, power: 14, cs: 10, dc: 11, reset: 12, busy: 13 },
   { id: 3, power: 26, cs: 19, dc: 20, reset: 21, busy: 22 },
 ];
 
-const hex = (n) => `0x${(n >>> 0).toString(16).padStart(8, '0')}`;
+const hex = (n: number) => `0x${(n >>> 0).toString(16).padStart(8, "0")}`;
+
+// These two look past rp2040js's public types; see the interfaces above.
+function clockInternals(clock: SimulationClock): ClockInternals {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- private fields, see ClockInternals
+  return clock as unknown as ClockInternals;
+}
+
+function watchdogOf(mcu: RP2040): WatchdogInternals {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- an RPWatchdog, see WatchdogInternals
+  return mcu.peripherals[WATCHDOG_BASE] as unknown as WatchdogInternals;
+}
 
 /** Finds a function in the bootrom's lookup table by its two-letter code. */
-function romFunction(bootrom, code) {
+function romFunction(bootrom: Uint8Array, code: string) {
   const view = new DataView(bootrom.buffer, bootrom.byteOffset, bootrom.byteLength);
   const want = code.charCodeAt(0) | (code.charCodeAt(1) << 8);
   for (let i = view.getUint16(0x14, true); ; i += 4) {
@@ -52,55 +91,90 @@ function romFunction(bootrom, code) {
   }
 }
 
-export class Board {
+export interface BoardOptions {
+  firmware: Uint8Array;
+  bootrom: Uint8Array;
+  aps: AccessPoint[];
+  trace?: boolean;
   /**
-   * @param {{ firmware: Uint8Array, bootrom: Uint8Array, aps: object[], trace?: boolean,
-   *           elf?: Uint8Array, log?: (msg: string) => void }} opts
-   *   With the firmware's ELF, calls to cyw43_spi_transfer() are answered
-   *   directly instead of bit-banging every byte through PIO and DMA, which
-   *   is many times faster. Without it, the real bus driver runs.
+   * With the firmware's ELF, calls to cyw43_spi_transfer() are answered
+   * directly instead of bit-banging every byte through PIO and DMA, which is
+   * many times faster. Without it, the real bus driver runs.
    */
-  constructor(opts) {
+  elf?: Uint8Array;
+  log?: (msg: string) => void;
+}
+
+export interface BoardEvents {
+  display: { screen: number; frame: Uint8Array; updateControl: number };
+  serial: string;
+  reboot: { reason: string };
+}
+
+type Listeners = { [K in keyof BoardEvents]: Set<(arg: BoardEvents[K]) => void> };
+
+/** A panel model and the Pico pins it's wired to. */
+export type WiredPanel = EPaperPanel & { readonly pins: PanelPins };
+
+export class Board {
+  readonly opts: BoardOptions;
+  /** The 16 MB QSPI flash: survives reboots. */
+  readonly flash = new Uint8Array(16 * 1024 * 1024).fill(0xff);
+  readonly romErase: number;
+  readonly romProgram: number;
+  /** Address of cyw43_spi_transfer(), or 1 (never a PC) for no fast path. */
+  readonly spiTransfer: number;
+  readonly panels: WiredPanel[];
+  private readonly listeners: Listeners = {
+    display: new Set(),
+    serial: new Set(),
+    reboot: new Set(),
+  };
+  serial = "";
+  boots = 0;
+  flashWrites = 0;
+  /** REASON for the watchdog reset run() should do next, or 0. */
+  pendingReboot = 0;
+  // Set by powerOn()
+  clock!: SimulationClock;
+  mcu!: RP2040;
+  chip!: FakeCYW43;
+
+  constructor(opts: BoardOptions) {
     this.opts = opts;
-    this.flash = new Uint8Array(16 * 1024 * 1024).fill(0xff);
     for (let off = 0; off + 512 <= opts.firmware.length; off += 512) {
       const view = new DataView(opts.firmware.buffer, opts.firmware.byteOffset + off, 512);
       const addr = view.getUint32(12, true);
       const size = view.getUint32(16, true);
       this.flash.set(opts.firmware.subarray(off + 32, off + 32 + size), addr - FLASH_BASE);
     }
-    this.romErase = romFunction(opts.bootrom, 'RE');
-    this.romProgram = romFunction(opts.bootrom, 'RP');
-    this.spiTransfer = opts.elf ? (elfSymbols(opts.elf).get('cyw43_spi_transfer') ?? 1) & ~1 : 1;
-    this.listeners = new Map();
-    this.serial = '';
-    this.boots = 0;
-    this.flashWrites = 0;
+    this.romErase = romFunction(opts.bootrom, "RE");
+    this.romProgram = romFunction(opts.bootrom, "RP");
+    this.spiTransfer = opts.elf ? (elfSymbols(opts.elf).get("cyw43_spi_transfer") ?? 1) & ~1 : 1;
     // The panels outlive a Pico reboot; they lose power when its pins reset.
     this.panels = PANELS.map((pins) => {
-      const panel = new EPaperPanel({ id: pins.id, after: (ms, fn) => this.after(ms, fn) });
-      panel.pins = pins;
+      const panel = Object.assign(
+        new EPaperPanel({ id: pins.id, after: (ms, fn) => this.after(ms, fn) }),
+        { pins },
+      );
       panel.onDisplay = ({ image, updateControl }) =>
-        this.emit('display', { screen: pins.id, frame: image, updateControl });
+        this.emit("display", { screen: pins.id, frame: image, updateControl });
       return panel;
     });
     this.powerOn(0);
   }
 
-  on(event, fn) {
-    if (!this.listeners.has(event)) {
-      this.listeners.set(event, new Set());
-    }
-    this.listeners.get(event).add(fn);
+  on<K extends keyof BoardEvents>(event: K, fn: (arg: BoardEvents[K]) => void) {
+    this.listeners[event].add(fn);
   }
 
-  emit(event, arg) {
-    for (const fn of this.listeners.get(event) ?? []) {
+  emit<K extends keyof BoardEvents>(event: K, arg: BoardEvents[K]) {
+    for (const fn of this.listeners[event]) {
       fn(arg);
     }
   }
 
-  after(ms, fn) {
+  after(ms: number, fn: () => void) {
     this.clock.createAlarm(fn).schedule(ms * 1e6);
   }
 
@@ -109,19 +183,24 @@ export class Board {
   }
 
   /** (Re)creates the RP2040 and its peripherals, keeping flash and the time. */
-  powerOn(watchdogReason) {
+  powerOn(watchdogReason: number) {
     this.boots++;
-    const oldWatchdog = this.mcu?.peripherals[WATCHDOG_BASE];
+    // mcu, clock and chip are still unset on the first power-on.
+    const oldWatchdog = this.mcu ? watchdogOf(this.mcu) : undefined;
     // A fresh clock, so the old chip's timer and watchdog alarms die with it.
     // rp2040js doesn't export SimulationClock, so borrow a Simulator's.
     // Its time is set directly: tick() would run every alarm in between.
     const now = this.clock?.nanos ?? 0;
     this.clock = new Simulator().clock;
-    this.clock.nanosCounter = now;
+    clockInternals(this.clock).nanosCounter = now;
     const mcu = new RP2040(this.clock);
     this.mcu = mcu;
     mcu.loadBootrom(
-      new Uint32Array(this.opts.bootrom.buffer, this.opts.bootrom.byteOffset, this.opts.bootrom.byteLength / 4),
+      new Uint32Array(
+        this.opts.bootrom.buffer,
+        this.opts.bootrom.byteOffset,
+        this.opts.bootrom.byteLength / 4,
+      ),
     );
     mcu.flash.set(this.flash);
     mcu.logger = new ConsoleLogger(LogLevel.Error);
@@ -132,7 +211,7 @@ export class Board {
       pio.run = () => {};
     }
 
-    const watchdog = mcu.peripherals[WATCHDOG_BASE];
+    const watchdog = watchdogOf(mcu);
     // A watchdog reset keeps the scratch registers and records why it fired.
     if (watchdogReason) {
       watchdog.reason = watchdogReason;
@@ -148,12 +227,16 @@ export class Board {
       if (!this.pendingReboot) {
         // rp2040js has just set REASON: TIMER for a timeout, FORCE for a trigger.
         this.pendingReboot = watchdog.reason;
-        this.emit('reboot', { reason: 'watchdog' });
+        this.emit("reboot", { reason: "watchdog" });
       }
     };
 
-    const previousChip = this.chip;
-    this.chip = new FakeCYW43(mcu, { aps: this.opts.aps, trace: this.opts.trace, log: this.opts.log });
+    const previousChip = this.chip as FakeCYW43 | undefined;
+    this.chip = new FakeCYW43(mcu, {
+      aps: this.opts.aps,
+      trace: this.opts.trace,
+      log: this.opts.log,
+    });
     if (previousChip) {
       this.chip.onEthernetFromHost = previousChip.onEthernetFromHost;
       this.chip.onLinkChange = previousChip.onLinkChange;
@@ -170,15 +253,15 @@ export class Board {
     cdc.onSerialData = (bytes) => {
       const text = new TextDecoder().decode(bytes);
       this.serial += text;
-      this.emit('serial', text);
+      this.emit("serial", text);
     };
 
     mcu.core.PC = FLASH_BASE;
   }
 
   /** Connects the panels to a new RP2040's pins and SPI0. */
-  wirePanels(mcu) {
-    const high = (pin) => mcu.gpio[pin].value === GPIOPinState.High;
+  wirePanels(mcu: RP2040) {
+    const high = (pin: number) => mcu.gpio[pin].value === GPIOPinState.High;
     for (const panel of this.panels) {
       const { power, reset, busy } = panel.pins;
       panel.setPower(false);
@@ -201,7 +284,7 @@ export class Board {
    * Bootrom flash erase/program: rp2040js has no QSPI flash model, so do them
    * here and return straight to the caller. Returns true when it handled pc.
    */
-  romHook(pc) {
+  romHook(pc: number) {
     const { core } = this.mcu;
     const r = core.registers;
     if (pc === this.romErase) {
@@ -214,7 +297,10 @@ export class Board {
     } else {
       return false;
     }
-    this.mcu.flash.set(this.flash.subarray(r[0], r[0] + (pc === this.romErase ? r[1] : r[2])), r[0]);
+    this.mcu.flash.set(
+      this.flash.subarray(r[0], r[0] + (pc === this.romErase ? r[1] : r[2])),
+      r[0],
+    );
     core.PC = core.LR & ~1;
     return true;
   }
@@ -247,7 +333,7 @@ export class Board {
   }
 
   /** Runs the board for up to `ms` of simulated time, or until stop() returns true. */
-  run(ms, stop = () => false) {
+  run(ms: number, stop: () => boolean = () => false) {
     const end = this.clock.nanos + ms * 1e6;
     while (this.clock.nanos < end) {
       if (this.pendingReboot) {
@@ -267,7 +353,7 @@ export class Board {
    * Runs up to `instructions` instructions, stopping early at a watchdog reset
    * (so the old chip runs no further) or once simulated time reaches `end`.
    */
-  step(instructions, end = Infinity) {
+  step(instructions: number, end = Infinity) {
     const { mcu, clock } = this;
     const { core } = mcu;
     const cycleNanos = 1e9 / (mcu.clocks.sysFreq || 125_000_000);
@@ -290,7 +376,7 @@ export class Board {
         cycles = 8;
       } else {
         // Asleep: jump to the next alarm, but no further than `end`.
-        if (!clock.nextAlarm) {
+        if (!clockInternals(clock).nextAlarm) {
           throw new Error(`CPU asleep at ${hex(core.PC)} with no timer alarm to wake it`);
         }
         clock.tick(Math.min(clock.nanosToNextAlarm, end - clock.nanos));
