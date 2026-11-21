@@ -19,7 +19,7 @@
 // Unit tests for the SSD1677 panel model on its own, without the firmware.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { EPaperPanel, type PanelDisplay, RAM_BYTES, ROW_BYTES } from "../epaper.ts";
+import { EPaperPanel, type PanelDisplay, RAM_BYTES, ROW_BYTES } from "../src/epaper.ts";
 
 /** A powered panel with a fake clock: run() fires the timers it scheduled. */
 type TestPanel = EPaperPanel & { run: () => void; displayed: PanelDisplay[] };

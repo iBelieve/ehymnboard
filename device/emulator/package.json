@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node run.ts",
+    "start": "node src/run.ts",
     "test": "node --test 'test/*.test.ts'",
     "typecheck": "tsc -p .",
     "lint": "oxlint",

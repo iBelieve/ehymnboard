@@ -18,7 +18,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { testImage } from "../emulator.ts";
+import { testImage } from "../src/emulator.ts";
 import { assertFirstImagesShown, boot, count } from "./helpers.ts";
 
 test("boots, joins WiFi, shows all three screens, then only refreshes what changed", () => {

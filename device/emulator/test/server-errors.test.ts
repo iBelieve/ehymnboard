@@ -18,8 +18,8 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Emulator } from "../emulator.ts";
-import type { HttpResponse } from "../virtual-net.ts";
+import type { Emulator } from "../src/emulator.ts";
+import type { HttpResponse } from "../src/virtual-net.ts";
 import { boot, count } from "./helpers.ts";
 
 // The first loop's images, failing the given screen in the given way.

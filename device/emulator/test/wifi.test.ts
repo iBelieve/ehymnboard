@@ -18,7 +18,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { AccessPoint } from "../fake-cyw43.ts";
+import type { AccessPoint } from "../src/fake-cyw43.ts";
 import { boot, count } from "./helpers.ts";
 
 test("skips unknown networks and joins the known one", () => {
