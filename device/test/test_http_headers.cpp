@@ -1,5 +1,6 @@
 #include "http_headers.h"
 
+#include <optional>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -49,7 +50,7 @@ TEST(FindEtag, ReadsServerResponse)
 
 TEST(FindEtag, MissingHeader)
 {
-    EXPECT_EQ(find_etag("HTTP/1.1 304 NOT MODIFIED\r\nServer: gunicorn\r\n\r\n"), "");
+    EXPECT_EQ(find_etag("HTTP/1.1 304 NOT MODIFIED\r\nServer: gunicorn\r\n\r\n"), std::nullopt);
 }
 
 TEST(FindEtag, HeaderNameIsCaseInsensitive)
@@ -65,13 +66,18 @@ TEST(FindEtag, TrimsWhitespace)
 
 TEST(FindEtag, IgnoresEtagInStatusLineAndOtherValues)
 {
-    EXPECT_EQ(find_etag("Etag: status\r\nX-Note: Etag: nope\r\n\r\n"), "");
+    EXPECT_EQ(find_etag("Etag: status\r\nX-Note: Etag: nope\r\n\r\n"), std::nullopt);
+}
+
+TEST(FindEtag, BlankValueIsMissing)
+{
+    EXPECT_EQ(find_etag("HTTP/1.1 200 OK\r\nEtag: \t \r\n\r\n"), std::nullopt);
 }
 
 TEST(FindEtag, IgnoresTruncatedLine)
 {
     // The header block was cut off mid-value: don't trust a partial etag.
-    EXPECT_EQ(find_etag("HTTP/1.1 200 OK\r\nEtag: 2e16e58b"), "");
+    EXPECT_EQ(find_etag("HTTP/1.1 200 OK\r\nEtag: 2e16e58b"), std::nullopt);
 }
 
 TEST(FindEtag, FirstEtagWins)
@@ -81,7 +87,7 @@ TEST(FindEtag, FirstEtagWins)
 
 TEST(FindEtag, EmptyInput)
 {
-    EXPECT_EQ(find_etag(""), "");
+    EXPECT_EQ(find_etag(""), std::nullopt);
 }
 
 RC_GTEST_PROP(FindEtag, FindsEtagAmongOtherHeaders, ())
@@ -90,13 +96,13 @@ RC_GTEST_PROP(FindEtag, FindsEtagAmongOtherHeaders, ())
         *rc::gen::container<std::vector<std::pair<std::string, std::string>>>(rc::gen::pair(token(), header_value()));
     const auto after =
         *rc::gen::container<std::vector<std::pair<std::string, std::string>>>(rc::gen::pair(token(), header_value()));
-    const auto etag = *header_value();
+    const auto etag = *rc::gen::suchThat(header_value(), [](const std::string &value) { return !value.empty(); });
 
     std::string headers = "HTTP/1.1 200 OK\r\n";
     for (const auto &[name, value] : before)
     {
         // Another header named "etag" would legitimately win; skip it.
-        RC_PRE(find_etag("HTTP/1.1 200 OK\r\n" + name + ": x\r\n\r\n").empty());
+        RC_PRE(!find_etag("HTTP/1.1 200 OK\r\n" + name + ": x\r\n\r\n"));
         headers += name + ": " + value + "\r\n";
     }
     headers += "Etag: " + etag + "\r\n";
@@ -109,15 +115,16 @@ RC_GTEST_PROP(FindEtag, FindsEtagAmongOtherHeaders, ())
     RC_ASSERT(find_etag(headers) == etag);
 }
 
-RC_GTEST_PROP(FindEtag, NeverReturnsLineBreaksOrPadding, (const std::string &headers))
+RC_GTEST_PROP(FindEtag, NeverReturnsBlankLineBreaksOrPadding, (const std::string &headers))
 {
     const auto etag = find_etag(headers);
 
-    RC_ASSERT(etag.find('\r') == std::string::npos);
-    RC_ASSERT(etag.find('\n') == std::string::npos);
-    if (!etag.empty())
+    if (etag)
     {
-        RC_ASSERT(etag.front() != ' ');
-        RC_ASSERT(etag.back() != ' ');
+        RC_ASSERT(!etag->empty());
+        RC_ASSERT(etag->find('\r') == std::string::npos);
+        RC_ASSERT(etag->find('\n') == std::string::npos);
+        RC_ASSERT(etag->front() != ' ');
+        RC_ASSERT(etag->back() != ' ');
     }
 }

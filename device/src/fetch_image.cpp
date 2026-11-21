@@ -18,6 +18,7 @@
 
 #include "fetch_image.h"
 
+#include <optional>
 #include <string>
 
 #include "http_headers.h"
@@ -39,7 +40,7 @@ struct FetchImageHttpRequest
 
     // Captured from the response headers; only adopted by the caller once
     // the full image body has been received.
-    std::string new_etag;
+    std::optional<std::string> new_etag;
 };
 
 } // namespace
@@ -57,13 +58,13 @@ static err_t on_headers_received([[maybe_unused]] httpc_state_t *connection, voi
 
     req->new_etag = find_etag(headers);
 
-    if (req->new_etag.empty())
+    if (req->new_etag)
     {
-        printf("WARNING: Etag not found in headers\n");
+        printf("Etag: %s\n", req->new_etag->c_str());
     }
     else
     {
-        printf("Etag: %s\n", req->new_etag.c_str());
+        printf("WARNING: Etag not found in headers\n");
     }
 
     return ERR_OK;
@@ -167,9 +168,9 @@ FetchImageResult fetch_image(int image, std::string &etag)
         // Only adopt the new etag once the full image has arrived — adopting
         // it on a truncated body would make the server 304 us forever for an
         // image we never displayed.
-        if (!req.new_etag.empty())
+        if (req.new_etag)
         {
-            etag = req.new_etag;
+            etag = *req.new_etag;
         }
 
         return FetchImageResult::NEW_IMAGE;
