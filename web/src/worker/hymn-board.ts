@@ -46,7 +46,7 @@ export class HymnBoard extends DurableObject<Env> {
       );
       CREATE TABLE IF NOT EXISTS devices (
         id TEXT PRIMARY KEY,
-        saved_state_writes TEXT,
+        saved_state_writes INTEGER,
         last_seen TEXT,
         last_updated_at TEXT,
         booted_at TEXT,
@@ -134,8 +134,9 @@ export class HymnBoard extends DurableObject<Env> {
   updateDevice(id: string, fields: Partial<Omit<Device, "id">>): void {
     // Only overwrite the fields that were given, like the Flask server did.
     const entries = Object.entries(fields).filter(
-      (entry): entry is [string, string] =>
-        DEVICE_FIELDS.has(entry[0]) && typeof entry[1] === "string",
+      (entry): entry is [string, string | number] =>
+        DEVICE_FIELDS.has(entry[0]) &&
+        (typeof entry[1] === "string" || typeof entry[1] === "number"),
     );
     this.sql.exec("INSERT OR IGNORE INTO devices (id) VALUES (?)", id);
     if (entries.length > 0) {

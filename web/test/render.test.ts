@@ -82,3 +82,10 @@ describe("matches the Flask server's rendering", () => {
 test("blank lines render a blank screen", () => {
   expect(renderScreen(getFont(), "", "").every((byte) => byte === 0)).toBe(true);
 });
+
+test("line breaks and control characters render as spaces, like Flask's clean_line", () => {
+  const font = getFont();
+  expect(renderScreen(font, "LSB\n657", "Kyrie \tEleison")).toEqual(
+    renderScreen(font, "LSB 657", "Kyrie  Eleison"),
+  );
+});

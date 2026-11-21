@@ -5,6 +5,7 @@
 
 import type { Font, PathCommand } from "opentype.js";
 import {
+  cleanLine,
   LINE1_CENTER_Y,
   LINE2_CENTER_Y,
   LINE_OFFSET,
@@ -41,8 +42,8 @@ export function fitFontSize(font: Font, text: string): number {
 
 export function renderScreen(font: Font, line1: string, line2: string): Uint8Array {
   const buffer = new Uint8Array(SCREEN_BYTES);
-  drawCenteredLine(buffer, font, line1, LINE1_CENTER_Y);
-  drawCenteredLine(buffer, font, line2, LINE2_CENTER_Y);
+  drawCenteredLine(buffer, font, cleanLine(line1), LINE1_CENTER_Y);
+  drawCenteredLine(buffer, font, cleanLine(line2), LINE2_CENTER_Y);
   return buffer;
 }
 

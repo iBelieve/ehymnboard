@@ -119,10 +119,17 @@ describe("device status", () => {
     const state = await (await get("/api/state", AUTH)).json<BoardState>();
     expect(state.devices.map((d) => d.name)).toEqual(["Left Hymn Board", "Right Hymn Board"]);
     const left = state.devices[0]!;
-    expect(left.saved_state_writes).toBe("4");
+    expect(left.saved_state_writes).toBe(4);
     expect(left.booted_at).toBeTruthy();
     expect(left.last_updated_at).toBeTruthy();
     expect(state.devices[1]!.booted_at).toBeNull();
+  });
+
+  test("ignores a saved_state_writes that isn't an integer", async () => {
+    await get(`/device_healthy?device_id=${LEFT}&saved_state_writes=9`);
+    await get(`/device_healthy?device_id=${LEFT}&saved_state_writes=lots`);
+    const state = await (await get("/api/state", AUTH)).json<BoardState>();
+    expect(state.devices[0]!.saved_state_writes).toBe(9);
   });
 
   test("OTA results replace the watchdog failure ping", async () => {

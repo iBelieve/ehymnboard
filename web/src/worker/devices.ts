@@ -26,6 +26,9 @@ export function deviceSortIndex(deviceId: string): number {
  * Pings the board's healthchecks.io check. path is "" (success), "/log" or
  * "/failure". Failures are logged, never thrown.
  */
+// Like the Flask server: don't let a slow healthchecks.io hold a request open.
+const HEALTHCHECK_TIMEOUT_MS = 10_000;
+
 export async function pingHealthcheck(
   deviceId: string | undefined,
   path: "" | "/log" | "/failure",
@@ -37,7 +40,11 @@ export async function pingHealthcheck(
     return;
   }
   try {
-    await fetch(url + path, { method: "POST", body: data });
+    await fetch(url + path, {
+      method: "POST",
+      body: data,
+      signal: AbortSignal.timeout(HEALTHCHECK_TIMEOUT_MS),
+    });
   } catch {
     console.log(`Warning: Healthcheck ping failed for ${deviceId}`);
   }

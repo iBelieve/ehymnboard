@@ -44,6 +44,16 @@ export function trimLines([a, b, c, d, e, f]: Lines): Lines {
   return [a.trim(), b.trim(), c.trim(), d.trim(), e.trim(), f.trim()];
 }
 
+// Characters the Flask server turned into spaces before drawing: control
+// characters (including \n, \r and \t) and the line and paragraph separators,
+// none of which can be laid out on one line.
+const LINE_BREAKING = /[\p{Cc}\p{Zl}\p{Zp}]/gu;
+
+/** Makes arbitrary input safe to draw as a single line, like Flask's clean_line. */
+export function cleanLine(text: string): string {
+  return text.replace(LINE_BREAKING, " ");
+}
+
 export function isLines(value: unknown): value is Lines {
   return (
     Array.isArray(value) &&

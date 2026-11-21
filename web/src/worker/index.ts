@@ -37,8 +37,13 @@ const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 function deviceStatus(c: AppContext): DeviceStatusParams {
   return {
     device_id: c.req.query("device_id") || undefined,
-    saved_state_writes: c.req.query("saved_state_writes") || undefined,
+    saved_state_writes: parseInteger(c.req.query("saved_state_writes")),
   };
+}
+
+/** Like Flask's request.args.get(..., type=int): undefined unless an integer. */
+function parseInteger(value: string | undefined): number | undefined {
+  return value !== undefined && /^\s*[+-]?\d+\s*$/.test(value) ? Number(value) : undefined;
 }
 
 /** Runs a healthchecks.io ping after the response is sent. */
