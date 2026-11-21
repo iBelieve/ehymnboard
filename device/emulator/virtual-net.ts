@@ -45,7 +45,7 @@ type Bytes = Uint8Array;
 type Address = ArrayLike<number>;
 
 const ipEq = (a: number[], b: Address) => a.every((x, i) => x === b[i]);
-const ipStr = (a: number[]) => a.join(".");
+const ipStr = (a: ArrayLike<number>) => Array.from(a).join(".");
 
 function checksum(bytes: Bytes, initial = 0) {
   let sum = initial;
@@ -209,7 +209,9 @@ export class VirtualNetwork {
     dstMac: Address | null | undefined = this.clientMac,
   ) {
     if (!dstMac) {
-      return; // nothing has spoken to us yet
+      // Nothing has spoken to the router yet, so there is nowhere to send it.
+      this.log(`dropped IP packet to ${ipStr(dst)}: no client MAC yet`);
+      return;
     }
     const ip = new Uint8Array(20 + payload.length);
     ip[0] = 0x45;

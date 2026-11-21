@@ -120,31 +120,32 @@ export class FakeCYW43 {
   readonly trace: boolean;
   mac = [0x28, 0xcd, 0xc1, 0x00, 0x00, 0x01];
 
-  // Chip state, set by reset() when WL_ON drops
+  // Chip state. The constructor and every WL_ON drop call reset(), which is
+  // the one place these are set to their power-on values.
   generation = 0;
-  word32 = false;
-  busRegs = new Uint8Array(0x40);
-  f1Regs = new Map<number, number>();
-  ram = new Uint8Array(RAM_SIZE);
-  backplane = new Map<number, number>();
-  rxQueue: Uint8Array[] = []; // packets for the host
-  txSeq = 0;
-  hostSeq = 0;
-  pmk = "";
-  joined: AccessPoint | null = null;
-  creditSent = 0;
+  word32!: boolean;
+  busRegs!: Uint8Array;
+  f1Regs!: Map<number, number>;
+  ram!: Uint8Array;
+  backplane!: Map<number, number>;
+  rxQueue!: Uint8Array[]; // packets for the host
+  txSeq!: number;
+  hostSeq!: number;
+  pmk!: string;
+  joined!: AccessPoint | null;
+  creditSent!: number;
   up = false;
-  stats = {
-    transactions: 0,
-    clockEdges: 0,
-    firmwareBytes: 0,
-    ioctls: 0,
-    framesIn: 0,
-    framesOut: 0,
+  stats!: {
+    transactions: number;
+    clockEdges: number;
+    firmwareBytes: number;
+    ioctls: number;
+    framesIn: number;
+    framesOut: number;
   };
 
   // The bus transaction in progress
-  inTransaction = false;
+  inTransaction!: boolean;
   bitCount = 0;
   curByte = 0;
   rxBytes: number[] = [];

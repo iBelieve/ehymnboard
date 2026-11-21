@@ -158,7 +158,8 @@ jobs:
 
       # Installs the pnpm from package.json's packageManager, Node.js from
       # device/emulator/.node-version, and runs pnpm install --frozen-lockfile.
-      - uses: pnpm/setup@v3
+      - id: setup
+        uses: pnpm/setup@v3
         with:
           working-directory: device/emulator
           cache: true
@@ -168,15 +169,15 @@ jobs:
         run: pnpm run typecheck
 
       - name: Lint
-        if: success() || failure()
+        if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm run lint
 
       - name: Check formatting
-        if: success() || failure()
+        if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm run format:check
 
       - name: Run scenario tests
-        if: success() || failure()
+        if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm test
 
   # Complexity and copy-paste limits across the firmware.

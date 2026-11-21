@@ -5,8 +5,9 @@ emulated eHymnBoard: a Pico W with a fake CYW43439 WiFi chip, a scripted
 access point with its own LAN (DHCP, DNS, TCP), a mock hymn board server,
 three e-paper panels modeled on their SSD1677 controller, and flash that
 survives reboots. The unmodified pico-sdk WiFi driver, lwIP and the firmware's
-HTTP client all run as they would on a real board, so tests can exercise WiFi and server failures that are hard to
-set up on hardware. Everything runs locally and no Wokwi account is needed.
+HTTP client all run as they would on a real board, so tests can exercise WiFi
+and server failures that are hard to set up on hardware. Everything runs
+locally and no Wokwi account is needed.
 
 ## Run the scenario tests
 
