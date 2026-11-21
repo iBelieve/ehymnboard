@@ -77,8 +77,8 @@ static void send_healthcheck_request(const std::string &path)
     settings.result_fn = on_healthcheck_request_completed;
 
     cyw43_arch_lwip_begin();
-    auto ret = httpc_get_file_dns("api.hymnboard.sonrise.io", 80, full_path.c_str(), &settings,
-                                  on_healthcheck_data_received, &req, nullptr);
+    const auto ret = httpc_get_file_dns("api.hymnboard.sonrise.io", 80, full_path.c_str(), &settings,
+                                        on_healthcheck_data_received, &req, nullptr);
     cyw43_arch_lwip_end();
 
     if (ret != ERR_OK)
@@ -87,7 +87,7 @@ static void send_healthcheck_request(const std::string &path)
         return;
     }
 
-    auto request_start = get_absolute_time();
+    const auto request_start = get_absolute_time();
 
     while (!req.complete)
     {

@@ -46,7 +46,7 @@ class OutputPin
 class InputPin
 {
   public:
-    InputPin(uint gpio) : gpio(gpio)
+    explicit InputPin(uint gpio) : gpio(gpio)
     {
         gpio_set_function(gpio, GPIO_FUNC_SIO);
         gpio_set_dir(gpio, GPIO_IN);

@@ -40,7 +40,7 @@ struct WiFiScanResult
     uint8_t bssid[6] = {};
     int16_t rssi;
 
-    WiFiScanResult(const cyw43_ev_scan_result_t *result) : ssid((char *)result->ssid), rssi(result->rssi)
+    explicit WiFiScanResult(const cyw43_ev_scan_result_t *result) : ssid((char *)result->ssid), rssi(result->rssi)
     {
         memcpy(bssid, result->bssid, sizeof(bssid));
     }
@@ -99,8 +99,9 @@ int on_wifi_scan_complete(void *env, const cyw43_ev_scan_result_t *result)
            scan_result.bssid[0], scan_result.bssid[1], scan_result.bssid[2], scan_result.bssid[3], scan_result.bssid[4],
            scan_result.bssid[5], scan_result.rssi);
 
-    auto existingResult = std::find_if(scan->results.begin(), scan->results.end(),
-                                       [&scan_result](const WiFiScanResult &r) { return r.ssid == scan_result.ssid; });
+    const auto existingResult =
+        std::find_if(scan->results.begin(), scan->results.end(),
+                     [&scan_result](const WiFiScanResult &r) { return r.ssid == scan_result.ssid; });
 
     if (existingResult != scan->results.end())
     {
@@ -144,7 +145,7 @@ void setup_wifi()
 
         for (const auto &result : wifi_scan.results)
         {
-            auto entry = WIFI_SSIDS.find(result.ssid);
+            const auto entry = WIFI_SSIDS.find(result.ssid);
 
             if (entry != WIFI_SSIDS.end())
             {

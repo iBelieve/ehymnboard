@@ -4,8 +4,8 @@ version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
     "flask>=3.1.3",
-    "gunicorn>=26.0.0",
-    "pillow>=12.3.0",
+    "gunicorn>=27.0.1",
+    "pillow>=13.0.0",
     "requests>=2.34.2",
     "str2bool>=1.1",
 ]
@@ -14,11 +14,11 @@ dependencies = [
 dev = [
     "hypothesis>=6.170.17",
     "lizard>=1.26.1",
-    "pyright>=1.1.411",
+    "pyright>=1.1.414",
     "pytest>=9.2.0",
     "pytest-cov>=7.1.0",
     "pytest-playwright>=0.10.0",
-    "ruff>=0.15.20",
+    "ruff>=0.17.6",
     "vulture>=2.16",
 ]
 

@@ -74,10 +74,10 @@ static err_t on_http_data_received([[maybe_unused]] void *arg, struct altcp_pcb 
 {
     assert(arg);
 
-    auto space_left = image_buffer.size() - image_buffer_offset;
-    auto bytes_to_copy = p->tot_len < space_left ? p->tot_len : space_left;
+    const auto space_left = image_buffer.size() - image_buffer_offset;
+    const auto bytes_to_copy = p->tot_len < space_left ? p->tot_len : space_left;
 
-    auto bytes_copied = pbuf_copy_partial(p, image_buffer.data() + image_buffer_offset, bytes_to_copy, 0);
+    const auto bytes_copied = pbuf_copy_partial(p, image_buffer.data() + image_buffer_offset, bytes_to_copy, 0);
 
     if (bytes_copied == 0)
     {
@@ -126,8 +126,8 @@ FetchImageResult fetch_image(int image, std::string &etag)
     image_buffer_offset = 0;
 
     cyw43_arch_lwip_begin();
-    auto ret = httpc_get_file_dns("api.hymnboard.sonrise.io", 80, path.c_str(), &settings, on_http_data_received, &req,
-                                  nullptr);
+    const auto ret = httpc_get_file_dns("api.hymnboard.sonrise.io", 80, path.c_str(), &settings, on_http_data_received,
+                                        &req, nullptr);
     cyw43_arch_lwip_end();
 
     if (ret != ERR_OK)
@@ -136,7 +136,7 @@ FetchImageResult fetch_image(int image, std::string &etag)
         return FetchImageResult::ERROR;
     }
 
-    auto request_start = get_absolute_time();
+    const auto request_start = get_absolute_time();
 
     while (!req.complete)
     {

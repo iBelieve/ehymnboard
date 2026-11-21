@@ -31,3 +31,5 @@ WarningsAsErrors: '*'
 HeaderFilterRegex: '.*/device/(src|test)/.*'
 CheckOptions:
   readability-function-cognitive-complexity.Threshold: 25
+  # lwIP and pico-sdk callbacks take non-const pointers we can't change.
+  misc-const-correctness.AnalyzePointers: false
