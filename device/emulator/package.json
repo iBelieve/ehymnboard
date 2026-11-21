@@ -1,0 +1,13 @@
+{
+  "name": "ehymnboard-emulator",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node run.mjs",
+    "test": "node --test 'test/*.test.mjs'"
+  },
+  "dependencies": {
+    "rp2040js": "1.4.2"
+  },
+  "packageManager": "pnpm@12.21.0"
+}
