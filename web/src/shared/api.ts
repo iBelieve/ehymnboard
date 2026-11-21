@@ -13,6 +13,8 @@ export type Device = {
   ota_status: string | null;
   ota_version: string | null;
   ota_at: string | null;
+  /** When the board was flagged for re-downloading a screen it already has. */
+  etag_stuck_at: string | null;
 };
 
 export type DeviceWithName = Device & { name: string };

@@ -37,6 +37,11 @@ export function DeviceList({
       {devices.map((device) => (
         <div key={device.id} className="flex items-center gap-2 text-lg">
           {device.name} ({describe(device, now)})
+          {device.etag_stuck_at && (
+            <span className="badge badge-warning">
+              Re-downloading every poll since {prettyDate(device.etag_stuck_at, now)}
+            </span>
+          )}
         </div>
       ))}
       {firmware && (

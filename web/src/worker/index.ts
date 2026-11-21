@@ -4,6 +4,8 @@ import type { BoardState, DeviceStatusParams } from "../shared/api";
 import { EMPTY_LINES, isLines, SCREEN_COUNT, trimLines } from "../shared/screen";
 import { deviceSortIndex, getDeviceName, pingHealthcheck } from "./devices";
 
+import { STUCK_ETAG_DOWNLOADS } from "./hymn-board";
+
 export { HymnBoard } from "./hymn-board";
 
 // Must match the device: OTA images are written to flash in 256-byte pages,
@@ -80,6 +82,18 @@ app.get("/images/:id{[0-9]+}", async (c) => {
     `Device ${getDeviceName(status.device_id)} (${status.device_id}) updating image ${id} from ${etag} to ${result.etag}`,
   );
   ping(c, status.device_id, "/log", `Updating image ${id}`);
+
+  if (result.etagStuck) {
+    console.log(
+      `Warning: Device ${getDeviceName(status.device_id)} (${status.device_id}) downloaded image ${id} ${STUCK_ETAG_DOWNLOADS} times in a row without keeping its ETag`,
+    );
+    ping(
+      c,
+      status.device_id,
+      "/failure",
+      `Board isn't keeping its ETag: downloaded image ${id} ${STUCK_ETAG_DOWNLOADS} times in a row`,
+    );
+  }
 
   return c.body(result.buffer, 200, { "Content-Type": "application/octet-stream" });
 });

@@ -141,6 +141,50 @@ describe("device status", () => {
   });
 });
 
+function poll(etag = "") {
+  return get(`/images/2?device_id=${LEFT}&etag=${etag}`);
+}
+
+async function stuckAt() {
+  return (await (await get("/api/state", AUTH)).json<BoardState>()).devices[0]!.etag_stuck_at;
+}
+
+function failures() {
+  return pings.filter((p) => p.url.endsWith("/failure")).map((p) => p.body);
+}
+
+describe("boards that don't keep their ETag", () => {
+  test("are flagged once after three identical downloads, and cleared by a 304", async () => {
+    const etag = (await poll()).headers.get("Etag")!;
+    await poll();
+    await settle();
+    expect(failures()).toEqual([]);
+    expect(await stuckAt()).toBeNull();
+
+    await poll();
+    await poll();
+    await settle();
+    expect(failures()).toEqual([
+      "Board isn't keeping its ETag: downloaded image 2 3 times in a row",
+    ]);
+    expect(await stuckAt()).toBeTruthy();
+
+    expect((await poll(etag)).status).toBe(304);
+    expect(await stuckAt()).toBeNull();
+  });
+
+  test("aren't flagged for downloading each new image once", async () => {
+    for (const line of ["1", "2", "3"]) {
+      await putLines(["", "", line, "", "", ""]);
+      const etag = (await poll()).headers.get("Etag")!;
+      expect((await poll(etag)).status).toBe(304);
+    }
+    await settle();
+    expect(failures()).toEqual([]);
+    expect(await stuckAt()).toBeNull();
+  });
+});
+
 describe("admin API", () => {
   test("requires basic auth", async () => {
     expect((await get("/api/state")).status).toBe(401);

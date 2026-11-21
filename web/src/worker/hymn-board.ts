@@ -16,11 +16,24 @@ const DEVICE_FIELDS = new Set([
   "ota_at",
 ]);
 
+// A board that keeps downloading the same image never kept its ETag (say, a
+// header it can't parse), so it redraws every poll. Flag it after this many
+// identical downloads in a row; one or two can be a cut-off download or a
+// reset of the board's saved state.
+export const STUCK_ETAG_DOWNLOADS = 3;
+
 type ScreenRow = { id: number; etag: string; buffer: ArrayBuffer };
 type FirmwareRow = FirmwareInfo & { image: ArrayBuffer };
 
 export type ImageResult =
-  { status: 304; etag: string } | { status: 200; etag: string; buffer: ArrayBuffer };
+  | { status: 304; etag: string }
+  | {
+      status: 200;
+      etag: string;
+      buffer: ArrayBuffer;
+      /** True only on the download that newly flags the board as stuck. */
+      etagStuck: boolean;
+    };
 
 /**
  * The state behind one set of hymn boards: the six lines, the three rendered
@@ -53,7 +66,16 @@ export class HymnBoard extends DurableObject<Env> {
         firmware_version TEXT,
         ota_status TEXT,
         ota_version TEXT,
-        ota_at TEXT
+        ota_at TEXT,
+        etag_stuck_at TEXT
+      );
+      -- The last screen each board downloaded, and how many times in a row.
+      CREATE TABLE IF NOT EXISTS served_screens (
+        device_id TEXT NOT NULL,
+        screen_id INTEGER NOT NULL,
+        etag TEXT NOT NULL,
+        downloads INTEGER NOT NULL,
+        PRIMARY KEY (device_id, screen_id)
       );
       CREATE TABLE IF NOT EXISTS firmware (
         id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -64,6 +86,11 @@ export class HymnBoard extends DurableObject<Env> {
         image BLOB NOT NULL
       );
     `);
+    // Added after the first release; CREATE TABLE IF NOT EXISTS won't add it.
+    const columns = this.sql.exec<{ name: string }>("PRAGMA table_info(devices)").toArray();
+    if (!columns.some((column) => column.name === "etag_stuck_at")) {
+      this.sql.exec("ALTER TABLE devices ADD COLUMN etag_stuck_at TEXT");
+    }
   }
 
   getLines(): Lines {
@@ -118,17 +145,76 @@ export class HymnBoard extends DurableObject<Env> {
     const now = new Date().toISOString();
     const updated = etag !== screen.etag;
 
+    let etagStuck = false;
     if (status.device_id) {
       this.updateDevice(status.device_id, {
         saved_state_writes: status.saved_state_writes,
         last_seen: now,
         last_updated_at: updated ? now : undefined,
       });
+      etagStuck = this.trackDownload(status.device_id, id, updated ? screen.etag : undefined, now);
     }
 
     return updated
-      ? { status: 200, etag: screen.etag, buffer: screen.buffer }
+      ? { status: 200, etag: screen.etag, buffer: screen.buffer, etagStuck }
       : { status: 304, etag: screen.etag };
+  }
+
+  /**
+   * Counts identical downloads of a screen by a board (servedEtag is undefined
+   * for a 304). Returns true when this download newly flags the board as not
+   * keeping its ETag. The flag clears once none of its screens are stuck.
+   */
+  private trackDownload(
+    deviceId: string,
+    screenId: number,
+    servedEtag: string | undefined,
+    now: string,
+  ): boolean {
+    if (servedEtag === undefined) {
+      this.sql.exec(
+        "DELETE FROM served_screens WHERE device_id = ? AND screen_id = ?",
+        deviceId,
+        screenId,
+      );
+      const stillStuck = this.sql
+        .exec(
+          "SELECT 1 FROM served_screens WHERE device_id = ? AND downloads >= ?",
+          deviceId,
+          STUCK_ETAG_DOWNLOADS,
+        )
+        .toArray();
+      if (stillStuck.length === 0) {
+        this.sql.exec("UPDATE devices SET etag_stuck_at = NULL WHERE id = ?", deviceId);
+      }
+      return false;
+    }
+
+    const previous = this.sql
+      .exec<{ etag: string; downloads: number }>(
+        "SELECT etag, downloads FROM served_screens WHERE device_id = ? AND screen_id = ?",
+        deviceId,
+        screenId,
+      )
+      .toArray()[0];
+    const downloads = previous?.etag === servedEtag ? previous.downloads + 1 : 1;
+    this.sql.exec(
+      "INSERT OR REPLACE INTO served_screens (device_id, screen_id, etag, downloads) VALUES (?, ?, ?, ?)",
+      deviceId,
+      screenId,
+      servedEtag,
+      downloads,
+    );
+    if (downloads < STUCK_ETAG_DOWNLOADS) {
+      return false;
+    }
+    const update = this.sql.exec(
+      "UPDATE devices SET etag_stuck_at = ? WHERE id = ? AND etag_stuck_at IS NULL",
+      now,
+      deviceId,
+    );
+    update.toArray();
+    return update.rowsWritten > 0;
   }
 
   updateDevice(id: string, fields: Partial<Omit<Device, "id">>): void {
