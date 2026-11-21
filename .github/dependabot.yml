@@ -5,7 +5,9 @@
 version: 2
 updates:
   - package-ecosystem: npm
-    directory: /server
+    directories:
+      - /server
+      - /web
     schedule:
       interval: weekly
     cooldown:
@@ -37,7 +39,9 @@ updates:
           - patch
 
   - package-ecosystem: docker
-    directory: /server
+    directories:
+      - /server
+      - /web
     schedule:
       interval: weekly
     cooldown:

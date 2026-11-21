@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+@plugin "daisyui" {
+  themes: corporate --default;
+}
+
+@theme {
+  --font-display: "Orelega One", "system-ui";
+
+  --color-site-bg: oklch(25.3267% 0.015896 252.417568);
+}
