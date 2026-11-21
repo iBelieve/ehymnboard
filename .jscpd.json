@@ -12,6 +12,7 @@
     "**/.venv/**",
     "**/*.lock",
     "**/package-lock.json",
+    "**/pnpm-lock.yaml",
     "**/static/**",
     "**/*.svg"
   ],
