@@ -1,0 +1,72 @@
+name: CI (web)
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "web/**"
+      - ".github/workflows/ci-web.yml"
+  pull_request:
+    paths:
+      - "web/**"
+      - ".github/workflows/ci-web.yml"
+
+concurrency:
+  group: ci-web-${{ github.ref }}
+  # Cancel superseded runs on PR branches only; let every master commit finish
+  # so each one keeps its own CI result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: web
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      # Installs the pnpm from package.json's packageManager, Node.js from
+      # web/.node-version, and runs pnpm install --frozen-lockfile.
+      - uses: pnpm/setup@v3
+        with:
+          working-directory: web
+          cache: true
+          require-lockfile: true
+
+      - name: Type check
+        run: pnpm run typecheck
+
+      - name: Lint
+        if: success() || failure()
+        run: pnpm run lint
+
+      - name: Check formatting
+        if: success() || failure()
+        run: pnpm run format:check
+
+      - name: Test
+        if: success() || failure()
+        run: pnpm run test
+
+      - name: Build
+        if: success() || failure()
+        run: pnpm run build
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: web
+          push: false
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web

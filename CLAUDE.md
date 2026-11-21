@@ -2,14 +2,18 @@
 
 E-ink hymn board: `device/` is Raspberry Pi Pico W firmware (C++, pico-sdk,
 CMake), `server/` is a Flask app (Python, uv) with Tailwind-built assets and a
-Docker image deployed via dokku. `hardware/` is the KiCad design (no CI).
+Docker image deployed via dokku. `web/` is its TypeScript replacement (Hono
+Worker + Durable Object + React, self-hosted on workerd via Docker; see
+`web/README.md`), keeping the device protocol byte-for-byte. `hardware/` is the
+KiCad design (no CI).
 
 ## CI
 
-GitHub Actions runs on any change to `device/**` or `server/**`
-(`.github/workflows/ci-device.yml`, `ci-server.yml`). **The device build treats
-all compiler warnings as errors in CI** (`-Wall -Wextra` plus `-DWERROR=ON`),
-so fix warnings before pushing even if a local build only prints them.
+GitHub Actions runs on any change to `device/**`, `server/**` or `web/**`
+(`.github/workflows/ci-device.yml`, `ci-server.yml`, `ci-web.yml`). **The
+device build treats all compiler warnings as errors in CI** (`-Wall -Wextra`
+plus `-DWERROR=ON`), so fix warnings before pushing even if a local build only
+prints them.
 
 All checks below must pass; run them locally before committing.
 
@@ -39,3 +43,17 @@ All checks below must pass; run them locally before committing.
   releases under a day old, so don't pin a version published today
 - Docker: CI builds the image (`docker build server`); the tailwind/pnpm asset
   build runs inside it
+
+### web/
+
+- Deps: pnpm, pinned by `packageManager` in `package.json`, same
+  `allowBuilds` and `minimumReleaseAge` rules as `server/` (in
+  `web/pnpm-workspace.yaml`)
+- Checks: `pnpm run typecheck`, `pnpm run lint`, `pnpm run format:check`,
+  `pnpm run test`, `pnpm run build`
+- After changing `wrangler.jsonc`, regenerate `worker-configuration.d.ts`
+  with `pnpm exec wrangler types`
+- Don't change the device endpoints' paths, query parameters or response
+  bytes: the firmware hard-codes them. The rasterizer is compared against
+  Flask's output in `test/render.test.ts`
+- Docker: CI builds the image (`docker build web`)
