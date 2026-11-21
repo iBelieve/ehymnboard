@@ -42,11 +42,6 @@ set (for `pnpm dev`, put them in `.dev.vars`). After changing
 The Docker image runs the built Worker on workerd and stores Durable Object
 data under `/data`, which must be a persistent volume.
 
-> **Flash the boards first.** workerd sends the header as `ETag`. Firmware
-> before the case-insensitive header parsing in PR #16 only recognizes
-> `Etag`, never adopts the new tag, and would redraw every screen every 15
-> seconds.
-
 ```sh
 dokku apps:create hymnboard-web
 dokku builder:set hymnboard-web build-dir web
@@ -56,6 +51,26 @@ dokku config:set hymnboard-web BASIC_AUTH_USERNAME=... BASIC_AUTH_PASSWORD=...
 dokku ports:set hymnboard-web http:80:5000
 git push dokku-web master   # a remote pointing at hymnboard-web
 ```
+
+**Rename the ETag header in nginx.** workerd always sends the header as
+`ETag`, and Cloudflare passes that through unchanged. Firmware before the
+case-insensitive parsing in PR #16 only matches `Etag: `, so it would never
+adopt the new tag and would redraw every screen every 15 seconds. A per-app
+nginx snippet sends it as `Etag` instead (tested through Cloudflare, on 200s
+and 304s):
+
+```sh
+# as the dokku user on the host
+mkdir -p /home/dokku/hymnboard-web/nginx.conf.d
+cat > /home/dokku/hymnboard-web/nginx.conf.d/etag.conf <<'CONF'
+proxy_hide_header ETag;
+add_header Etag $upstream_http_etag;
+CONF
+dokku proxy:build-config hymnboard-web
+```
+
+Check it with `curl -s -o /dev/null -D - http://<domain>/images/1`, which
+should print one `Etag:` line and no `ETag:` line.
 
 Try it on a temporary domain, then move `api.hymnboard.sonrise.io` (and the
 admin domain) from the Flask app to `hymnboard-web` with `dokku domains:remove`
