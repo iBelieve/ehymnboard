@@ -33,6 +33,17 @@ export function linesForScreen(lines: Lines, screen: number): [string, string] {
   return [lines[i] ?? "", lines[i + 1] ?? ""];
 }
 
+/** A copy of lines with one line replaced. */
+export function withLine(lines: Lines, index: number, line: string): Lines {
+  const next: Lines = [...lines];
+  next[index] = line;
+  return next;
+}
+
+export function trimLines([a, b, c, d, e, f]: Lines): Lines {
+  return [a.trim(), b.trim(), c.trim(), d.trim(), e.trim(), f.trim()];
+}
+
 export function isLines(value: unknown): value is Lines {
   return (
     Array.isArray(value) &&

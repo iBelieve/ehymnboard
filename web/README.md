@@ -28,7 +28,7 @@ OTA endpoints `/firmware/latest` and `/firmware/image`.
 pnpm install
 pnpm dev          # Vite + the Worker in workerd, with hot reload
 pnpm test         # rasterizer + Worker tests
-pnpm typecheck && pnpm lint && pnpm format:check
+pnpm typecheck && pnpm lint && pnpm format:check  # tsc 7, oxlint (type-aware via tsrs), Prettier
 pnpm build        # dist/client (admin) and dist/ehymnboard (Worker)
 ```
 

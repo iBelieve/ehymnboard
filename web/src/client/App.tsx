@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { BoardState } from "../shared/api";
 import { getFont } from "../shared/font";
 import { renderScreen } from "../shared/render";
-import { EMPTY_LINES, linesForScreen, SCREEN_COUNT, type Lines } from "../shared/screen";
+import { EMPTY_LINES, linesForScreen, SCREEN_COUNT, withLine, type Lines } from "../shared/screen";
 import { fetchScreen, fetchState, saveLines } from "./api";
 import { BoardPreview } from "./BoardPreview";
 import { DeviceList } from "./DeviceList";
@@ -104,9 +104,7 @@ export function App() {
                   disabled={!draft}
                   maxLength={100}
                   data-1p-ignore
-                  onChange={(e) =>
-                    setDraft((prev) => prev && (prev.with(i, e.target.value) as Lines))
-                  }
+                  onChange={(e) => setDraft((prev) => prev && withLine(prev, i, e.target.value))}
                 />
               ))}
 

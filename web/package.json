@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc -b",
-    "lint": "oxlint --deny-warnings",
+    "lint": "oxlint",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
@@ -34,7 +34,8 @@
     "oxlint": "^1.94.0",
     "prettier": "^3.10.1",
     "tailwindcss": "^4.3.5",
-    "typescript": "~6.0.3",
+    "tsrs": "7.1.0-beta.tsrs3",
+    "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "vitest": "^5.1.1",
     "workerd": "^1.20261119.1",

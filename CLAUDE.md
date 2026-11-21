@@ -49,8 +49,9 @@ All checks below must pass; run them locally before committing.
 - Deps: pnpm, pinned by `packageManager` in `package.json`, same
   `allowBuilds` and `minimumReleaseAge` rules as `server/` (in
   `web/pnpm-workspace.yaml`)
-- Checks: `pnpm run typecheck`, `pnpm run lint` (oxlint, config in
-  `.oxlintrc.json`), `pnpm run format:check`, `pnpm run test`, `pnpm run build`
+- Checks: `pnpm run typecheck` (TypeScript 7), `pnpm run lint` (oxlint with
+  type-aware rules via tsrs, config in `.oxlintrc.json`), `pnpm run
+  format:check`, `pnpm run test`, `pnpm run build`
 - After changing `wrangler.jsonc`, regenerate `worker-configuration.d.ts`
   with `pnpm exec wrangler types`
 - Don't change the device endpoints' paths, query parameters or response

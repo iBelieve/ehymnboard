@@ -1,6 +1,12 @@
 import type { BoardState } from "../shared/api";
 import type { Lines } from "../shared/screen";
 
+/** Parses a response from our own API, whose shape the Worker guarantees. */
+async function json<T>(res: Response): Promise<T> {
+  // oxlint-disable-next-line typescript/no-unsafe-type-assertion
+  return (await (await check(res)).json()) as T;
+}
+
 async function check(res: Response): Promise<Response> {
   if (!res.ok) {
     throw new Error(`${res.status} ${await res.text()}`);
@@ -9,7 +15,7 @@ async function check(res: Response): Promise<Response> {
 }
 
 export async function fetchState(): Promise<BoardState> {
-  return (await check(await fetch("/api/state"))).json();
+  return json<BoardState>(await fetch("/api/state"));
 }
 
 export async function saveLines(lines: Lines): Promise<BoardState> {
@@ -18,7 +24,7 @@ export async function saveLines(lines: Lines): Promise<BoardState> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ lines }),
   });
-  return (await check(res)).json();
+  return json<BoardState>(res);
 }
 
 /** The bits a board downloads for this screen. */

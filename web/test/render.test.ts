@@ -8,9 +8,9 @@ import { SCREEN_BYTES, SCREEN_HEIGHT, SCREEN_WIDTH } from "../src/shared/screen"
 // Rendered by the Flask server (server/app.py, Pillow) for the same lines.
 // Regenerate with test/fixtures/flask/generate.py.
 const fixtures = new URL("./fixtures/flask/", import.meta.url);
-const cases: { lines: [string, string]; sizes: [number | null, number | null] }[] = JSON.parse(
-  readFileSync(new URL("cases.json", fixtures), "utf8"),
-);
+type Case = { lines: [string, string]; sizes: [number | null, number | null] };
+// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- our own fixture
+const cases = JSON.parse(readFileSync(new URL("cases.json", fixtures), "utf8")) as Case[];
 
 function flaskBuffer(i: number): Uint8Array {
   return new Uint8Array(gunzipSync(readFileSync(new URL(`case${i}.bin.gz`, fixtures))));

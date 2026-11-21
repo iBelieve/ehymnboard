@@ -1,7 +1,7 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { basicAuth } from "hono/basic-auth";
 import type { BoardState, DeviceStatusParams } from "../shared/api";
-import { isLines, SCREEN_COUNT, type Lines } from "../shared/screen";
+import { EMPTY_LINES, isLines, SCREEN_COUNT, trimLines } from "../shared/screen";
 import { deviceSortIndex, getDeviceName, pingHealthcheck } from "./devices";
 
 export { HymnBoard } from "./hymn-board";
@@ -202,7 +202,7 @@ async function getState(env: Env): Promise<BoardState> {
   ]);
   return {
     // RPC types widen the tuple to string[]; getLines() always returns six.
-    lines: lines as unknown as Lines,
+    lines: isLines(lines) ? lines : [...EMPTY_LINES],
     screens,
     devices: devices
       .map((device) => ({ ...device, name: getDeviceName(device.id) }))
@@ -219,7 +219,7 @@ app.put("/api/lines", requireAuth, async (c) => {
   if (!isLines(lines) || lines.some((line) => line.length > MAX_LINE_LENGTH)) {
     return c.text("Expected { lines: [six strings] }", 400);
   }
-  await board(c.env).setLines(lines.map((line) => line.trim()) as Lines);
+  await board(c.env).setLines(trimLines(lines));
   return c.json(await getState(c.env));
 });
 

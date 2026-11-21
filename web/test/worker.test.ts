@@ -27,9 +27,10 @@ let pings: { url: string; body: string }[];
 beforeEach(() => {
   pings = [];
   // Healthcheck pings are the only outbound requests.
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    pings.push({ url: String(input), body: String(init?.body ?? "") });
-    return new Response(null, { status: 200 });
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = input instanceof Request ? input.url : input.toString();
+    pings.push({ url, body: typeof init?.body === "string" ? init.body : "" });
+    return Promise.resolve(new Response(null, { status: 200 }));
   });
 });
 
@@ -115,7 +116,7 @@ describe("device status", () => {
       "6c7ef2cb-71b8-492e-9e11-4ddfacf29d0c",
     ]);
 
-    const state = (await (await get("/api/state", AUTH)).json()) as BoardState;
+    const state = await (await get("/api/state", AUTH)).json<BoardState>();
     expect(state.devices.map((d) => d.name)).toEqual(["Left Hymn Board", "Right Hymn Board"]);
     const left = state.devices[0]!;
     expect(left.saved_state_writes).toBe("4");
@@ -148,7 +149,7 @@ describe("admin API", () => {
 
   test("saves trimmed lines and serves the stored screen bits", async () => {
     const res = await putLines([" 123 ", "", "", "", "", "Kyrie"]);
-    const state = (await res.json()) as BoardState;
+    const state = await res.json<BoardState>();
     expect(state.lines).toEqual(["123", "", "", "", "", "Kyrie"]);
     expect(state.screens.map((s) => s.id)).toEqual([1, 2, 3]);
 
