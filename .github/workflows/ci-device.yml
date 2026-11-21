@@ -140,6 +140,7 @@ jobs:
 
   # Boots the built firmware in rp2040js with a fake WiFi chip, access point,
   # LAN and server (device/emulator), and runs the scenario tests against it.
+  # The emulator itself is TypeScript, type checked and linted by oxlint.
   emulator:
     needs: build
     runs-on: ubuntu-latest
@@ -163,7 +164,19 @@ jobs:
           cache: true
           require-lockfile: true
 
+      - name: Type check
+        run: pnpm run typecheck
+
+      - name: Lint
+        if: success() || failure()
+        run: pnpm run lint
+
+      - name: Check formatting
+        if: success() || failure()
+        run: pnpm run format:check
+
       - name: Run scenario tests
+        if: success() || failure()
         run: pnpm test
 
   # Complexity and copy-paste limits across the firmware.

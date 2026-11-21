@@ -17,21 +17,26 @@
  */
 
 // Unit tests for the SSD1677 panel model on its own, without the firmware.
-import assert from 'node:assert/strict';
-import { test } from 'node:test';
-import { EPaperPanel, RAM_BYTES, ROW_BYTES } from '../epaper.mjs';
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { EPaperPanel, type PanelDisplay, RAM_BYTES, ROW_BYTES } from "../epaper.ts";
 
 /** A powered panel with a fake clock: run() fires the timers it scheduled. */
-function panel() {
-  const timers = [];
-  const p = new EPaperPanel({ id: 1, after: (ms, fn) => timers.push(fn) });
-  p.run = () => {
-    while (timers.length) {
-      timers.shift()();
+type TestPanel = EPaperPanel & { run: () => void; displayed: PanelDisplay[] };
+
+function panel(): TestPanel {
+  const timers: (() => void)[] = [];
+  const displayed: PanelDisplay[] = [];
+  const run = () => {
+    for (let fn = timers.shift(); fn; fn = timers.shift()) {
+      fn();
     }
   };
-  p.displayed = [];
-  p.onDisplay = (d) => p.displayed.push(d);
+  const p = Object.assign(new EPaperPanel({ id: 1, after: (_ms, fn) => timers.push(fn) }), {
+    run,
+    displayed,
+  });
+  p.onDisplay = (d) => displayed.push(d);
   p.setPower(true);
   p.setReset(false);
   p.setReset(true);
@@ -39,20 +44,20 @@ function panel() {
   return p;
 }
 
-const send = (p, cmd, ...data) => {
+const send = (p: EPaperPanel, cmd: number, ...data: number[]) => {
   p.byte(cmd, false);
   for (const d of data) {
     p.byte(d, true);
   }
 };
 
-const refresh = (p) => {
+const refresh = (p: TestPanel) => {
   send(p, 0x22, 0xf7);
   send(p, 0x20);
   p.run();
 };
 
-test('a full frame written with the POR window lands in raster order', () => {
+test("a full frame written with the POR window lands in raster order", () => {
   const p = panel();
   const frame = Uint8Array.from({ length: RAM_BYTES }, (_, i) => (i * 7) & 0xff);
   send(p, 0x24, ...frame);
@@ -62,7 +67,7 @@ test('a full frame written with the POR window lands in raster order', () => {
   assert.deepEqual(p.displayed[0].image, frame);
 });
 
-test('a window and counters place a partial write; X is in pixels', () => {
+test("a window and counters place a partial write; X is in pixels", () => {
   const p = panel();
   send(p, 0x24, ...new Uint8Array(RAM_BYTES).fill(0xff));
   // Two bytes wide (pixels 16-31), two rows (10-11), X first, both increasing.
@@ -78,7 +83,7 @@ test('a window and counters place a partial write; X is in pixels', () => {
   assert.deepEqual([...img.subarray(11 * ROW_BYTES + 1, 11 * ROW_BYTES + 5)], [0xff, 3, 4, 0xff]);
 });
 
-test('Y-first entry mode fills columns', () => {
+test("Y-first entry mode fills columns", () => {
   const p = panel();
   send(p, 0x11, 0x07);
   send(p, 0x44, 0, 0, 15, 0);
@@ -89,17 +94,17 @@ test('Y-first entry mode fills columns', () => {
   assert.deepEqual([img[0], img[ROW_BYTES], img[1], img[ROW_BYTES + 1]], [1, 2, 3, 4]);
 });
 
-test('only the gate lines set by driver output control are refreshed', () => {
+test("only the gate lines set by driver output control are refreshed", () => {
   const p = panel();
   send(p, 0x01, 99, 0, 0); // 100 gate lines
   send(p, 0x24, ...new Uint8Array(RAM_BYTES).fill(0));
   refresh(p);
   const img = p.displayed[0].image;
   assert.equal(img[99 * ROW_BYTES], 0);
-  assert.equal(img[100 * ROW_BYTES], 0xff, 'rows past the gates keep the old (white) image');
+  assert.equal(img[100 * ROW_BYTES], 0xff, "rows past the gates keep the old (white) image");
 });
 
-test('BUSY stays high through a refresh and commands during it are faults', () => {
+test("BUSY stays high through a refresh and commands during it are faults", () => {
   const p = panel();
   send(p, 0x22, 0xf7);
   send(p, 0x20);
@@ -110,7 +115,7 @@ test('BUSY stays high through a refresh and commands during it are faults', () =
   assert.equal(p.busy, false);
 });
 
-test('protocol mistakes are recorded as faults', () => {
+test("protocol mistakes are recorded as faults", () => {
   const p = panel();
   send(p, 0x44, 0, 0); // two of four bytes, then a new command
   send(p, 0x99);
@@ -124,17 +129,17 @@ test('protocol mistakes are recorded as faults', () => {
   p.setPower(false);
   send(p, 0x12);
   assert.deepEqual(p.faults, [
-    '0x44 (set RAM X start/end) got 2 of 4 data bytes',
-    'unknown command 0x99',
-    'master activation (0x20) before display update control 2 (0x22)',
-    '0x24 wrote 81601 bytes, more than the 81600 in the RAM window',
-    '0x11 (data entry mode) got more than its 1 data bytes',
-    'power cut while BUSY is high',
-    'SPI byte 0x12 while the panel is powered off',
+    "0x44 (set RAM X start/end) got 2 of 4 data bytes",
+    "unknown command 0x99",
+    "master activation (0x20) before display update control 2 (0x22)",
+    "0x24 wrote 81601 bytes, more than the 81600 in the RAM window",
+    "0x11 (data entry mode) got more than its 1 data bytes",
+    "power cut while BUSY is high",
+    "SPI byte 0x12 while the panel is powered off",
   ]);
 });
 
-test('deep sleep ignores everything until a hardware reset', () => {
+test("deep sleep ignores everything until a hardware reset", () => {
   const p = panel();
   send(p, 0x10, 0x03);
   send(p, 0x24, 0);
@@ -147,10 +152,16 @@ test('deep sleep ignores everything until a hardware reset', () => {
   assert.equal(p.faults.length, faults);
 });
 
-test('the transcript lists commands, data and pin events', () => {
+test("the transcript lists commands, data and pin events", () => {
   const p = panel();
   send(p, 0x24, 1, 2, 3);
   send(p, 0x3c, 0x05);
   p.setPower(false);
-  assert.deepEqual(p.transcript, ['power on', 'hardware reset', '0x24 <3 bytes>', '0x3c 05', 'power off']);
+  assert.deepEqual(p.transcript, [
+    "power on",
+    "hardware reset",
+    "0x24 <3 bytes>",
+    "0x3c 05",
+    "power off",
+  ]);
 });

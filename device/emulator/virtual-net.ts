@@ -40,10 +40,14 @@ const ROUTER_IP = [10, 0, 0, 1];
 const CLIENT_IP = [10, 0, 0, 2];
 const NETMASK = [255, 255, 255, 0];
 
-const ipEq = (a, b) => a.every((x, i) => x === b[i]);
-const ipStr = (a) => a.join('.');
+type Bytes = Uint8Array;
+/** An IPv4 or MAC address as a list of bytes. */
+type Address = ArrayLike<number>;
 
-function checksum(bytes, initial = 0) {
+const ipEq = (a: number[], b: Address) => a.every((x, i) => x === b[i]);
+const ipStr = (a: number[]) => a.join(".");
+
+function checksum(bytes: Bytes, initial = 0) {
   let sum = initial;
   for (let i = 0; i + 1 < bytes.length; i += 2) {
     sum += (bytes[i] << 8) | bytes[i + 1];
@@ -57,35 +61,81 @@ function checksum(bytes, initial = 0) {
   return ~sum & 0xffff;
 }
 
-function pseudoHeaderSum(src, dst, proto, length) {
-  return ((src[0] << 8) | src[1]) + ((src[2] << 8) | src[3]) + ((dst[0] << 8) | dst[1]) + ((dst[2] << 8) | dst[3]) + proto + length;
+function pseudoHeaderSum(src: Address, dst: Address, proto: number, length: number) {
+  return (
+    ((src[0] << 8) | src[1]) +
+    ((src[2] << 8) | src[3]) +
+    ((dst[0] << 8) | dst[1]) +
+    ((dst[2] << 8) | dst[3]) +
+    proto +
+    length
+  );
 }
 
-/**
- * @typedef {{ method: string, path: string, query: Record<string, string>, host: string }} HttpRequest
- * @typedef {{ status?: number, headers?: Record<string, string>, body?: Uint8Array | string,
- *             stall?: boolean, reset?: boolean, truncateAt?: number }} HttpResponse
- */
+export interface HttpRequest {
+  method: string;
+  path: string;
+  query: Record<string, string>;
+  host: string;
+}
+
+export interface HttpResponse {
+  status?: number;
+  headers?: Record<string, string>;
+  body?: Uint8Array | string;
+  /** Accept the request but never answer. */
+  stall?: boolean;
+  /** Answer with a TCP reset. */
+  reset?: boolean;
+  /** Close the connection after this many body bytes. */
+  truncateAt?: number;
+}
+
+export interface NetworkOptions {
+  after: (ms: number, fn: () => void) => void;
+  send: (frame: Uint8Array) => void;
+  /** Each name the router resolves maps to true; any other name gets NXDOMAIN. */
+  dns: Partial<Record<string, boolean>>;
+  http: (req: HttpRequest) => HttpResponse | undefined;
+  log?: (msg: string) => void;
+}
+
+/** One TCP connection from the client to the router's port 80. */
+interface Connection {
+  key: string;
+  ip: number[];
+  port: number;
+  iss: number;
+  sndUna: number;
+  sndNxt: number;
+  rcvNxt: number;
+  peerWnd: number;
+  request: string;
+  out: Uint8Array | null; // response bytes once known
+  finSent: boolean;
+  closed: boolean;
+  stalled: boolean;
+  lastProgress: number;
+}
 
 export class VirtualNetwork {
-  /**
-   * @param {{ after: (ms: number, fn: () => void) => void,
-   *           send: (frame: Uint8Array) => void,
-   *           dns: Record<string, boolean>,
-   *           http: (req: HttpRequest) => HttpResponse,
-   *           log?: (msg: string) => void }} opts
-   *   dns maps each name the router resolves to true; any other name gets NXDOMAIN.
-   */
-  constructor(opts) {
+  readonly after: NetworkOptions["after"];
+  readonly send: NetworkOptions["send"];
+  readonly dns: NetworkOptions["dns"];
+  readonly http: NetworkOptions["http"];
+  readonly log: (msg: string) => void;
+  clientMac: number[] | null = null;
+  connections = new Map<string, Connection>();
+  ipId = 1;
+  /** Every HTTP request served, with the status it got. */
+  requests: (HttpRequest & { status: number | undefined })[] = [];
+
+  constructor(opts: NetworkOptions) {
     this.after = opts.after;
     this.send = opts.send;
     this.dns = opts.dns;
     this.http = opts.http;
     this.log = opts.log ?? ((msg) => console.log(`[net] ${msg}`));
-    this.clientMac = null;
-    this.connections = new Map();
-    this.ipId = 1;
-    this.requests = [];
   }
 
   /** Forgets all TCP connections, as a router reboot or a link drop would. */
@@ -93,7 +143,7 @@ export class VirtualNetwork {
     this.connections.clear();
   }
 
-  receive(frame) {
+  receive(frame: Bytes) {
     if (frame.length < 14) {
       return;
     }
@@ -108,7 +158,7 @@ export class VirtualNetwork {
 
   // ---- link layer ------------------------------------------------------------
 
-  sendEthernet(dstMac, type, payload) {
+  sendEthernet(dstMac: Address, type: number, payload: Bytes) {
     const frame = new Uint8Array(14 + payload.length);
     frame.set(dstMac, 0);
     frame.set(ROUTER_MAC, 6);
@@ -118,7 +168,7 @@ export class VirtualNetwork {
     this.send(frame);
   }
 
-  handleArp(arp) {
+  handleArp(arp: Bytes) {
     const op = (arp[6] << 8) | arp[7];
     const targetIp = Array.from(arp.subarray(24, 28));
     // Answer for every address on the LAN except the client's own (lwIP
@@ -137,7 +187,7 @@ export class VirtualNetwork {
 
   // ---- IPv4 ------------------------------------------------------------------
 
-  handleIp(ip) {
+  handleIp(ip: Bytes) {
     const ihl = (ip[0] & 0x0f) * 4;
     const totalLen = (ip[2] << 8) | ip[3];
     const proto = ip[9];
@@ -151,7 +201,16 @@ export class VirtualNetwork {
     }
   }
 
-  sendIp(src, dst, proto, payload, dstMac = this.clientMac) {
+  sendIp(
+    src: Address,
+    dst: Address,
+    proto: number,
+    payload: Bytes,
+    dstMac: Address | null | undefined = this.clientMac,
+  ) {
+    if (!dstMac) {
+      return; // nothing has spoken to us yet
+    }
     const ip = new Uint8Array(20 + payload.length);
     ip[0] = 0x45;
     ip[2] = ip.length >> 8;
@@ -172,7 +231,7 @@ export class VirtualNetwork {
 
   // ---- UDP: DHCP and DNS -----------------------------------------------------
 
-  handleUdp(src, dst, udp) {
+  handleUdp(src: number[], dst: number[], udp: Bytes) {
     const srcPort = (udp[0] << 8) | udp[1];
     const dstPort = (udp[2] << 8) | udp[3];
     const data = udp.subarray(8, (udp[4] << 8) | udp[5]);
@@ -183,7 +242,14 @@ export class VirtualNetwork {
     }
   }
 
-  sendUdp(src, srcPort, dst, dstPort, data, dstMac) {
+  sendUdp(
+    src: Address,
+    srcPort: number,
+    dst: Address,
+    dstPort: number,
+    data: Bytes,
+    dstMac?: Address,
+  ) {
     const udp = new Uint8Array(8 + data.length);
     udp[0] = srcPort >> 8;
     udp[1] = srcPort & 0xff;
@@ -195,15 +261,15 @@ export class VirtualNetwork {
     const sum = checksum(udp, pseudoHeaderSum(src, dst, IP_UDP, udp.length)) || 0xffff;
     udp[6] = sum >> 8;
     udp[7] = sum & 0xff;
-    this.sendIp(src, dst, IP_UDP, udp, dstMac);
+    this.sendIp(src, dst, IP_UDP, udp, dstMac ?? this.clientMac);
   }
 
-  handleDhcp(msg) {
+  handleDhcp(msg: Bytes) {
     if (msg[0] !== 1 || msg.length < 240) {
       return;
     }
     let type = 0;
-    for (let i = 240; i < msg.length && msg[i] !== 255; ) {
+    for (let i = 240; i < msg.length && msg[i] !== 255;) {
       if (msg[i] === 0) {
         i++;
         continue;
@@ -219,7 +285,7 @@ export class VirtualNetwork {
     if (!reply) {
       return;
     }
-    this.log(`DHCP ${reply === 2 ? 'offer' : 'ack'} ${ipStr(CLIENT_IP)}`);
+    this.log(`DHCP ${reply === 2 ? "offer" : "ack"} ${ipStr(CLIENT_IP)}`);
     const out = new Uint8Array(300);
     out[0] = 2; // BOOTREPLY
     out[1] = 1; // Ethernet
@@ -231,23 +297,50 @@ export class VirtualNetwork {
     out.set([99, 130, 83, 99], 236); // magic cookie
     const lease = [0, 1, 0x51, 0x80]; // 1 day
     out.set(
-      [53, 1, reply, 54, 4, ...ROUTER_IP, 51, 4, ...lease, 1, 4, ...NETMASK, 3, 4, ...ROUTER_IP, 6, 4, ...ROUTER_IP, 255],
+      [
+        53,
+        1,
+        reply,
+        54,
+        4,
+        ...ROUTER_IP,
+        51,
+        4,
+        ...lease,
+        1,
+        4,
+        ...NETMASK,
+        3,
+        4,
+        ...ROUTER_IP,
+        6,
+        4,
+        ...ROUTER_IP,
+        255,
+      ],
       240,
     );
-    this.sendUdp(ROUTER_IP, 67, [255, 255, 255, 255], 68, out, [0xff, 0xff, 0xff, 0xff, 0xff, 0xff]);
+    this.sendUdp(
+      ROUTER_IP,
+      67,
+      [255, 255, 255, 255],
+      68,
+      out,
+      [0xff, 0xff, 0xff, 0xff, 0xff, 0xff],
+    );
   }
 
-  handleDns(src, srcPort, q) {
+  handleDns(src: number[], srcPort: number, q: Bytes) {
     let i = 12;
     const labels = [];
     while (i < q.length && q[i] !== 0) {
       labels.push(new TextDecoder().decode(q.subarray(i + 1, i + 1 + q[i])));
       i += 1 + q[i];
     }
-    const name = labels.join('.').toLowerCase();
+    const name = labels.join(".").toLowerCase();
     const questionEnd = i + 5;
     const known = this.dns[name] === true;
-    this.log(`DNS ${name} -> ${known ? ipStr(ROUTER_IP) : 'NXDOMAIN'}`);
+    this.log(`DNS ${name} -> ${known ? ipStr(ROUTER_IP) : "NXDOMAIN"}`);
     const answer = known ? [0xc0, 12, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, ...ROUTER_IP] : [];
     const out = new Uint8Array(questionEnd + answer.length);
     out.set(q.subarray(0, questionEnd));
@@ -261,7 +354,7 @@ export class VirtualNetwork {
 
   // ---- TCP -------------------------------------------------------------------
 
-  handleTcp(src, dst, seg) {
+  handleTcp(src: number[], dst: number[], seg: Bytes) {
     const srcPort = (seg[0] << 8) | seg[1];
     const dstPort = (seg[2] << 8) | seg[3];
     const seq = ((seg[4] << 24) | (seg[5] << 16) | (seg[6] << 8) | seg[7]) >>> 0;
@@ -287,10 +380,11 @@ export class VirtualNetwork {
         sndNxt: 1001,
         rcvNxt: (seq + 1) >>> 0,
         peerWnd: window,
-        request: '',
+        request: "",
         out: null, // response bytes once known
         finSent: false,
         closed: false,
+        stalled: false,
         lastProgress: 0,
       };
       this.connections.set(key, c);
@@ -324,22 +418,24 @@ export class VirtualNetwork {
         return;
       }
     }
-    if (!c.out && c.request.includes('\r\n\r\n')) {
+    if (!c.out && c.request.includes("\r\n\r\n")) {
       this.respond(c);
     }
     this.pump(c);
   }
 
-  respond(c) {
-    const [requestLine, ...headerLines] = c.request.split('\r\n');
-    const [method, target = ''] = requestLine.split(' ');
-    const [path, qs = ''] = target.split('?');
+  respond(c: Connection) {
+    const [requestLine, ...headerLines] = c.request.split("\r\n");
+    const [method, target = ""] = requestLine.split(" ");
+    const [path, qs = ""] = target.split("?");
     const query = Object.fromEntries(new URLSearchParams(qs));
-    const hostLine = headerLines.find((h) => h.toLowerCase().startsWith('host:'));
-    const req = { method, path, query, host: hostLine ? hostLine.slice(5).trim() : '' };
+    const hostLine = headerLines.find((h) => h.toLowerCase().startsWith("host:"));
+    const req = { method, path, query, host: hostLine ? hostLine.slice(5).trim() : "" };
     const res = this.http(req) ?? {};
     this.requests.push({ ...req, status: res.status });
-    this.log(`HTTP ${method} ${target} -> ${res.reset ? 'RST' : res.stall ? 'no response' : (res.status ?? 200)}`);
+    this.log(
+      `HTTP ${method} ${target} -> ${res.reset ? "RST" : res.stall ? "no response" : (res.status ?? 200)}`,
+    );
 
     if (res.reset) {
       this.sendSegment(c, c.sndNxt, new Uint8Array(0), TCP_RST | TCP_ACK);
@@ -353,21 +449,25 @@ export class VirtualNetwork {
       return;
     }
     const status = res.status ?? 200;
-    const body = typeof res.body === 'string' ? new TextEncoder().encode(res.body) : (res.body ?? new Uint8Array(0));
-    const headers = { 'Content-Length': String(body.length), Connection: 'close', ...res.headers };
-    const head = `HTTP/1.1 ${status} ${STATUS_TEXT[status] ?? 'Status'}\r\n${Object.entries(headers)
+    const body =
+      typeof res.body === "string"
+        ? new TextEncoder().encode(res.body)
+        : (res.body ?? new Uint8Array(0));
+    const headers = { "Content-Length": String(body.length), Connection: "close", ...res.headers };
+    const head = `HTTP/1.1 ${status} ${STATUS_TEXT[status] ?? "Status"}\r\n${Object.entries(headers)
       .map(([k, v]) => `${k}: ${v}\r\n`)
-      .join('')}\r\n`;
+      .join("")}\r\n`;
     const headBytes = new TextEncoder().encode(head);
     const full = new Uint8Array(headBytes.length + body.length);
     full.set(headBytes);
     full.set(body, headBytes.length);
-    c.out = res.truncateAt !== undefined ? full.subarray(0, headBytes.length + res.truncateAt) : full;
+    c.out =
+      res.truncateAt !== undefined ? full.subarray(0, headBytes.length + res.truncateAt) : full;
     this.scheduleResend(c);
   }
 
   /** Sends as much of the response as the peer's window allows, then FIN. */
-  pump(c) {
+  pump(c: Connection) {
     if (!c.out || c.closed || c.stalled) {
       return;
     }
@@ -391,7 +491,7 @@ export class VirtualNetwork {
     }
   }
 
-  scheduleResend(c) {
+  scheduleResend(c: Connection) {
     const progress = c.lastProgress;
     this.after(RESEND_MS, () => {
       if (c.closed || !this.connections.has(c.key) || c.stalled) {
@@ -400,7 +500,7 @@ export class VirtualNetwork {
       if (c.sndUna !== c.sndNxt && c.lastProgress === progress) {
         // Nothing acknowledged since last time: go back and resend.
         c.sndNxt = c.sndUna;
-        if (((c.sndNxt - (c.iss + 1 + c.out.length)) | 0) <= 0) {
+        if (((c.sndNxt - (c.iss + 1 + (c.out?.length ?? 0))) | 0) <= 0) {
           c.finSent = false;
         }
         this.pump(c);
@@ -411,11 +511,20 @@ export class VirtualNetwork {
     });
   }
 
-  sendSegment(c, seq, data, flags) {
+  sendSegment(c: Connection, seq: number, data: Bytes, flags: number) {
     this.sendTcpRaw(c.ip, 80, c.port, seq, c.rcvNxt, flags, 0, data);
   }
 
-  sendTcpRaw(dst, srcPort, dstPort, seq, ack, flags, mss, data = new Uint8Array(0)) {
+  sendTcpRaw(
+    dst: Address,
+    srcPort: number,
+    dstPort: number,
+    seq: number,
+    ack: number,
+    flags: number,
+    mss: number,
+    data: Bytes = new Uint8Array(0),
+  ) {
     const optLen = mss ? 4 : 0;
     const seg = new Uint8Array(20 + optLen + data.length);
     const v = new DataView(seg.buffer);
@@ -436,11 +545,11 @@ export class VirtualNetwork {
   }
 }
 
-const STATUS_TEXT = {
-  200: 'OK',
-  204: 'No Content',
-  304: 'Not Modified',
-  404: 'Not Found',
-  500: 'Internal Server Error',
-  503: 'Service Unavailable',
+const STATUS_TEXT: Record<number, string> = {
+  200: "OK",
+  204: "No Content",
+  304: "Not Modified",
+  404: "Not Found",
+  500: "Internal Server Error",
+  503: "Service Unavailable",
 };

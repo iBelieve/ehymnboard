@@ -46,39 +46,72 @@ const POWER_ON_RAM = 0x5a;
 
 // Command code -> [name, data bytes]. RAM writes take any number of bytes.
 // 0x37 isn't in the manual's table but Waveshare's partial-update init uses it.
-const COMMANDS = new Map([
-  [0x01, ['driver output control', 3]],
-  [0x03, ['gate driving voltage', 1]],
-  [0x04, ['source driving voltage', 3]],
-  [0x0c, ['booster soft start', 5]],
-  [0x10, ['deep sleep mode', 1]],
-  [0x11, ['data entry mode', 1]],
-  [0x12, ['software reset', 0]],
-  [0x18, ['temperature sensor selection', 1]],
-  [0x1a, ['write temperature register', 2]],
-  [0x20, ['master activation', 0]],
-  [0x21, ['display update control 1', 1]],
-  [0x22, ['display update control 2', 1]],
-  [0x24, ['write RAM (BW)', Infinity]],
-  [0x26, ['write RAM (RED)', Infinity]],
-  [0x2c, ['write VCOM register', 1]],
-  [0x32, ['write LUT register', 105]],
-  [0x37, ['write display option', 10]],
-  [0x3c, ['border waveform control', 1]],
-  [0x44, ['set RAM X start/end', 4]],
-  [0x45, ['set RAM Y start/end', 4]],
-  [0x4e, ['set RAM X address counter', 2]],
-  [0x4f, ['set RAM Y address counter', 2]],
+const COMMANDS = new Map<number, [name: string, dataBytes: number]>([
+  [0x01, ["driver output control", 3]],
+  [0x03, ["gate driving voltage", 1]],
+  [0x04, ["source driving voltage", 3]],
+  [0x0c, ["booster soft start", 5]],
+  [0x10, ["deep sleep mode", 1]],
+  [0x11, ["data entry mode", 1]],
+  [0x12, ["software reset", 0]],
+  [0x18, ["temperature sensor selection", 1]],
+  [0x1a, ["write temperature register", 2]],
+  [0x20, ["master activation", 0]],
+  [0x21, ["display update control 1", 1]],
+  [0x22, ["display update control 2", 1]],
+  [0x24, ["write RAM (BW)", Infinity]],
+  [0x26, ["write RAM (RED)", Infinity]],
+  [0x2c, ["write VCOM register", 1]],
+  [0x32, ["write LUT register", 105]],
+  [0x37, ["write display option", 10]],
+  [0x3c, ["border waveform control", 1]],
+  [0x44, ["set RAM X start/end", 4]],
+  [0x45, ["set RAM Y start/end", 4]],
+  [0x4e, ["set RAM X address counter", 2]],
+  [0x4f, ["set RAM Y address counter", 2]],
 ]);
 
 // Display update control 2 (0x22): bit 2 runs the display pattern.
 const UPDATE_DISPLAY = 0x04;
 
-const hex = (n) => `0x${n.toString(16).padStart(2, '0')}`;
-const word10 = (lo, hi) => lo | ((hi & 0x03) << 8);
+const hex = (n: number) => `0x${n.toString(16).padStart(2, "0")}`;
+const word10 = (lo: number, hi: number) => lo | ((hi & 0x03) << 8);
+
+interface Registers {
+  gates: number;
+  entryMode: number;
+  xStart: number;
+  xEnd: number;
+  yStart: number;
+  yEnd: number;
+  x: number;
+  y: number;
+  border: number;
+  updateControl: number | null;
+}
+
+/** A command collecting its data bytes. */
+interface PendingCommand {
+  code: number;
+  name: string;
+  length: number;
+  data: number[];
+  ramBytes: number;
+}
+
+export interface PanelDisplay {
+  image: Uint8Array;
+  updateControl: number;
+}
+
+export interface PanelOptions {
+  id: number;
+  after: (ms: number, fn: () => void) => void;
+  refreshMs?: number;
+}
 
 /** The registers a hardware or software reset puts back (POR values from the manual). */
-function porRegisters() {
+function porRegisters(): Registers {
   return {
     gates: 0x2a7 + 1, // driver output control: 680 gate lines
     entryMode: 0x03, // X increment, Y increment, X first
@@ -94,52 +127,52 @@ function porRegisters() {
 }
 
 export class EPaperPanel {
-  /**
-   * @param {{ id: number, after: (ms: number, fn: () => void) => void,
-   *           refreshMs?: number }} opts
-   */
-  constructor(opts) {
+  readonly id: number;
+  readonly after: (ms: number, fn: () => void) => void;
+  readonly refreshMs: number;
+  /** Set by the board: drives the BUSY pin. */
+  setBusy: (busy: boolean) => void = () => {};
+  /** Called when a display update finishes. */
+  onDisplay: (display: PanelDisplay) => void = () => {};
+  /** Test hook: when true, BUSY never drops after it goes high. */
+  stuckBusy = false;
+
+  powered = false;
+  inReset = false;
+  busy = false;
+  generation = 0; // bumped on power-off and reset, so stale timers do nothing
+  ram = new Uint8Array(RAM_BYTES);
+  shown = new Uint8Array(RAM_BYTES).fill(0xff); // a blank (white) panel
+  regs = porRegisters();
+  deepSleep = false;
+  current: PendingCommand | null = null; // the command collecting data bytes
+  lastCommand: PendingCommand | null = null; // the last one finished, to name extra data bytes
+  /** Everything the panel received, one line per command or pin event. */
+  transcript: string[] = [];
+  /** Rules from the manual the host broke, as readable strings. */
+  faults: string[] = [];
+  refreshes = 0;
+
+  constructor(opts: PanelOptions) {
     this.id = opts.id;
     this.after = opts.after;
     this.refreshMs = opts.refreshMs ?? REFRESH_MS;
-    /** Set by the board: drives the BUSY pin. */
-    this.setBusy = () => {};
-    /** Called with { image, updateControl } when a display update finishes. */
-    this.onDisplay = () => {};
-    /** Test hook: when true, BUSY never drops after it goes high. */
-    this.stuckBusy = false;
-
-    this.powered = false;
-    this.inReset = false;
-    this.busy = false;
-    this.generation = 0; // bumped on power-off and reset, so stale timers do nothing
-    this.ram = new Uint8Array(RAM_BYTES);
-    this.shown = new Uint8Array(RAM_BYTES).fill(0xff); // a blank (white) panel
-    this.regs = porRegisters();
-    this.deepSleep = false;
-    this.current = null; // the command collecting data bytes
-    this.lastCommand = null; // the last one finished, to name extra data bytes
-    /** Everything the panel received, one line per command or pin event. */
-    this.transcript = [];
-    /** Rules from the manual the host broke, as readable strings. */
-    this.faults = [];
-    this.refreshes = 0;
   }
 
-  fault(msg) {
+  fault(msg: string) {
     this.faults.push(msg);
   }
 
-  setPower(on) {
+  setPower(on: boolean) {
     if (on === this.powered) {
       return;
     }
     this.finishCommand();
     if (!on && this.busy && !this.stuckBusy) {
-      this.fault('power cut while BUSY is high');
+      this.fault("power cut while BUSY is high");
     }
     this.powered = on;
-    this.transcript.push(on ? 'power on' : 'power off');
+    this.transcript.push(on ? "power on" : "power off");
     this.generation++;
     this.busy = false;
     this.setBusy(false);
@@ -151,7 +184,7 @@ export class EPaperPanel {
   }
 
   /** RES# is active low: high is normal operation. */
-  setReset(high) {
+  setReset(high: boolean) {
     if (!this.powered || high === !this.inReset) {
       this.inReset = !high;
       return;
@@ -161,14 +194,14 @@ export class EPaperPanel {
     if (this.inReset) {
       return;
     }
-    this.transcript.push('hardware reset');
+    this.transcript.push("hardware reset");
     this.generation++;
     this.regs = porRegisters();
     this.deepSleep = false;
     this.busyFor(RESET_BUSY_MS);
   }
 
-  busyFor(ms, then = () => {}) {
+  busyFor(ms: number, then = () => {}) {
     const generation = this.generation;
     this.busy = true;
     this.setBusy(true);
@@ -185,7 +218,7 @@ export class EPaperPanel {
   }
 
   /** One byte clocked in while CS# is low; isData is the D/C# pin. */
-  byte(value, isData) {
+  byte(value: number, isData: boolean) {
     if (!this.powered) {
       this.fault(`SPI byte ${hex(value)} while the panel is powered off`);
       return;
@@ -196,11 +229,13 @@ export class EPaperPanel {
     }
     if (this.busy) {
       // Manual note 5-4: while BUSY is high no command should be sent.
-      this.fault(`${isData ? 'data' : 'command'} ${hex(value)} sent while BUSY is high`);
+      this.fault(`${isData ? "data" : "command"} ${hex(value)} sent while BUSY is high`);
       return;
     }
     if (this.deepSleep) {
-      this.fault(`${isData ? 'data' : 'command'} ${hex(value)} sent in deep sleep (needs a hardware reset)`);
+      this.fault(
+        `${isData ? "data" : "command"} ${hex(value)} sent in deep sleep (needs a hardware reset)`,
+      );
       return;
     }
     if (isData) {
@@ -210,7 +245,7 @@ export class EPaperPanel {
     }
   }
 
-  command(code) {
+  command(code: number) {
     this.finishCommand();
     this.lastCommand = null;
     const spec = COMMANDS.get(code);
@@ -227,17 +262,19 @@ export class EPaperPanel {
     }
   }
 
-  data(value) {
+  data(value: number) {
     const c = this.current;
     if (!c) {
       const last = this.lastCommand;
       this.fault(
-        last ? `${hex(last.code)} (${last.name}) got more than its ${last.length} data bytes` : `data ${hex(value)} with no command`,
+        last
+          ? `${hex(last.code)} (${last.name}) got more than its ${last.length} data bytes`
+          : `data ${hex(value)} with no command`,
       );
       return;
     }
     if (c.length === Infinity) {
-      this.ramWrite(value);
+      this.ramWrite(c, value);
       return;
     }
     c.data.push(value);
@@ -257,11 +294,15 @@ export class EPaperPanel {
     if (c.length === Infinity) {
       this.transcript.push(`${hex(c.code)} <${c.ramBytes} bytes>`);
       if (c.ramBytes > this.windowBytes()) {
-        this.fault(`${hex(c.code)} wrote ${c.ramBytes} bytes, more than the ${this.windowBytes()} in the RAM window`);
+        this.fault(
+          `${hex(c.code)} wrote ${c.ramBytes} bytes, more than the ${this.windowBytes()} in the RAM window`,
+        );
       }
       return;
     }
-    this.transcript.push([hex(c.code), ...c.data.map((b) => b.toString(16).padStart(2, '0'))].join(' '));
+    this.transcript.push(
+      [hex(c.code), ...c.data.map((b) => b.toString(16).padStart(2, "0"))].join(" "),
+    );
     if (c.data.length < c.length) {
       this.fault(`${hex(c.code)} (${c.name}) got ${c.data.length} of ${c.length} data bytes`);
       return;
@@ -269,17 +310,18 @@ export class EPaperPanel {
     this.apply(c.code, c.data);
   }
 
-  apply(code, d) {
+  apply(code: number, data: number[]) {
     const r = this.regs;
+    const d = (i: number) => data[i] ?? 0; // always present: finishCommand checked the length
     switch (code) {
       case 0x01:
-        r.gates = word10(d[0], d[1]) + 1;
+        r.gates = word10(d(0), d(1)) + 1;
         break;
       case 0x10:
-        this.deepSleep = (d[0] & 0x03) !== 0;
+        this.deepSleep = (d(0) & 0x03) !== 0;
         break;
       case 0x11:
-        r.entryMode = d[0] & 0x07;
+        r.entryMode = d(0) & 0x07;
         break;
       case 0x12:
         // Software reset: registers to defaults (not deep sleep), RAM affected.
@@ -290,24 +332,24 @@ export class EPaperPanel {
         this.activate();
         break;
       case 0x22:
-        r.updateControl = d[0];
+        r.updateControl = d(0);
         break;
       case 0x3c:
-        r.border = d[0];
+        r.border = d(0);
         break;
       case 0x44:
-        r.xStart = word10(d[0], d[1]);
-        r.xEnd = word10(d[2], d[3]);
+        r.xStart = word10(d(0), d(1));
+        r.xEnd = word10(d(2), d(3));
         break;
       case 0x45:
-        r.yStart = word10(d[0], d[1]);
-        r.yEnd = word10(d[2], d[3]);
+        r.yStart = word10(d(0), d(1));
+        r.yEnd = word10(d(2), d(3));
         break;
       case 0x4e:
-        r.x = word10(d[0], d[1]);
+        r.x = word10(d(0), d(1));
         break;
       case 0x4f:
-        r.y = word10(d[0], d[1]);
+        r.y = word10(d(0), d(1));
         break;
       default:
         // Voltages, LUTs, temperature and soft start don't change the image.
@@ -334,8 +376,7 @@ export class EPaperPanel {
    * them as the data entry mode says, wrapping within the RAM window. X
    * addresses are in pixels (XEA resets to 959), so X moves 8 per byte.
    */
-  ramWrite(value) {
-    const c = this.current;
+  ramWrite(c: PendingCommand, value: number) {
     const r = this.regs;
     c.ramBytes++;
     if (c.code !== 0x24) {
@@ -375,7 +416,7 @@ export class EPaperPanel {
   activate() {
     const control = this.regs.updateControl;
     if (control === null) {
-      this.fault('master activation (0x20) before display update control 2 (0x22)');
+      this.fault("master activation (0x20) before display update control 2 (0x22)");
       return;
     }
     if (!(control & UPDATE_DISPLAY)) {

@@ -15,17 +15,17 @@
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
-import assert from 'node:assert/strict';
-import { test } from 'node:test';
-import { assertFirstImagesShown, boot } from './helpers.mjs';
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { assertFirstImagesShown, boot } from "./helpers.ts";
 
 // The other tests answer cyw43_spi_transfer() directly. This one runs the
 // firmware's real gSPI driver: PIO bit-banging and DMA, clocked bit by bit.
-test('the real PIO bus driver joins and fetches all three screens', () => {
+test("the real PIO bus driver joins and fetches all three screens", () => {
   const emu = boot({ pioBus: true });
-  emu.waitForSerial('Connected to SSID_1', 30_000);
-  emu.waitForSerial('State saved to flash', 60_000);
+  emu.waitForSerial("Connected to SSID_1", 30_000);
+  emu.waitForSerial("State saved to flash", 60_000);
   assertFirstImagesShown(emu);
   // The firmware blob alone is ~230 KB, so millions of clock edges.
-  assert.ok(emu.board.chip.stats.clockEdges > 1_000_000, 'traffic went over the PIO bus');
+  assert.ok(emu.board.chip.stats.clockEdges > 1_000_000, "traffic went over the PIO bus");
 });

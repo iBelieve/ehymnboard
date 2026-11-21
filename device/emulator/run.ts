@@ -19,19 +19,19 @@
 // Boots a firmware UF2 on the emulated board, with the fake AP, LAN and
 // server, and prints the firmware's serial output and emulator events.
 //
-// Usage: node run.mjs <firmware.uf2> [--seconds <simulated seconds>] [--trace]
-import { parseArgs } from 'node:util';
-import { Emulator } from './emulator.mjs';
+// Usage: node run.ts <firmware.uf2> [--seconds <simulated seconds>] [--trace]
+import { parseArgs } from "node:util";
+import { Emulator } from "./emulator.ts";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
-    seconds: { type: 'string', default: '60' },
-    trace: { type: 'boolean', default: false },
+    seconds: { type: "string", default: "60" },
+    trace: { type: "boolean", default: false },
   },
 });
 if (positionals.length !== 1) {
-  console.error('usage: node run.mjs <firmware.uf2> [--seconds <simulated seconds>] [--trace]');
+  console.error("usage: node run.ts <firmware.uf2> [--seconds <simulated seconds>] [--trace]");
   process.exit(2);
 }
 
@@ -39,4 +39,6 @@ const emu = new Emulator({ firmware: positionals[0], trace: values.trace, echo: 
 const t0 = Date.now();
 emu.run(Number(values.seconds) * 1000);
 const wall = (Date.now() - t0) / 1000;
-console.log(`\n[emu] ran ${(emu.simMs / 1000).toFixed(1)} s simulated in ${wall.toFixed(1)} s, ${emu.reboots} reboot(s)`);
+console.log(
+  `\n[emu] ran ${(emu.simMs / 1000).toFixed(1)} s simulated in ${wall.toFixed(1)} s, ${emu.reboots} reboot(s)`,
+);

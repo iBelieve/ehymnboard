@@ -22,7 +22,7 @@
 // ioctl/event protocol for the pico-sdk cyw43-driver to bring the chip up,
 // scan and (later) join and pass Ethernet frames. The firmware blob the driver
 // downloads is accepted and discarded: nothing runs "inside" the chip.
-import { GPIOPinState } from 'rp2040js';
+import { GPIOPinState, type RP2040 } from "rp2040js";
 
 const PIN_REG_ON = 23;
 const PIN_DATA = 24; // data in/out and host wake share this pin on the Pico W
@@ -84,26 +84,79 @@ const SUP_MSG3_TIMEOUT = 8;
 const SCAN_MS = 300;
 const JOIN_MS = 200;
 
-const swap16x2 = (b) => [b[1], b[0], b[3], b[2]];
+const swap16x2 = (b: ArrayLike<number>) => [b[1], b[0], b[3], b[2]];
+
+/** An access point in range. No password means an open network. */
+export interface AccessPoint {
+  ssid: string;
+  password?: string;
+  bssid?: number[];
+  rssi?: number;
+  channel?: number;
+}
+
+export interface FakeCYW43Options {
+  aps?: AccessPoint[];
+  log?: (msg: string) => void;
+  trace?: boolean;
+}
+
+/** A decoded gSPI command word. */
+interface BusCommand {
+  write: boolean;
+  fn: number;
+  addr: number;
+  size: number;
+}
 
 export class FakeCYW43 {
-  /**
-   * An access point: { ssid, password?, bssid?, rssi?, channel? }. No password
-   * means an open network.
-   *
-   * @param {import('rp2040js').RP2040} mcu
-   * @param {{ aps?: object[], log?: (msg: string) => void, trace?: boolean }} opts
-   */
-  constructor(mcu, opts = {}) {
+  readonly mcu: RP2040;
+  aps: AccessPoint[];
+  /** Called with each Ethernet frame the firmware sends. */
+  onEthernetFromHost: ((frame: Uint8Array) => void) | null = null;
+  /** Called with the joined AP, or null when the link goes down. */
+  onLinkChange: ((ap: AccessPoint | null) => void) | null = null;
+  readonly log: (msg: string) => void;
+  readonly trace: boolean;
+  mac = [0x28, 0xcd, 0xc1, 0x00, 0x00, 0x01];
+
+  // Chip state, set by reset() when WL_ON drops
+  generation = 0;
+  word32 = false;
+  busRegs = new Uint8Array(0x40);
+  f1Regs = new Map<number, number>();
+  ram = new Uint8Array(RAM_SIZE);
+  backplane = new Map<number, number>();
+  rxQueue: Uint8Array[] = []; // packets for the host
+  txSeq = 0;
+  hostSeq = 0;
+  pmk = "";
+  joined: AccessPoint | null = null;
+  creditSent = 0;
+  up = false;
+  stats = {
+    transactions: 0,
+    clockEdges: 0,
+    firmwareBytes: 0,
+    ioctls: 0,
+    framesIn: 0,
+    framesOut: 0,
+  };
+
+  // The bus transaction in progress
+  inTransaction = false;
+  bitCount = 0;
+  curByte = 0;
+  rxBytes: number[] = [];
+  cmd: BusCommand | null = null;
+  out: Uint8Array | null = null;
+  outBit = 0;
+
+  constructor(mcu: RP2040, opts: FakeCYW43Options = {}) {
     this.mcu = mcu;
     this.aps = opts.aps ?? [];
-    /** Called with each Ethernet frame the firmware sends. */
-    this.onEthernetFromHost = null;
-    /** Called with the joined AP, or null when the link goes down. */
-    this.onLinkChange = null;
     this.log = opts.log ?? ((msg) => console.log(`[cyw43] ${msg}`));
     this.trace = opts.trace ?? false;
-    this.mac = [0x28, 0xcd, 0xc1, 0x00, 0x00, 0x01];
     this.reset();
 
     const gpio = mcu.gpio;
@@ -133,7 +186,7 @@ export class FakeCYW43 {
   reset() {
     // Timers from before a power cycle (a scan or join in progress) must not
     // fire into the new session.
-    this.generation = (this.generation ?? 0) + 1;
+    this.generation++;
     if (this.joined) {
       this.onLinkChange?.(null);
     }
@@ -142,18 +195,25 @@ export class FakeCYW43 {
     this.f1Regs = new Map();
     this.ram = new Uint8Array(RAM_SIZE);
     this.backplane = new Map(AI_RESETCTRL.map((a) => [a, 1]));
-    this.rxQueue = []; // packets for the host, each a Uint8Array
+    this.rxQueue = [];
     this.txSeq = 0;
     this.hostSeq = 0;
     this.inTransaction = false;
-    this.pmk = '';
+    this.pmk = "";
     this.joined = null;
     this.creditSent = 0;
-    this.stats = { transactions: 0, clockEdges: 0, firmwareBytes: 0, ioctls: 0, framesIn: 0, framesOut: 0 };
+    this.stats = {
+      transactions: 0,
+      clockEdges: 0,
+      firmwareBytes: 0,
+      ioctls: 0,
+      framesIn: 0,
+      framesOut: 0,
+    };
   }
 
   /** Runs fn after ms of simulated time. */
-  after(ms, fn) {
+  after(ms: number, fn: () => void) {
     const generation = this.generation;
     const alarm = this.mcu.clock.createAlarm(() => {
       if (generation === this.generation) {
@@ -208,7 +268,7 @@ export class FakeCYW43 {
     }
   }
 
-  pushByte(byte) {
+  pushByte(byte: number) {
     this.rxBytes.push(byte);
     if (this.rxBytes.length === 4 && !this.cmd) {
       this.decodeCommand();
@@ -220,7 +280,7 @@ export class FakeCYW43 {
    * replaces the firmware's PIO/DMA bus driver: sends tx (command and any
    * write data) and returns the rxLength - tx.length bytes clocked back.
    */
-  transfer(tx, rxLength) {
+  transfer(tx: Uint8Array, rxLength: number) {
     this.beginTransaction();
     for (const byte of tx) {
       this.pushByte(byte);
@@ -244,7 +304,7 @@ export class FakeCYW43 {
     };
     this.cmd = cmd;
     if (this.trace) {
-      this.log(`${cmd.write ? 'W' : 'R'} fn${cmd.fn} 0x${cmd.addr.toString(16)} len ${cmd.size}`);
+      this.log(`${cmd.write ? "W" : "R"} fn${cmd.fn} 0x${cmd.addr.toString(16)} len ${cmd.size}`);
     }
     if (!cmd.write) {
       this.out = this.handleRead(cmd);
@@ -254,8 +314,8 @@ export class FakeCYW43 {
 
   // ---- register and memory model ---------------------------------------------
 
-  /** @returns {Uint8Array} the bytes to clock out, in wire order */
-  handleRead(cmd) {
+  /** Returns the bytes to clock out, in wire order. */
+  handleRead(cmd: BusCommand): Uint8Array {
     switch (cmd.fn) {
       case 0: {
         this.refreshBusRegs();
@@ -280,7 +340,7 @@ export class FakeCYW43 {
     }
   }
 
-  handleWrite(cmd, data) {
+  handleWrite(cmd: BusCommand, data: Uint8Array) {
     switch (cmd.fn) {
       case 0: {
         const bytes = this.word32 ? data : Uint8Array.from(swap16x2(data));
@@ -320,7 +380,7 @@ export class FakeCYW43 {
     r.setUint32(SPI_READ_TEST_REGISTER, TEST_PATTERN, true);
   }
 
-  backplaneAddress(addr) {
+  backplaneAddress(addr: number) {
     const window =
       ((this.f1Regs.get(SDIO_BACKPLANE_ADDRESS_HIGH) ?? 0) << 24) |
       ((this.f1Regs.get(SDIO_BACKPLANE_ADDRESS_MID) ?? 0) << 16) |
@@ -328,7 +388,7 @@ export class FakeCYW43 {
     return ((window & ~0x7fff) | (addr & 0x7fff)) >>> 0;
   }
 
-  readF1Byte(addr) {
+  readF1Byte(addr: number) {
     if (addr >= 0x10000) {
       const value = this.f1Regs.get(addr) ?? 0;
       if (addr === SDIO_CHIP_CLOCK_CSR) {
@@ -343,7 +403,7 @@ export class FakeCYW43 {
     return full < RAM_SIZE ? this.ram[full] : (this.backplane.get(full) ?? 0);
   }
 
-  writeF1Byte(addr, value) {
+  writeF1Byte(addr: number, value: number) {
     if (addr >= 0x10000) {
       this.f1Regs.set(addr, value);
       return;
@@ -365,14 +425,14 @@ export class FakeCYW43 {
     }
   }
 
-  queueForHost(pkt) {
+  queueForHost(pkt: Uint8Array) {
     this.rxQueue.push(pkt);
     this.updateHostWake();
   }
 
   // ---- SDPCM -----------------------------------------------------------------
 
-  sdpcmPacket(channel, body) {
+  sdpcmPacket(channel: number, body: Uint8Array) {
     // Like the real firmware, event and data packets carry 2 bytes of padding
     // after the SDPCM header, so the Ethernet payload lands 2 mod 4 aligned
     // and the IP header that follows it is word aligned.
@@ -395,7 +455,7 @@ export class FakeCYW43 {
     return pkt;
   }
 
-  handleHostPacket(data) {
+  handleHostPacket(data: Uint8Array) {
     const v = new DataView(data.buffer, data.byteOffset, data.byteLength);
     const size = v.getUint16(0, true);
     if (size === 0 || (size ^ v.getUint16(2, true)) !== 0xffff) {
@@ -424,7 +484,7 @@ export class FakeCYW43 {
     }
   }
 
-  handleIoctl(payload) {
+  handleIoctl(payload: Uint8Array) {
     const v = new DataView(payload.buffer, payload.byteOffset, payload.byteLength);
     const cmd = v.getUint32(0, true);
     const len = v.getUint32(4, true) & 0xffff;
@@ -434,7 +494,7 @@ export class FakeCYW43 {
     this.stats.ioctls++;
 
     let response = data; // SETs echo the request back
-    let name = '';
+    let name = "";
     if (cmd === WLC_GET_VAR || cmd === WLC_SET_VAR) {
       const nul = data.indexOf(0);
       name = new TextDecoder().decode(data.subarray(0, nul < 0 ? data.length : nul));
@@ -456,7 +516,7 @@ export class FakeCYW43 {
       this.setLinkDown();
     }
     if (this.trace) {
-      this.log(`ioctl ${cmd}${name ? ` "${name}"` : ''} len ${len} itf ${iface}`);
+      this.log(`ioctl ${cmd}${name ? ` "${name}"` : ""} len ${len} itf ${iface}`);
     }
 
     const body = new Uint8Array(16 + response.length);
@@ -469,14 +529,14 @@ export class FakeCYW43 {
     this.queueForHost(this.sdpcmPacket(CONTROL_HEADER, body));
   }
 
-  getVar(name, len) {
+  getVar(name: string, len: number) {
     const out = new Uint8Array(len);
     switch (name) {
-      case 'cur_etheraddr':
+      case "cur_etheraddr":
         out.set(this.mac);
         break;
-      case 'clmver':
-        out.set(new TextEncoder().encode('fake-cyw43 CLM\0').subarray(0, len));
+      case "clmver":
+        out.set(new TextEncoder().encode("fake-cyw43 CLM\0").subarray(0, len));
         break;
       default:
         // clmload_status and anything else: zeros (success / off)
@@ -485,16 +545,16 @@ export class FakeCYW43 {
     return out;
   }
 
-  setVar(name, value, iface) {
+  setVar(name: string, value: Uint8Array, iface: number) {
     switch (name) {
-      case 'cur_etheraddr':
+      case "cur_etheraddr":
         this.mac = Array.from(value.subarray(0, 6));
-        this.log(`MAC set to ${this.mac.map((b) => b.toString(16).padStart(2, '0')).join(':')}`);
+        this.log(`MAC set to ${this.mac.map((b) => b.toString(16).padStart(2, "0")).join(":")}`);
         break;
-      case 'escan':
+      case "escan":
         this.after(SCAN_MS, () => this.sendScanResults(iface));
         break;
-      case 'join': {
+      case "join": {
         const ssidLen = value[0] | (value[1] << 8);
         this.startJoin(new TextDecoder().decode(value.subarray(4, 4 + ssidLen)), iface);
         break;
@@ -504,7 +564,7 @@ export class FakeCYW43 {
 
   // ---- join and link ---------------------------------------------------------
 
-  startJoin(ssid, iface) {
+  startJoin(ssid: string, iface: number) {
     this.after(JOIN_MS, () => {
       const ap = this.aps.find((a) => a.ssid === ssid);
       if (!ap) {
@@ -517,8 +577,12 @@ export class FakeCYW43 {
         // A wrong passphrase shows up as the 4-way handshake never finishing,
         // and the AP deauthenticating us.
         this.log(`join "${ssid}": wrong password`);
-        this.queueForHost(this.eventPacket(EV_PSK_SUP, SUP_MSG3_TIMEOUT, iface, undefined, { reason: 14 }));
-        this.queueForHost(this.eventPacket(EV_DEAUTH_IND, STATUS_SUCCESS, iface, undefined, { reason: 2 }));
+        this.queueForHost(
+          this.eventPacket(EV_PSK_SUP, SUP_MSG3_TIMEOUT, iface, undefined, { reason: 14 }),
+        );
+        this.queueForHost(
+          this.eventPacket(EV_DEAUTH_IND, STATUS_SUCCESS, iface, undefined, { reason: 2 }),
+        );
         return;
       }
       this.log(`join "${ssid}": connected`);
@@ -544,7 +608,7 @@ export class FakeCYW43 {
   }
 
   /** Delivers an Ethernet frame to the firmware. */
-  sendEthernet(frame) {
+  sendEthernet(frame: Uint8Array) {
     if (!this.joined) {
       return;
     }
@@ -557,7 +621,13 @@ export class FakeCYW43 {
 
   // ---- async events ----------------------------------------------------------
 
-  eventPacket(eventType, status, iface, data = new Uint8Array(0), { flags = 0, reason = 0 } = {}) {
+  eventPacket(
+    eventType: number,
+    status: number,
+    iface: number,
+    data = new Uint8Array(0),
+    { flags = 0, reason = 0 } = {},
+  ) {
     // BDC header, then an Ethernet-style header with the Broadcom ethertype,
     // then the BCM event header, then wl_event_msg (big endian), then data.
     const body = new Uint8Array(4 + 24 + 48 + data.length);
@@ -587,13 +657,36 @@ export class FakeCYW43 {
     return this.sdpcmPacket(ASYNCEVENT_HEADER, body);
   }
 
-  escanResult(ap) {
+  escanResult(ap: AccessPoint) {
     // wl_escan_result header followed by one wl_bss_info (little endian).
     const ies = [];
     ies.push(0, ap.ssid.length, ...new TextEncoder().encode(ap.ssid)); // SSID IE
     if (ap.password) {
       // Minimal RSN IE: version 1, CCMP group/pairwise, PSK AKM
-      ies.push(48, 20, 1, 0, 0x00, 0x0f, 0xac, 4, 1, 0, 0x00, 0x0f, 0xac, 4, 1, 0, 0x00, 0x0f, 0xac, 2, 0, 0);
+      ies.push(
+        48,
+        20,
+        1,
+        0,
+        0x00,
+        0x0f,
+        0xac,
+        4,
+        1,
+        0,
+        0x00,
+        0x0f,
+        0xac,
+        4,
+        1,
+        0,
+        0x00,
+        0x0f,
+        0xac,
+        2,
+        0,
+        0,
+      );
     }
     const bssLen = 128 + ies.length;
     const buf = new Uint8Array(12 + bssLen);
@@ -619,10 +712,12 @@ export class FakeCYW43 {
     return buf;
   }
 
-  sendScanResults(iface) {
+  sendScanResults(iface: number) {
     this.log(`scan: reporting ${this.aps.length} AP(s)`);
     for (const ap of this.aps) {
-      this.queueForHost(this.eventPacket(EV_ESCAN_RESULT, STATUS_PARTIAL, iface, this.escanResult(ap)));
+      this.queueForHost(
+        this.eventPacket(EV_ESCAN_RESULT, STATUS_PARTIAL, iface, this.escanResult(ap)),
+      );
     }
     this.queueForHost(this.eventPacket(EV_ESCAN_RESULT, STATUS_SUCCESS, iface));
   }
