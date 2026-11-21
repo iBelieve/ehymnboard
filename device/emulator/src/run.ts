@@ -19,7 +19,8 @@
 // Boots a firmware UF2 on the emulated board, with the fake AP, LAN and
 // server, and prints the firmware's serial output and emulator events.
 //
-// Usage: node src/run.ts <firmware.uf2> [--seconds <simulated seconds>] [--trace]
+// Usage: node src/run.ts <firmware.uf2> [--seconds <simulated seconds>]
+//          [--bootloader <pico_fota_bootloader.uf2>] [--trace]
 import { parseArgs } from "node:util";
 import { Emulator } from "./emulator.ts";
 
@@ -27,15 +28,23 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     seconds: { type: "string", default: "60" },
+    bootloader: { type: "string" },
     trace: { type: "boolean", default: false },
   },
 });
 if (positionals.length !== 1) {
-  console.error("usage: node src/run.ts <firmware.uf2> [--seconds <simulated seconds>] [--trace]");
+  console.error(
+    "usage: node src/run.ts <firmware.uf2> [--seconds <simulated seconds>] [--bootloader <uf2>] [--trace]",
+  );
   process.exit(2);
 }
 
-const emu = new Emulator({ firmware: positionals[0], trace: values.trace, echo: true });
+const emu = new Emulator({
+  firmware: positionals[0],
+  bootloader: values.bootloader,
+  trace: values.trace,
+  echo: true,
+});
 const t0 = Date.now();
 emu.run(Number(values.seconds) * 1000);
 const wall = (Date.now() - t0) / 1000;

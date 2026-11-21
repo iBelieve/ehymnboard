@@ -99,9 +99,14 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: firmware
+          # The OTA image, its version and the bootloader are for the
+          # emulator's OTA tests.
           path: |
             device/build/ehymnboard.uf2
             device/build/ehymnboard.elf
+            device/build/ehymnboard_fota_image_encrypted.bin
+            device/build/firmware_version.txt
+            device/build/lib/pico_fota_bootloader/pico_fota_bootloader.uf2
           if-no-files-found: error
 
       - uses: astral-sh/setup-uv@v10.4.0

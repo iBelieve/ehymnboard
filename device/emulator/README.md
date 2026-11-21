@@ -22,6 +22,10 @@ FIRMWARE_UF2=/path/to/ehymnboard.uf2 pnpm test
 EMULATOR_VERBOSE=1 pnpm test                # print serial output and events
 ```
 
+`$FIRMWARE_UF2` must sit in its build directory: the bootloader UF2
+(`lib/pico_fota_bootloader/`), `firmware_version.txt` and
+`ehymnboard_fota_image_encrypted.bin` are read from beside it.
+
 The emulator is TypeScript that Node runs directly (type stripping, so no
 build step and only erasable syntax). Its own checks, all run in CI:
 
@@ -45,6 +49,7 @@ faster than real time.
 | `panels.test.ts`        | Each screen gets exactly Waveshare's documented full-update sequence with no controller faults; a panel stuck busy makes the firmware time out and reboot |
 | `epaper.test.ts`        | The panel model on its own: RAM window and address counters, gate lines, BUSY, deep sleep and fault detection                                             |
 | `recovery.test.ts`      | WiFi lost for good, the 3 minute watchdog reboot, rejoin with ETags kept in flash                                                                         |
+| `ota.test.ts`           | OTA updates through the bootloader: installed, committed, kept through a power cut; rolled back and skipped; power cut mid-download; bad images           |
 
 ## Run the firmware interactively
 
@@ -71,7 +76,12 @@ node src/run.ts ../build/ehymnboard.uf2 --seconds 60   # simulated seconds
 - `board.panels[i]` is each screen's controller: `transcript` (every command,
   its data, and power and reset events), `faults` (rules from the panel manual
   the firmware broke), and `stuckBusy` to make one hang.
-- `dropLink()` takes the AP away. `aps` (an option) lists the networks in
+- `server.firmware = { version, image }` offers an OTA update, as the real
+  server does after an upload. `OtaBuild` (`src/ota-image.ts`) decrypts the
+  build's `ehymnboard_fota_image_encrypted.bin` with the key from
+  `device/secrets.cmake` (or `$PFB_AES_KEY`, or the example key) and makes
+  images of the same build under another version: `imageFor(nextVersion("ota2"))`.
+- `powerCycle()` unplugs the board and plugs it back in. `dropLink()` takes the AP away. `aps` (an option) lists the networks in
   range, each `{ ssid, password?, bssid?, rssi?, channel? }`.
 
 ## How it works
@@ -96,7 +106,10 @@ The emulator's source is in `src/` and its tests are in `test/`.
   data/command and busy pins and SPI0, keeps a flash image
   (bootrom erase and program calls are answered directly, as rp2040js has no
   QSPI flash model), and rebuilds the chip from that flash on a watchdog
-  reset. When the firmware's `.elf` sits next to its `.uf2`, calls to
+  reset. The firmware is built to run after pico_fota_bootloader, so the
+  bootloader's UF2 from the same build
+  (`lib/pico_fota_bootloader/pico_fota_bootloader.uf2`) is flashed first, and
+  OTA updates swap the flash slots just as on a board. When the firmware's `.elf` sits next to its `.uf2`, calls to
   `cyw43_spi_transfer()` are answered directly (the fast path); otherwise, or
   with `pioBus: true`, PIO is stepped in lockstep with the CPU.
 - `virtual-net.ts` is the LAN behind the AP: the router at 10.0.0.1 answers
@@ -114,5 +127,6 @@ The emulator's source is in `src/` and its tests are in `test/`.
 - The unique board ID reads as zeros, and nothing types at the USB serial
   console.
 - rp2040js workarounds live in `board.ts`: its PIO timer, its watchdog
-  re-firing forever at expiry, and USB CDC answering every poll at once.
+  re-firing forever at expiry, USB CDC answering every poll at once, and USB
+  CDC enumerating only once (the firmware re-enumerates after the bootloader).
 - Networks are open or WPA2-PSK only: no WPA3 and no roaming between APs.

@@ -72,7 +72,8 @@ test("a panel stuck busy makes the firmware give up after 30 s and reboot", () =
   const at = emu.waitForSerial("Timeout waiting for busy pin to go low", 90_000);
   const before = emu.displays.map((d) => d.screen);
   assert.deepEqual(before, [1], "screen 1 refreshed before screen 2 hung");
-  assert.equal(emu.board.panels[1].powered, false, "the stuck panel is switched off");
+  // The serial output can arrive before the firmware gets to the power pin.
+  emu.waitFor("the stuck panel to be switched off", () => !emu.board.panels[1].powered, 1_000);
   emu.waitFor("a watchdog reset", () => emu.reboots >= 1, 60_000);
   emu.waitForSerial("Rebooted due to watchdog timeout!", 15_000, at);
 });
