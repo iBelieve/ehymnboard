@@ -18,14 +18,15 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 // Over-the-air firmware updates, using pico_fota_bootloader. The bootloader
 // sits at the start of flash, followed by an application slot (the running
 // firmware) and a download slot. An update is downloaded into the download
 // slot and verified, then on reboot the bootloader swaps the two slots. If the
-// new firmware reboots before calling ota_commit_firmware(), the bootloader
-// swaps them back.
+// new firmware reboots before it reaches the server (see ota_loop()), the
+// bootloader swaps them back.
 //
 // The server decides which firmware a board should run: any board whose
 // version differs from the one uploaded to the server installs it.
@@ -38,12 +39,9 @@ inline std::string ota_boot_version;
 // Records what the bootloader did on this boot. Call early in main().
 void ota_handle_boot();
 
-// Tells the bootloader this firmware works, so it won't be rolled back. Call
-// once the firmware has shown it can do its job. Only writes to flash on the
-// first call after an update.
-void ota_commit_firmware();
-
-// Asks the server for a firmware update and, if there is one, downloads,
-// verifies and installs it. Doesn't return when an update is installed (the
-// board reboots into the bootloader).
-void ota_check_for_update();
+// Called at the end of each main loop iteration (counting from 1). Once the
+// screens have reached the server, tells the bootloader that newly installed
+// firmware works, and every so often asks the server for an update. If there
+// is one, downloads, verifies and installs it, and doesn't return (the board
+// reboots into the bootloader).
+void ota_loop(uint32_t loop_count, bool any_success);

@@ -5,10 +5,14 @@ on:
     branches: [master]
     paths:
       - "device/**"
+      - "tools/**"
+      - ".jscpd.json"
       - ".github/workflows/ci-device.yml"
   pull_request:
     paths:
       - "device/**"
+      - "tools/**"
+      - ".jscpd.json"
       - ".github/workflows/ci-device.yml"
 
 concurrency:
@@ -35,7 +39,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.4.0
 
       - name: Check formatting
-        run: git ls-files 'src/*.cpp' 'src/*.h' | xargs uv run clang-format --dry-run --Werror
+        run: git ls-files 'src/*.cpp' 'src/*.h' 'test/*.cpp' 'test/*.h' | xargs uv run clang-format --dry-run --Werror
 
   build:
     runs-on: ubuntu-latest
@@ -91,6 +95,17 @@ jobs:
       - name: Check OTA image was built
         run: test -s build/ehymnboard_fota_image_encrypted.bin && test -s build/lib/pico_fota_bootloader/pico_fota_bootloader.uf2
 
+      - name: Upload firmware
+        uses: actions/upload-artifact@v7
+        with:
+          name: firmware
+          path: |
+            device/build/ehymnboard.uf2
+            device/build/ehymnboard.elf
+          if-no-files-found: error
+
+      - uses: astral-sh/setup-uv@v10.4.0
+
       - name: Run clang-tidy
         run: |
           TOOLCHAIN_DIR="$(dirname "$(dirname "$(command -v arm-none-eabi-gcc)")")"
@@ -101,6 +116,103 @@ jobs:
             --extra-arg=-isystem --extra-arg="$TOOLCHAIN_DIR/arm-none-eabi/include/c++/$GCC_VER/arm-none-eabi/thumb/v6-m/nofp" \
             --extra-arg=-isystem --extra-arg="$TOOLCHAIN_DIR/arm-none-eabi/include" \
             src/*.cpp
+
+  # Unit and property tests (GoogleTest + RapidCheck) for the
+  # hardware-independent code, built for the host under ASan/UBSan with
+  # coverage.
+  host-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.4.0
+
+      - name: Install ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Configure
+        run: cmake -S test -B build-test -G Ninja -DSANITIZE=ON -DCOVERAGE=ON
+
+      - name: Build
+        run: ninja -C build-test
+
+      - name: Run tests
+        run: ctest --test-dir build-test --output-on-failure
+
+      - name: Check coverage
+        run: >
+          uv run gcovr --root . --filter 'src/' --object-directory build-test
+          --exclude-throw-branches --txt --cobertura build-test/coverage.xml
+          --fail-under-line 90
+
+      - name: Check CRAP scores
+        run: >
+          uv run python ../tools/crap.py --coverage build-test/coverage.xml
+          src/http_headers.cpp src/request_path.cpp src/saved_state.cpp
+
+  # Boots the built firmware in rp2040js with a fake WiFi chip, access point,
+  # LAN and server (device/emulator), and runs the scenario tests against it.
+  # The emulator itself is TypeScript, type checked and linted by oxlint.
+  emulator:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: device/emulator
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: firmware
+          path: device/build
+
+      # Installs the pnpm from package.json's packageManager, Node.js from
+      # device/emulator/.node-version, and runs pnpm install --frozen-lockfile.
+      - id: setup
+        uses: pnpm/setup@v3
+        with:
+          working-directory: device/emulator
+          cache: true
+          require-lockfile: true
+
+      - name: Type check
+        run: pnpm run typecheck
+
+      - name: Lint
+        if: (success() || failure()) && steps.setup.outcome == 'success'
+        run: pnpm run lint
+
+      - name: Check formatting
+        if: (success() || failure()) && steps.setup.outcome == 'success'
+        run: pnpm run format:check
+
+      - name: Run scenario tests
+        if: (success() || failure()) && steps.setup.outcome == 'success'
+        run: pnpm test
+
+  # Complexity and copy-paste limits across the firmware.
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.4.0
+
+      - name: Check complexity
+        run: uv run lizard --CCN 15 --length 150 --arguments 7 --warnings_only src test
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+
+      - name: Check for duplicate code
+        if: success() || failure()
+        working-directory: .
+        run: npx --yes jscpd@5.4.3 device
 
   python:
     runs-on: ubuntu-latest
@@ -122,3 +234,7 @@ jobs:
       - name: Check formatting
         if: success() || failure()
         run: uv run ruff format --check .
+
+      - name: Check for dead code
+        if: success() || failure()
+        run: uv run vulture

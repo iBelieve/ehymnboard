@@ -1,6 +1,6 @@
 /*
  * eHymnBoard device firmware
- * Copyright (C) 2025  Michael Spencer <sonrisesoftware@gmail.com>
+ * Copyright (C) 2025-2026  Michael Spencer <sonrisesoftware@gmail.com>
 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,7 +18,9 @@
 
 #include "utils.h"
 
+#include "firmware_version.h"
 #include "pico/unique_id.h"
+#include "state.h"
 
 std::string get_unique_board_id()
 {
@@ -27,6 +29,11 @@ std::string get_unique_board_id()
     pico_get_unique_board_id_string(buf, sizeof(buf));
 
     return std::string(buf);
+}
+
+DeviceStatus current_device_status()
+{
+    return DeviceStatus{unique_board_id, flash_saved_state->write_count, watchdog_caused_reboot(), FIRMWARE_VERSION};
 }
 
 void reset_pico()

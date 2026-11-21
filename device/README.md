@@ -54,7 +54,7 @@ Boards update themselves over the air using [pico_fota_bootloader](https://githu
 
 About every 10 minutes a board asks the server (`/firmware/latest`) whether it should run a different firmware version. If so, it downloads the image into the download slot, checks its SHA-256, and reboots. The bootloader then swaps the two slots (about 30 seconds) and starts the new firmware. Once the new firmware successfully talks to the server, it commits itself; if it reboots before that (crash, watchdog, or no network for 3 minutes), the bootloader swaps the old firmware back and the board won't retry that version.
 
-The firmware version is `git describe --always --dirty --tags` (plus a timestamp for dirty trees), so commit before building a release.
+The firmware version is the short commit hash (plus `-dirty` and a timestamp for uncommitted changes), so commit before building a release.
 
 #### One-time setup (per board, over USB)
 
@@ -86,6 +86,19 @@ Notes:
 - The image is served over plain HTTP, so it is AES encrypted: it contains the WiFi passphrases. The SHA-256 is inside the encrypted image, so a corrupted or tampered image fails the check.
 - Don't change the flash layout (`PFB_RESERVED_FILESYSTEM_SIZE_KB` in `CMakeLists.txt`) or the bootloader without reflashing every board over USB.
 - Losing power during the ~30 second slot swap can leave a board unbootable until it is reflashed over USB.
+
+### Tests
+
+The hardware-independent parts of the firmware (HTTP header parsing, request
+paths, saved state) are unit and property tested on your computer, no Pico
+needed. Builds with the host compiler under AddressSanitizer and
+UndefinedBehaviorSanitizer:
+
+```sh
+cmake -S test -B build-test -G Ninja
+ninja -C build-test
+ctest --test-dir build-test
+```
 
 ### Monitoring Output
 

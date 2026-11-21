@@ -1,6 +1,6 @@
 /*
  * eHymnBoard device firmware
- * Copyright (C) 2025  Michael Spencer <sonrisesoftware@gmail.com>
+ * Copyright (C) 2025-2026  Michael Spencer <sonrisesoftware@gmail.com>
 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -46,7 +46,7 @@ class OutputPin
 class InputPin
 {
   public:
-    InputPin(uint gpio) : gpio(gpio)
+    explicit InputPin(uint gpio) : gpio(gpio)
     {
         gpio_set_function(gpio, GPIO_FUNC_SIO);
         gpio_set_dir(gpio, GPIO_IN);

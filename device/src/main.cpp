@@ -1,6 +1,6 @@
 /*
  * eHymnBoard device firmware
- * Copyright (C) 2025  Michael Spencer <sonrisesoftware@gmail.com>
+ * Copyright (C) 2025-2026  Michael Spencer <sonrisesoftware@gmail.com>
 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -36,12 +36,12 @@
 // Refresh a single screen. On transient HTTP failures we just log and bail out
 // for this iteration — the next loop will retry. The main loop tracks a "no
 // success in too long" timeout to reset us if the network stays broken.
-FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag)
+static FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag)
 {
     long_watchdog_update();
 
     printf("Refreshing screen %d\n", screen_id);
-    auto ret = fetch_image(screen_id, etag);
+    const auto ret = fetch_image(screen_id, etag);
 
     if (ret == FetchImageResult::NEW_IMAGE)
     {
@@ -151,27 +151,23 @@ int main()
     // on transient blips.
     constexpr int64_t NO_SUCCESS_REBOOT_TIMEOUT_US = 3LL * 60 * 1000 * 1000;
 
-    // Check for firmware updates on the first loop and then about every 10
-    // minutes (each loop is at least 15 seconds)
-    constexpr uint32_t OTA_CHECK_EVERY_LOOPS = 40;
-
     uint32_t loop_count = 0;
-    auto start_time = get_absolute_time();
+    const auto start_time = get_absolute_time();
     auto last_success_time = start_time;
 
     while (true)
     {
         loop_count++;
-        auto uptime_s = absolute_time_diff_us(start_time, get_absolute_time()) / 1000000;
+        const auto uptime_s = absolute_time_diff_us(start_time, get_absolute_time()) / 1000000;
         printf("Refreshing screens (loop=%lu, uptime=%llds)...\n", (unsigned long)loop_count, uptime_s);
 
-        auto r1 = refresh_screen(1, screen1, etag1);
-        auto r2 = refresh_screen(2, screen2, etag2);
-        auto r3 = refresh_screen(3, screen3, etag3);
+        const auto r1 = refresh_screen(1, screen1, etag1);
+        const auto r2 = refresh_screen(2, screen2, etag2);
+        const auto r3 = refresh_screen(3, screen3, etag3);
 
-        bool any_updated = (r1 == FetchImageResult::NEW_IMAGE) || (r2 == FetchImageResult::NEW_IMAGE) ||
-                           (r3 == FetchImageResult::NEW_IMAGE);
-        bool any_success =
+        const bool any_updated = (r1 == FetchImageResult::NEW_IMAGE) || (r2 == FetchImageResult::NEW_IMAGE) ||
+                                 (r3 == FetchImageResult::NEW_IMAGE);
+        const bool any_success =
             (r1 != FetchImageResult::ERROR) || (r2 != FetchImageResult::ERROR) || (r3 != FetchImageResult::ERROR);
 
         if (any_updated)
@@ -190,14 +186,10 @@ int main()
         if (any_success)
         {
             last_success_time = get_absolute_time();
-
-            // Reaching the server proves a newly installed firmware works;
-            // until it's committed, any reboot rolls it back
-            ota_commit_firmware();
         }
         else
         {
-            auto since_success_s = absolute_time_diff_us(last_success_time, get_absolute_time()) / 1000000;
+            const auto since_success_s = absolute_time_diff_us(last_success_time, get_absolute_time()) / 1000000;
             printf("WARNING: no successful fetch for %llds\n", since_success_s);
 
             if (absolute_time_diff_us(last_success_time, get_absolute_time()) > NO_SUCCESS_REBOOT_TIMEOUT_US)
@@ -209,10 +201,7 @@ int main()
 
         report_device_healthy();
 
-        if (any_success && loop_count % OTA_CHECK_EVERY_LOOPS == 1)
-        {
-            ota_check_for_update();
-        }
+        ota_loop(loop_count, any_success);
 
         printf("Sleeping for 15 seconds...\n");
         sleep_ms(15000);

@@ -5,10 +5,14 @@ on:
     branches: [master]
     paths:
       - "server/**"
+      - "tools/**"
+      - ".jscpd.json"
       - ".github/workflows/ci-server.yml"
   pull_request:
     paths:
       - "server/**"
+      - "tools/**"
+      - ".jscpd.json"
       - ".github/workflows/ci-server.yml"
 
 concurrency:
@@ -36,16 +40,60 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      # ../tools holds the CRAP checker both workflows share.
       - name: Lint
-        run: uv run ruff check .
+        run: uv run ruff check . ../tools
 
       - name: Check formatting
         if: success() || failure()
-        run: uv run ruff format --check .
+        run: uv run ruff format --check . ../tools
 
       - name: Type check
         if: success() || failure()
         run: uv run pyright
+
+      - name: Check for dead code
+        if: success() || failure()
+        run: uv run vulture
+
+      - name: Check complexity
+        if: success() || failure()
+        run: uv run lizard --CCN 10 --length 80 --arguments 7 --warnings_only app.py config ../tools
+
+      - uses: actions/setup-node@v7
+        if: success() || failure()
+        with:
+          node-version-file: server/.node-version
+
+      - name: Check for duplicate code
+        if: success() || failure()
+        working-directory: .
+        run: npx --yes jscpd@5.4.3 server tools
+
+      - name: Lint Dockerfile
+        if: success() || failure()
+        run: docker run --rm -i hadolint/hadolint:v2.15.1 < Dockerfile
+
+  # Unit, integration and property-based (Hypothesis) tests.
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.4.0
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests with coverage
+        run: uv run pytest --cov --cov-report=term --cov-report=xml
+
+      - name: Check CRAP scores
+        run: uv run python ../tools/crap.py --coverage coverage.xml app.py
+
+      - name: Test the CRAP checker
+        run: uv run pytest -p no:cacheprovider ../tools
 
   assets:
     runs-on: ubuntu-latest
@@ -53,17 +101,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v7
+      # Installs the pnpm from package.json's packageManager, Node.js from
+      # server/.node-version, and runs pnpm install --frozen-lockfile.
+      - uses: pnpm/setup@v3
         with:
-          node-version-file: server/.node-version
-          cache: npm
-          cache-dependency-path: server/package-lock.json
-
-      - name: Install npm dependencies
-        run: npm ci
+          working-directory: server
+          cache: true
+          require-lockfile: true
 
       - name: Build assets
-        run: npm run build
+        run: pnpm run build
 
   docker:
     runs-on: ubuntu-latest
@@ -78,5 +125,40 @@ jobs:
         with:
           context: server
           push: false
+          load: true
+          tags: ehymnboard-server:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # End-to-end: drive the real image with a browser and talk to it the
+      # way a board does.
+      - name: Start server
+        run: |
+          docker run -d --name server -p 8000:8000 \
+            -e BASIC_AUTH_USERNAME=e2e -e BASIC_AUTH_PASSWORD=e2e-password \
+            -e WEB_CONCURRENCY=2 \
+            ehymnboard-server:ci
+          for _ in $(seq 30); do
+            curl -fsS http://localhost:8000/ok && exit 0
+            sleep 1
+          done
+          docker logs server
+          exit 1
+
+      - uses: astral-sh/setup-uv@v10.4.0
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Install browser
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run end-to-end tests
+        env:
+          E2E_USERNAME: e2e
+          E2E_PASSWORD: e2e-password
+        run: uv run pytest e2e --base-url http://localhost:8000
+
+      - name: Server logs
+        if: failure()
+        run: docker logs server

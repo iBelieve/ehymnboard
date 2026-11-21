@@ -1,10 +1,35 @@
 # FixedAddressDereference is disabled because dereferencing fixed addresses
 # is exactly how memory-mapped hardware registers work.
+#
+# misc-use-internal-linkage doubles as dead code detection: once file-local
+# functions and variables are static (or in an anonymous namespace), the
+# compiler's -Wunused-function/-Wunused-variable (errors in CI) flag any that
+# nothing calls.
+#
+# Left out of misc-*: include-cleaner (pico-sdk's umbrella headers are meant to
+# be included as-is), non-private-member-variables-in-classes (plain structs
+# are used for C callback state) and use-anonymous-namespace (`static` is just
+# as internal, and an anonymous namespace would hide our flash_safe_execute
+# overload's call to the SDK's).
 Checks: >
   clang-analyzer-*,
   -clang-analyzer-core.FixedAddressDereference,
   bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  cert-*,
+  concurrency-*,
+  misc-*,
+  -misc-include-cleaner,
+  -misc-non-private-member-variables-in-classes,
+  -misc-use-anonymous-namespace,
   performance-*,
-  -bugprone-easily-swappable-parameters
+  portability-*,
+  -portability-avoid-pragma-once,
+  cppcoreguidelines-pro-type-member-init,
+  readability-function-cognitive-complexity
 WarningsAsErrors: '*'
-HeaderFilterRegex: '.*/device/src/.*'
+HeaderFilterRegex: '.*/device/(src|test)/.*'
+CheckOptions:
+  readability-function-cognitive-complexity.Threshold: 25
+  # lwIP and pico-sdk callbacks take non-const pointers we can't change.
+  misc-const-correctness.AnalyzePointers: false

@@ -1,6 +1,6 @@
 /*
  * eHymnBoard device firmware
- * Copyright (C) 2025  Michael Spencer <sonrisesoftware@gmail.com>
+ * Copyright (C) 2025-2026  Michael Spencer <sonrisesoftware@gmail.com>
 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -25,9 +25,9 @@
 inline constexpr auto SAVED_STATE_MAGIC = 0x0123456789ABCDEF;
 inline constexpr uint16_t STATE_VERSION = 2;
 
-// Firmware versions are `git describe` output, capped at 47 characters by
+// Firmware versions come from and are capped at 47 characters by
 // cmake/firmware_version.cmake
-inline constexpr size_t OTA_VERSION_SIZE = 48; // 47 + 1 for null terminator
+inline constexpr std::size_t OTA_VERSION_SIZE = 48; // 47 + 1 for null terminator
 
 // Example Etag: 2e16e58b5d7ca51f8e5972e3de922816bab545bf
 struct SavedState
@@ -35,29 +35,33 @@ struct SavedState
     uint64_t magic = SAVED_STATE_MAGIC;
     uint16_t version = STATE_VERSION;
     int write_count = 0;
-    char etag1[41]; // 40 + 1 for null terminator
-    char etag2[41]; // 40 + 1 for null terminator
-    char etag3[41]; // 40 + 1 for null terminator
+    char etag1[41] = {}; // 40 + 1 for null terminator
+    char etag2[41] = {}; // 40 + 1 for null terminator
+    char etag3[41] = {}; // 40 + 1 for null terminator
 
     // The OTA version being installed by the last reboot, so that if the
     // bootloader rolls it back we know which version failed
-    char ota_attempted_version[OTA_VERSION_SIZE];
+    char ota_attempted_version[OTA_VERSION_SIZE] = {};
     // A version that was rolled back; we don't retry it until the server
     // offers a different one
-    char ota_rejected_version[OTA_VERSION_SIZE];
+    char ota_rejected_version[OTA_VERSION_SIZE] = {};
 
     SavedState() : write_count(1)
     {
-        etag1[0] = '\0';
-        etag2[0] = '\0';
-        etag3[0] = '\0';
-        ota_attempted_version[0] = '\0';
-        ota_rejected_version[0] = '\0';
     }
 
-    // A copy of prev_state with new etags, keeping the OTA fields
+    // The state after a screen update, keeping the OTA fields. Etags must be
+    // at most 40 characters (a SHA-1 hex digest). Defined in saved_state.cpp,
+    // which has no flash access, so it's unit tested on the host.
     SavedState(const SavedState *prev_state, const std::string &etag1, const std::string &etag2,
                const std::string &etag3);
+
+    // A copy with the OTA fields replaced (each under OTA_VERSION_SIZE
+    // characters), keeping the etags and counting the write
+    SavedState with_ota(const std::string &attempted_version, const std::string &rejected_version) const;
+
+    std::string attempted_version() const;
+    std::string rejected_version() const;
 
     void save();
 

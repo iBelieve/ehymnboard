@@ -33,7 +33,7 @@
 
 // Defined by the bootloader's linker script; the symbol's address is the size
 // of each flash slot. Declared in the library's private linker_definitions.h.
-// NOLINTNEXTLINE(bugprone-reserved-identifier)
+// NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp)
 extern "C" uint32_t __FLASH_SWAP_SPACE_LENGTH;
 
 namespace
@@ -54,21 +54,6 @@ size_t download_slot_size()
     return reinterpret_cast<size_t>(&__FLASH_SWAP_SPACE_LENGTH);
 }
 
-std::string saved_string(const char *value, size_t size)
-{
-    return {value, strnlen(value, size)};
-}
-
-std::string saved_attempted_version()
-{
-    return saved_string(flash_saved_state->ota_attempted_version, sizeof(flash_saved_state->ota_attempted_version));
-}
-
-std::string saved_rejected_version()
-{
-    return saved_string(flash_saved_state->ota_rejected_version, sizeof(flash_saved_state->ota_rejected_version));
-}
-
 std::string ota_query()
 {
     return "?device_id=" + unique_board_id + "&version=" + FIRMWARE_VERSION;
@@ -79,7 +64,7 @@ std::string ota_query()
 bool wait_for_completion(const volatile bool &complete, int64_t timeout_us)
 {
     auto context = cyw43_arch_async_context();
-    auto start = get_absolute_time();
+    const auto start = get_absolute_time();
 
     while (!complete)
     {
@@ -149,11 +134,11 @@ std::string fetch_target_version()
     static httpc_connection_t settings = {};
     settings.result_fn = on_version_check_completed;
 
-    std::string path = "/firmware/latest" + ota_query();
+    const std::string path = "/firmware/latest" + ota_query();
 
     cyw43_arch_lwip_begin();
-    auto ret = httpc_get_file_dns(SERVER_HOST, SERVER_PORT, path.c_str(), &settings, on_version_check_data,
-                                  &version_check, nullptr);
+    const auto ret = httpc_get_file_dns(SERVER_HOST, SERVER_PORT, path.c_str(), &settings, on_version_check_data,
+                                        &version_check, nullptr);
     cyw43_arch_lwip_end();
 
     if (ret != ERR_OK)
@@ -316,14 +301,13 @@ void abandon_download()
     cyw43_arch_lwip_end();
 }
 
-// Streams the image into the download slot; returns the number of bytes
-// written, or 0 on failure
-size_t download_image(const std::string &version)
+// Starts the HTTP request for the image; the callbacks fill `download`
+bool start_download(const std::string &version)
 {
     if (!download.complete)
     {
         printf("OTA: previous download still closing, skipping\n");
-        return 0;
+        return false;
     }
 
     download.complete = false;
@@ -339,10 +323,10 @@ size_t download_image(const std::string &version)
     settings.headers_done_fn = on_download_headers;
     settings.result_fn = on_download_completed;
 
-    std::string path = "/firmware/image" + ota_query() + "&target_version=" + version;
+    const std::string path = "/firmware/image" + ota_query() + "&target_version=" + version;
 
     cyw43_arch_lwip_begin();
-    auto ret =
+    const auto ret =
         httpc_get_file_dns(SERVER_HOST, SERVER_PORT, path.c_str(), &settings, on_download_data, &download, nullptr);
     cyw43_arch_lwip_end();
 
@@ -350,72 +334,104 @@ size_t download_image(const std::string &version)
     {
         printf("OTA: error starting download: %d\n", ret);
         download.complete = true;
-        return 0;
+        return false;
     }
 
+    return true;
+}
+
+// Writes the first `length` staged bytes to flash at `offset`, then hands that
+// part of the buffer back to the callbacks and acknowledges it to lwIP
+bool write_staged(size_t offset, size_t length)
+{
+    // The callbacks only append past `buffered`, so this part of the buffer
+    // is ours until we hand it back below
+    const int ret = pfb_write_to_flash_aligned_256_bytes(download.buffer.data(), offset, length);
+    if (ret != 0)
+    {
+        printf("OTA: error writing to flash at offset %u: %d\n", (unsigned)offset, ret);
+        return false;
+    }
+
+    cyw43_arch_lwip_begin();
+    memmove(download.buffer.data(), download.buffer.data() + length, download.buffered - length);
+    download.buffered -= length;
+    if (!download.complete && download.conn != nullptr)
+    {
+        altcp_recved(download.conn, length);
+    }
+    cyw43_arch_lwip_end();
+
+    return true;
+}
+
+// Moves the body into flash as it arrives, until the request completes;
+// returns the number of bytes written, or 0 on failure
+size_t stream_download()
+{
     auto context = cyw43_arch_async_context();
-    auto start = get_absolute_time();
+    const auto start = get_absolute_time();
     auto last_progress = start;
     size_t written = 0;
 
     while (true)
     {
         cyw43_arch_lwip_begin();
-        size_t to_write = download.buffered - (download.buffered % PFB_ALIGN_SIZE);
-        bool complete = download.complete;
-        bool overflow = download.overflow;
+        const size_t to_write = download.buffered - (download.buffered % PFB_ALIGN_SIZE);
+        const bool complete = download.complete;
+        const bool overflow = download.overflow;
         cyw43_arch_lwip_end();
 
         if (overflow)
         {
             printf("OTA: receive buffer overflowed\n");
-            abandon_download();
             return 0;
         }
 
         if (to_write > 0)
         {
-            // The callbacks only append past `buffered`, so this part of the
-            // buffer is ours until we hand it back below
-            int write_ret = pfb_write_to_flash_aligned_256_bytes(download.buffer.data(), written, to_write);
-            if (write_ret != 0)
+            if (!write_staged(written, to_write))
             {
-                printf("OTA: error writing to flash at offset %u: %d\n", (unsigned)written, write_ret);
-                abandon_download();
                 return 0;
             }
 
             written += to_write;
-
-            cyw43_arch_lwip_begin();
-            memmove(download.buffer.data(), download.buffer.data() + to_write, download.buffered - to_write);
-            download.buffered -= to_write;
-            if (!download.complete && download.conn != nullptr)
-            {
-                altcp_recved(download.conn, to_write);
-            }
-            cyw43_arch_lwip_end();
-
             last_progress = get_absolute_time();
             long_watchdog_update();
-            continue;
         }
-
-        if (complete)
+        else if (complete)
         {
-            break;
+            return written;
         }
-
-        auto now = get_absolute_time();
-        if (absolute_time_diff_us(last_progress, now) > DOWNLOAD_STALL_TIMEOUT_US ||
-            absolute_time_diff_us(start, now) > DOWNLOAD_TOTAL_TIMEOUT_US)
+        else
         {
-            printf("OTA: download timed out after %u bytes\n", (unsigned)written);
-            abandon_download();
-            return 0;
-        }
+            const auto now = get_absolute_time();
+            if (absolute_time_diff_us(last_progress, now) > DOWNLOAD_STALL_TIMEOUT_US ||
+                absolute_time_diff_us(start, now) > DOWNLOAD_TOTAL_TIMEOUT_US)
+            {
+                printf("OTA: download timed out after %u bytes\n", (unsigned)written);
+                return 0;
+            }
 
-        async_context_wait_for_work_ms(context, 5);
+            async_context_wait_for_work_ms(context, 5);
+        }
+    }
+}
+
+// Streams the image into the download slot; returns the number of bytes
+// written, or 0 on failure
+size_t download_image(const std::string &version)
+{
+    if (!start_download(version))
+    {
+        return 0;
+    }
+
+    const auto written = stream_download();
+    if (!download.complete)
+    {
+        abandon_download();
+        return 0;
     }
 
     if (download.result != HTTPC_RESULT_OK || download.status_code != 200)
@@ -440,7 +456,7 @@ void ota_handle_boot()
 {
     printf("Firmware version: %s\n", FIRMWARE_VERSION);
 
-    auto attempted = saved_attempted_version();
+    const auto attempted = flash_saved_state->attempted_version();
 
     // The bootloader leaves the "after rollback" flag set until the next
     // successful update, so only act on it while an attempt is recorded
@@ -459,7 +475,9 @@ void ota_handle_boot()
     }
 }
 
-void ota_commit_firmware()
+// Tells the bootloader this firmware works, so it won't be rolled back. Only
+// writes to flash on the first call after an update.
+static void ota_commit_firmware()
 {
     static bool committed = false;
 
@@ -478,18 +496,19 @@ void ota_commit_firmware()
     printf("OTA: firmware is healthy, committing\n");
     pfb_firmware_commit();
 
-    auto rejected = saved_rejected_version();
-    if (!saved_attempted_version().empty() || rejected == FIRMWARE_VERSION)
+    const auto rejected = flash_saved_state->rejected_version();
+    if (!flash_saved_state->attempted_version().empty() || rejected == FIRMWARE_VERSION)
     {
         save_ota_state("", rejected == FIRMWARE_VERSION ? "" : rejected);
     }
 }
 
-void ota_check_for_update()
+// Asks the server for a firmware update and installs it if there is one
+static void ota_check_for_update()
 {
     long_watchdog_update();
 
-    auto version = fetch_target_version();
+    const auto version = fetch_target_version();
 
     if (version.empty())
     {
@@ -501,7 +520,7 @@ void ota_check_for_update()
         return;
     }
 
-    if (version == saved_rejected_version())
+    if (version == flash_saved_state->rejected_version())
     {
         printf("OTA: server offers %s, which was rolled back before, skipping\n", version.c_str());
         return;
@@ -513,7 +532,7 @@ void ota_check_for_update()
     // seconds, longer than the hardware watchdog allows
     printf("OTA: erasing download slot...\n");
     long_watchdog_pause();
-    int init_ret = pfb_initialize_download_slot();
+    const int init_ret = pfb_initialize_download_slot();
     long_watchdog_resume();
 
     if (init_ret != 0)
@@ -522,7 +541,7 @@ void ota_check_for_update()
         return;
     }
 
-    auto size = download_image(version);
+    const auto size = download_image(version);
     if (size == 0)
     {
         return;
@@ -538,9 +557,30 @@ void ota_check_for_update()
 
     printf("OTA: downloaded and verified %u bytes, installing %s\n", (unsigned)size, version.c_str());
 
-    save_ota_state(version, saved_rejected_version());
+    save_ota_state(version, flash_saved_state->rejected_version());
     pfb_mark_download_slot_as_valid();
 
     // Reboots into the bootloader, which swaps in the new firmware
     pfb_perform_update();
+}
+
+void ota_loop(uint32_t loop_count, bool any_success)
+{
+    // Check on the first loop and then about every 10 minutes (each loop is
+    // at least 15 seconds)
+    constexpr uint32_t CHECK_EVERY_LOOPS = 40;
+
+    if (!any_success)
+    {
+        return;
+    }
+
+    // Reaching the server proves a newly installed firmware works; until it's
+    // committed, any reboot rolls it back
+    ota_commit_firmware();
+
+    if (loop_count % CHECK_EVERY_LOOPS == 1)
+    {
+        ota_check_for_update();
+    }
 }

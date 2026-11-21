@@ -1,11 +1,14 @@
-# Writes the firmware version (from `git describe`) to a header and a text
-# file. Runs on every build so the version always matches the image that was
-# built; the outputs are only touched when the version changes.
+# Writes the firmware version (the short commit hash, plus "-dirty" and a
+# timestamp for uncommitted changes) to a header and a text file. Tags are
+# left out: the repo's releases/YYYY-MM-DD tags would add a '/' and push the
+# version past the length limit. Runs on every build so the version always
+# matches the image that was built; the outputs are only touched when the
+# version changes.
 #
 # Inputs: SOURCE_DIR, OUTPUT_HEADER, OUTPUT_TEXT
 
 execute_process(
-    COMMAND git describe --always --dirty --tags
+    COMMAND git describe --always --dirty --exclude=*
     WORKING_DIRECTORY ${SOURCE_DIR}
     OUTPUT_VARIABLE FIRMWARE_VERSION
     OUTPUT_STRIP_TRAILING_WHITESPACE

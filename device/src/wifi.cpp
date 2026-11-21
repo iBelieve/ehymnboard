@@ -1,6 +1,6 @@
 /*
  * eHymnBoard device firmware
- * Copyright (C) 2025  Michael Spencer <sonrisesoftware@gmail.com>
+ * Copyright (C) 2025-2026  Michael Spencer <sonrisesoftware@gmail.com>
 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -29,15 +29,21 @@
 #include "secrets.h"
 #include "utils.h"
 
+namespace
+{
+
 int on_wifi_scan_complete(void *env, const cyw43_ev_scan_result_t *result);
 
 struct WiFiScanResult
 {
     std::string ssid;
-    uint8_t bssid[6];
+    uint8_t bssid[6] = {};
     int16_t rssi;
 
-    WiFiScanResult(const cyw43_ev_scan_result_t *result) : ssid((char *)result->ssid), rssi(result->rssi)
+    // The SSID isn't NUL-terminated when it's the full 32 bytes, so use its length.
+    explicit WiFiScanResult(const cyw43_ev_scan_result_t *result)
+        : ssid(reinterpret_cast<const char *>(result->ssid), std::min<size_t>(result->ssid_len, sizeof(result->ssid))),
+          rssi(result->rssi)
     {
         memcpy(bssid, result->bssid, sizeof(bssid));
     }
@@ -96,8 +102,9 @@ int on_wifi_scan_complete(void *env, const cyw43_ev_scan_result_t *result)
            scan_result.bssid[0], scan_result.bssid[1], scan_result.bssid[2], scan_result.bssid[3], scan_result.bssid[4],
            scan_result.bssid[5], scan_result.rssi);
 
-    auto existingResult = std::find_if(scan->results.begin(), scan->results.end(),
-                                       [&scan_result](const WiFiScanResult &r) { return r.ssid == scan_result.ssid; });
+    const auto existingResult =
+        std::find_if(scan->results.begin(), scan->results.end(),
+                     [&scan_result](const WiFiScanResult &r) { return r.ssid == scan_result.ssid; });
 
     if (existingResult != scan->results.end())
     {
@@ -115,6 +122,8 @@ int on_wifi_scan_complete(void *env, const cyw43_ev_scan_result_t *result)
 
     return 0;
 }
+
+} // namespace
 
 void setup_wifi()
 {
@@ -139,7 +148,7 @@ void setup_wifi()
 
         for (const auto &result : wifi_scan.results)
         {
-            auto entry = WIFI_SSIDS.find(result.ssid);
+            const auto entry = WIFI_SSIDS.find(result.ssid);
 
             if (entry != WIFI_SSIDS.end())
             {
@@ -156,8 +165,8 @@ void setup_wifi()
                 {
                     long_watchdog_update();
 
-                    int res = cyw43_arch_wifi_connect_bssid_timeout_ms(ssid, result.bssid, password,
-                                                                       CYW43_AUTH_WPA2_AES_PSK, 30000);
+                    const int res = cyw43_arch_wifi_connect_bssid_timeout_ms(ssid, result.bssid, password,
+                                                                             CYW43_AUTH_WPA2_AES_PSK, 30000);
 
                     if (res == PICO_OK)
                     {
