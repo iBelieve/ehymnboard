@@ -51,6 +51,31 @@ static std::string_view trim(std::string_view s)
     return s.substr(start, end - start + 1);
 }
 
+static std::string_view unquote(std::string_view s)
+{
+    if (s.size() >= 2 && s.front() == '"' && s.back() == '"')
+    {
+        return s.substr(1, s.size() - 2);
+    }
+    return s;
+}
+
+static bool is_safe_etag(std::string_view etag)
+{
+    if (etag.empty() || etag.size() > MAX_ETAG_LENGTH)
+    {
+        return false;
+    }
+    for (const char c : etag)
+    {
+        if (std::isalnum(static_cast<unsigned char>(c)) == 0 && c != '.' && c != '_' && c != '-')
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
 std::string find_etag(std::string_view headers)
 {
     constexpr std::string_view crlf = "\r\n";
@@ -73,7 +98,8 @@ std::string find_etag(std::string_view headers)
         const auto colon = line.find(':');
         if (colon != std::string_view::npos && iequals(line.substr(0, colon), "etag"))
         {
-            return std::string(trim(line.substr(colon + 1)));
+            const auto etag = unquote(trim(line.substr(colon + 1)));
+            return is_safe_etag(etag) ? std::string(etag) : std::string();
         }
 
         line_start = line_end;

@@ -127,7 +127,7 @@ def test_device_fetches_are_tracked(client: FlaskClient, workdir: Path):
     devices = json.loads((workdir / "images/devices.json").read_text())
     device = devices[LEFT_BOARD]
     assert device["id"] == LEFT_BOARD
-    assert device["saved_state_writes"] == "7"
+    assert device["saved_state_writes"] == 7
     assert device["last_seen"]
     assert device["last_updated_at"]
 
@@ -161,6 +161,36 @@ def test_image_fetch_without_device_id_is_not_tracked(
 
     assert not (workdir / "images/devices.json").exists()
     assert pings.pings == []
+
+
+def test_bad_saved_state_writes_is_ignored(client: FlaskClient, workdir: Path):
+    client.get(f"/device_healthy?device_id={LEFT_BOARD}&saved_state_writes=lots")
+
+    device = json.loads((workdir / "images/devices.json").read_text())[LEFT_BOARD]
+    assert "saved_state_writes" not in device
+
+
+def test_corrupt_devices_file_is_treated_as_empty(client: FlaskClient, workdir: Path):
+    (workdir / "images").mkdir()
+    (workdir / "images/devices.json").write_text('{"half": ')
+
+    assert client.get("/devices").status_code == HTTPStatus.OK
+    assert client.get(f"/device_healthy?device_id={LEFT_BOARD}").status_code == 204
+    assert LEFT_BOARD in json.loads((workdir / "images/devices.json").read_text())
+
+
+def test_state_files_are_replaced_not_rewritten(client: FlaskClient, workdir: Path):
+    client.post("/images", data=HYMNS)
+    client.get(f"/device_healthy?device_id={LEFT_BOARD}")
+
+    # No temporary files are left behind.
+    assert sorted(p.name for p in (workdir / "images").iterdir()) == [
+        "1.png",
+        "2.png",
+        "3.png",
+        "devices.json",
+        "lines.json",
+    ]
 
 
 def test_device_booted(client: FlaskClient, workdir: Path, pings: PingRecorder):

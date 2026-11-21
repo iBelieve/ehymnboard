@@ -40,7 +40,10 @@ struct WiFiScanResult
     uint8_t bssid[6] = {};
     int16_t rssi;
 
-    explicit WiFiScanResult(const cyw43_ev_scan_result_t *result) : ssid((char *)result->ssid), rssi(result->rssi)
+    // The SSID isn't NUL-terminated when it's the full 32 bytes, so use its length.
+    explicit WiFiScanResult(const cyw43_ev_scan_result_t *result)
+        : ssid(reinterpret_cast<const char *>(result->ssid), std::min<size_t>(result->ssid_len, sizeof(result->ssid))),
+          rssi(result->rssi)
     {
         memcpy(bssid, result->bssid, sizeof(bssid));
     }

@@ -27,6 +27,8 @@
 #include "utils.h"
 
 static size_t image_buffer_offset = 0;
+// Everything the server sent, including anything past the end of the buffer.
+static size_t image_bytes_received = 0;
 
 namespace
 {
@@ -77,17 +79,14 @@ static err_t on_http_data_received([[maybe_unused]] void *arg, struct altcp_pcb 
     const auto space_left = image_buffer.size() - image_buffer_offset;
     const auto bytes_to_copy = p->tot_len < space_left ? p->tot_len : space_left;
 
+    // Once the buffer is full, keep accepting (and dropping) data so the
+    // connection finishes; fetch_image rejects the oversized image afterwards.
     const auto bytes_copied = pbuf_copy_partial(p, image_buffer.data() + image_buffer_offset, bytes_to_copy, 0);
 
-    if (bytes_copied == 0)
-    {
-        printf("Error copying data to image buffer\n");
-        return ERR_BUF;
-    }
-
     image_buffer_offset += bytes_copied;
+    image_bytes_received += p->tot_len;
 
-    printf("Received %d, copied %d, total %u bytes\n", p->tot_len, bytes_copied, (unsigned)image_buffer_offset);
+    printf("Received %d, copied %d, total %u bytes\n", p->tot_len, bytes_copied, (unsigned)image_bytes_received);
 
     altcp_recved(conn, p->tot_len);
     pbuf_free(p);
@@ -124,6 +123,7 @@ FetchImageResult fetch_image(int image, std::string &etag)
     settings.result_fn = on_http_req_completed;
 
     image_buffer_offset = 0;
+    image_bytes_received = 0;
 
     cyw43_arch_lwip_begin();
     const auto ret = httpc_get_file_dns("api.hymnboard.sonrise.io", 80, path.c_str(), &settings, on_http_data_received,
@@ -157,9 +157,9 @@ FetchImageResult fetch_image(int image, std::string &etag)
 
     if (req.status_code == 200)
     {
-        if (image_buffer_offset != image_buffer.size())
+        if (image_bytes_received != image_buffer.size())
         {
-            printf("Image buffer not full, only %u bytes received, %u expected\n", (unsigned)image_buffer_offset,
+            printf("Image is the wrong size: %u bytes received, %u expected\n", (unsigned)image_bytes_received,
                    (unsigned)image_buffer.size());
             return FetchImageResult::ERROR;
         }

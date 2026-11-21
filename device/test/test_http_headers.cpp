@@ -1,5 +1,7 @@
 #include "http_headers.h"
 
+#include <algorithm>
+#include <cctype>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -18,10 +20,28 @@ constexpr const char *SERVER_RESPONSE = "HTTP/1.1 200 OK\r\n"
                                         "Etag: 2e16e58b5d7ca51f8e5972e3de922816bab545bf\r\n"
                                         "\r\n";
 
-// A header-safe token: printable ASCII without ':' or whitespace.
+// A header name: printable ASCII without ':' or whitespace.
 rc::Gen<std::string> token()
 {
-    return rc::gen::nonEmpty(rc::gen::container<std::string>(rc::gen::inRange('!', '~')));
+    return rc::gen::nonEmpty(rc::gen::container<std::string>(
+        rc::gen::suchThat(rc::gen::inRange('!', '~'), [](char c) { return c != ':'; })));
+}
+
+const std::string ETAG_CHARS = "0123456789abcdefABCDEFxyzXYZ._-";
+
+// An etag the board accepts: 1 to MAX_ETAG_LENGTH safe characters.
+rc::Gen<std::string> etag_token()
+{
+    return rc::gen::mapcat(rc::gen::inRange<std::size_t>(1, MAX_ETAG_LENGTH + 1), [](std::size_t length) {
+        return rc::gen::container<std::string>(length, rc::gen::elementOf(ETAG_CHARS));
+    });
+}
+
+bool is_safe(const std::string &etag)
+{
+    return etag.size() <= MAX_ETAG_LENGTH && std::all_of(etag.begin(), etag.end(), [](char c) {
+               return std::isalnum(static_cast<unsigned char>(c)) || c == '.' || c == '_' || c == '-';
+           });
 }
 
 // A header value: printable ASCII, no leading or trailing whitespace.
@@ -68,6 +88,29 @@ TEST(FindEtag, IgnoresEtagInStatusLineAndOtherValues)
     EXPECT_EQ(find_etag("Etag: status\r\nX-Note: Etag: nope\r\n\r\n"), "");
 }
 
+TEST(FindEtag, StripsQuotes)
+{
+    // A standard strong ETag, which a proxy or another server might send.
+    EXPECT_EQ(find_etag("HTTP/1.1 200 OK\r\nETag: \"2e16e58b5d7ca51f8e5972e3de922816bab545bf\"\r\n\r\n"),
+              "2e16e58b5d7ca51f8e5972e3de922816bab545bf");
+}
+
+TEST(FindEtag, RejectsValuesTheBoardCantKeep)
+{
+    // Too long to save to flash...
+    EXPECT_EQ(find_etag("HTTP/1.1 200 OK\r\nEtag: " + std::string(MAX_ETAG_LENGTH + 1, 'a') + "\r\n\r\n"), "");
+    // ...or would need escaping in the request URL.
+    EXPECT_EQ(find_etag("HTTP/1.1 200 OK\r\nEtag: a&b=c\r\n\r\n"), "");
+    EXPECT_EQ(find_etag("HTTP/1.1 200 OK\r\nEtag: W/\"abc\"\r\n\r\n"), "");
+    EXPECT_EQ(find_etag("HTTP/1.1 200 OK\r\nEtag: \"\"\r\n\r\n"), "");
+}
+
+TEST(FindEtag, AcceptsLongestEtag)
+{
+    const std::string etag(MAX_ETAG_LENGTH, 'f');
+    EXPECT_EQ(find_etag("HTTP/1.1 200 OK\r\nEtag: " + etag + "\r\n\r\n"), etag);
+}
+
 TEST(FindEtag, IgnoresTruncatedLine)
 {
     // The header block was cut off mid-value: don't trust a partial etag.
@@ -90,7 +133,8 @@ RC_GTEST_PROP(FindEtag, FindsEtagAmongOtherHeaders, ())
         *rc::gen::container<std::vector<std::pair<std::string, std::string>>>(rc::gen::pair(token(), header_value()));
     const auto after =
         *rc::gen::container<std::vector<std::pair<std::string, std::string>>>(rc::gen::pair(token(), header_value()));
-    const auto etag = *header_value();
+    const auto etag = *etag_token();
+    const auto quoted = *rc::gen::arbitrary<bool>();
 
     std::string headers = "HTTP/1.1 200 OK\r\n";
     for (const auto &[name, value] : before)
@@ -99,7 +143,7 @@ RC_GTEST_PROP(FindEtag, FindsEtagAmongOtherHeaders, ())
         RC_PRE(find_etag("HTTP/1.1 200 OK\r\n" + name + ": x\r\n\r\n").empty());
         headers += name + ": " + value + "\r\n";
     }
-    headers += "Etag: " + etag + "\r\n";
+    headers += "Etag: " + (quoted ? "\"" + etag + "\"" : etag) + "\r\n";
     for (const auto &[name, value] : after)
     {
         headers += name + ": " + value + "\r\n";
@@ -109,15 +153,8 @@ RC_GTEST_PROP(FindEtag, FindsEtagAmongOtherHeaders, ())
     RC_ASSERT(find_etag(headers) == etag);
 }
 
-RC_GTEST_PROP(FindEtag, NeverReturnsLineBreaksOrPadding, (const std::string &headers))
+RC_GTEST_PROP(FindEtag, OnlyReturnsEtagsTheBoardCanKeep, (const std::string &headers))
 {
-    const auto etag = find_etag(headers);
-
-    RC_ASSERT(etag.find('\r') == std::string::npos);
-    RC_ASSERT(etag.find('\n') == std::string::npos);
-    if (!etag.empty())
-    {
-        RC_ASSERT(etag.front() != ' ');
-        RC_ASSERT(etag.back() != ' ');
-    }
+    // Whatever the server sends, the result fits SavedState and is URL-safe.
+    RC_ASSERT(is_safe(find_etag(headers)));
 }

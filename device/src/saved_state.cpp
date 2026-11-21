@@ -22,8 +22,11 @@
 #include <cstddef>
 #include <string>
 
+#include "http_headers.h"
 #include "pico/assert.h"
 #include "state.h"
+
+static_assert(sizeof(SavedState::etag1) == MAX_ETAG_LENGTH + 1, "SavedState etags must fit any etag find_etag accepts");
 
 template <std::size_t N> static void copy_etag(char (&dest)[N], const std::string &etag)
 {

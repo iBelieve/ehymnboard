@@ -7,10 +7,6 @@
 #include <gtest/gtest.h>
 #include <rapidcheck/gtest.h>
 
-// state.cpp (flash access) isn't built on the host, so define the pointer the
-// header declares.
-const SavedState *flash_saved_state = nullptr;
-
 namespace
 {
 

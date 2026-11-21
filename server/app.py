@@ -17,6 +17,7 @@
 import hashlib
 import json
 import os
+import tempfile
 import unicodedata
 from collections import OrderedDict
 from datetime import UTC, datetime
@@ -72,6 +73,10 @@ HEALTHCHECKS_PING_URLS = {
     "E6614103E71F8D26": "https://hc-ping.com/a717c5f0-8a83-45f9-92a7-c79a21a437b4",
     "E661A4D41787452B": "https://hc-ping.com/6c7ef2cb-71b8-492e-9e11-4ddfacf29d0c",
 }
+
+# Unicode categories Pillow can't render on a single line: control characters
+# (including \n, \r and \t) and the line and paragraph separators.
+LINE_BREAKING_CATEGORIES = {"Cc", "Zl", "Zp"}
 
 # Healthcheck pings run inline in the request, so don't let a slow
 # healthchecks.io stall a gunicorn worker (and the device waiting on it).
@@ -151,7 +156,7 @@ def index():
     try:
         with open("images/lines.json") as f:
             lines = json.load(f)
-    except OSError:
+    except OSError, json.JSONDecodeError:
         lines = []
 
     devices = get_sorted_devices()
@@ -193,8 +198,9 @@ def create_image():
     generate_image("2", line3, line4)
     generate_image("3", line5, line6)
 
-    with open("images/lines.json", "w") as f:
-        json.dump([line1, line2, line3, line4, line5, line6], f)
+    write_json_atomically(
+        "images/lines.json", [line1, line2, line3, line4, line5, line6]
+    )
 
     return redirect("/", code=HTTPStatus.FOUND)
 
@@ -241,7 +247,7 @@ def get_image(image_id):
         response.content_type = "application/octet-stream"
 
     if device_id:
-        saved_state_writes = request.args.get("saved_state_writes")
+        saved_state_writes = request.args.get("saved_state_writes", type=int)
 
         update_device(
             device_id=device_id,
@@ -258,7 +264,7 @@ def get_image(image_id):
 @app.get("/device_booted")
 def report_device_booted():
     device_id = request.args.get("device_id")
-    saved_state_writes = request.args.get("saved_state_writes")
+    saved_state_writes = request.args.get("saved_state_writes", type=int)
     watchdog_caused_reboot = request.args.get("watchdog_caused_reboot") == "1"
 
     if watchdog_caused_reboot:
@@ -284,7 +290,7 @@ def report_device_booted():
 @app.get("/device_healthy")
 def report_device_healthy():
     device_id = request.args.get("device_id")
-    saved_state_writes = request.args.get("saved_state_writes")
+    saved_state_writes = request.args.get("saved_state_writes", type=int)
 
     print(f"Device healthy: {get_device_name(device_id)} ({device_id})")
 
@@ -318,10 +324,13 @@ def clean_line(text: str) -> str:
     """Make arbitrary form input safe to render as a single line.
 
     Pillow can't lay out newlines, carriage returns or other control
-    characters on one line (it raises), so fold whitespace and drop them.
+    characters on one line (it raises), so turn them into spaces. Ordinary
+    spaces are left as typed.
     """
-    text = " ".join(text.split())
-    return "".join(ch for ch in text if unicodedata.category(ch) != "Cc")
+    return "".join(
+        " " if unicodedata.category(ch) in LINE_BREAKING_CATEGORIES else ch
+        for ch in text
+    )
 
 
 def generate_image(name: int | str, line1: str, line2: str):
@@ -381,7 +390,7 @@ def get_devices() -> dict[str, Device]:
     try:
         with open("images/devices.json") as f:
             return json.load(f)
-    except OSError:
+    except OSError, json.JSONDecodeError:
         return {}
 
 
@@ -400,8 +409,24 @@ def save_devices(devices: dict[str, Device]):
     # A board can check in before any image has been generated on a fresh
     # deploy, when images/ doesn't exist yet.
     os.makedirs("images", exist_ok=True)
-    with open("images/devices.json", "w") as f:
-        json.dump(devices, f)
+    write_json_atomically("images/devices.json", devices)
+
+
+def write_json_atomically(path: str, data: object):
+    """Write JSON so other gunicorn workers never read a half-written file.
+
+    Writes to a temporary file in the same directory, then renames it into
+    place, which replaces the old file in one step.
+    """
+    directory = os.path.dirname(path) or "."
+    fd, tmp_path = tempfile.mkstemp(dir=directory, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp_path, path)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
 
 
 def update_device(device_id: str | None, **kwargs):

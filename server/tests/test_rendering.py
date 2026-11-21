@@ -144,10 +144,11 @@ def test_any_unicode_renders_without_crashing(line1: str, line2: str):
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
-        ("  Hymn   123 ", "Hymn 123"),
+        ("  Hymn   123 ", "  Hymn   123 "),
         ("Hymn\n123", "Hymn 123"),
-        ("Hymn\r\n123", "Hymn 123"),
-        ("1\x002\x1b3", "123"),
+        ("Hymn\r\n123", "Hymn  123"),
+        ("1\x002\t3", "1 2 3"),
+        ("a\u2028b\u2029c", "a b c"),
         ("", ""),
     ],
 )
