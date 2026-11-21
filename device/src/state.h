@@ -1,6 +1,6 @@
 /*
  * eHymnBoard device firmware
- * Copyright (C) 2025  Michael Spencer <sonrisesoftware@gmail.com>
+ * Copyright (C) 2025-2026  Michael Spencer <sonrisesoftware@gmail.com>
 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -30,17 +30,17 @@ struct SavedState
     uint64_t magic = SAVED_STATE_MAGIC;
     uint16_t version = STATE_VERSION;
     int write_count = 0;
-    char etag1[41]; // 40 + 1 for null terminator
-    char etag2[41]; // 40 + 1 for null terminator
-    char etag3[41]; // 40 + 1 for null terminator
+    char etag1[41] = {}; // 40 + 1 for null terminator
+    char etag2[41] = {}; // 40 + 1 for null terminator
+    char etag3[41] = {}; // 40 + 1 for null terminator
 
     SavedState() : write_count(1)
     {
-        etag1[0] = '\0';
-        etag2[0] = '\0';
-        etag3[0] = '\0';
     }
 
+    // The state after a screen update. Etags must be at most 40 characters
+    // (a SHA-1 hex digest). Defined in saved_state.cpp, which has no flash
+    // access, so it's unit tested on the host.
     SavedState(const SavedState *prev_state, const std::string &etag1, const std::string &etag2,
                const std::string &etag3);
 

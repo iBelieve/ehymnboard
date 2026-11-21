@@ -1,6 +1,6 @@
 /*
  * eHymnBoard device firmware
- * Copyright (C) 2025  Michael Spencer <sonrisesoftware@gmail.com>
+ * Copyright (C) 2025-2026  Michael Spencer <sonrisesoftware@gmail.com>
 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -24,10 +24,14 @@
 
 #include "hardware/watchdog.h"
 #include "pico/stdlib.h"
+#include "request_path.h"
 
 inline std::string unique_board_id;
 
 std::string get_unique_board_id();
+
+// This board's ID, flash write count and why it last booted.
+DeviceStatus current_device_status();
 
 void reset_pico();
 void stall_spin();

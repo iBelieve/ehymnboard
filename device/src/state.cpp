@@ -1,6 +1,6 @@
 /*
  * eHymnBoard device firmware
- * Copyright (C) 2025  Michael Spencer <sonrisesoftware@gmail.com>
+ * Copyright (C) 2025-2026  Michael Spencer <sonrisesoftware@gmail.com>
 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -30,7 +30,9 @@ constexpr auto FLASH_TARGET_OFFSET = PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
 // NOLINTNEXTLINE(performance-no-int-to-ptr): memory-mapped flash address
 const SavedState *flash_saved_state = (const SavedState *)(XIP_BASE + FLASH_TARGET_OFFSET);
 
-int flash_safe_execute(std::function<void()> func, uint32_t enter_exit_timeout_ms)
+static_assert(sizeof(SavedState) <= FLASH_PAGE_SIZE, "SavedState must fit in one flash page");
+
+static int flash_safe_execute(std::function<void()> func, uint32_t enter_exit_timeout_ms)
 {
     return flash_safe_execute(
         [](void *arg) {
@@ -40,26 +42,13 @@ int flash_safe_execute(std::function<void()> func, uint32_t enter_exit_timeout_m
         &func, enter_exit_timeout_ms);
 }
 
-SavedState::SavedState(const SavedState *prev_state, const std::string &etag1, const std::string &etag2,
-                       const std::string &etag3)
-    : write_count(prev_state->write_count + 1)
-{
-    hard_assert(etag1.length() <= 40);
-    hard_assert(etag2.length() <= 40);
-    hard_assert(etag3.length() <= 40);
-
-    snprintf(this->etag1, sizeof(this->etag1), "%s", etag1.c_str());
-    snprintf(this->etag2, sizeof(this->etag2), "%s", etag2.c_str());
-    snprintf(this->etag3, sizeof(this->etag3), "%s", etag3.c_str());
-}
-
 void SavedState::save()
 {
     uint8_t page_buf[FLASH_PAGE_SIZE];
 
     memcpy(page_buf, this, sizeof(SavedState));
 
-    int res = flash_safe_execute(
+    const int res = flash_safe_execute(
         [page_buf]() {
             flash_range_erase(FLASH_TARGET_OFFSET, FLASH_SECTOR_SIZE);
             flash_range_program(FLASH_TARGET_OFFSET, page_buf, FLASH_PAGE_SIZE);

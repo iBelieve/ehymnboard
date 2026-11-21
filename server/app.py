@@ -1,5 +1,5 @@
 # eHymnBoard web app and backend server
-# Copyright (C) 2025  Michael Spencer <sonrisesoftware@gmail.com>
+# Copyright (C) 2025-2026  Michael Spencer <sonrisesoftware@gmail.com>
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as
@@ -17,6 +17,8 @@
 import hashlib
 import json
 import os
+import tempfile
+import unicodedata
 from collections import OrderedDict
 from datetime import UTC, datetime
 from functools import wraps
@@ -27,6 +29,7 @@ import requests
 from flask import (
     Flask,
     Response,
+    abort,
     make_response,
     redirect,
     render_template,
@@ -53,9 +56,7 @@ MAX_LINE_WIDTH = SCREEN_WIDTH - 2 * HORIZ_PADDING
 LINE_OFFSET = 15
 
 LINE1_TOP = 0
-LINE1_BOTTOM = LINE_HEIGHT
 LINE2_TOP = SCREEN_HEIGHT - LINE_HEIGHT
-LINE2_BOTTOM = SCREEN_HEIGHT
 
 LINE1_CENTER_Y = LINE1_TOP + LINE_HEIGHT / 2
 LINE2_CENTER_Y = LINE2_TOP + LINE_HEIGHT / 2
@@ -73,7 +74,13 @@ HEALTHCHECKS_PING_URLS = {
     "E661A4D41787452B": "https://hc-ping.com/6c7ef2cb-71b8-492e-9e11-4ddfacf29d0c",
 }
 
-PING_EVERY_REQUESTS = 10
+# Unicode categories Pillow can't render on a single line: control characters
+# (including \n, \r and \t) and the line and paragraph separators.
+LINE_BREAKING_CATEGORIES = {"Cc", "Zl", "Zp"}
+
+# Healthcheck pings run inline in the request, so don't let a slow
+# healthchecks.io stall a gunicorn worker (and the device waiting on it).
+HEALTHCHECK_TIMEOUT_SECONDS = 10
 
 
 class Device(TypedDict):
@@ -115,7 +122,7 @@ def format_device_name(device_id: str) -> str:
 
 
 @app.template_filter("prettydate")
-def prettydate(d: str | datetime) -> str:
+def prettydate(d: str | datetime) -> str:  # noqa: PLR0911
     if isinstance(d, str):
         d = datetime.fromisoformat(d)
 
@@ -123,20 +130,19 @@ def prettydate(d: str | datetime) -> str:
     s = diff.seconds
     if diff.days > 7 or diff.days < 0:
         return "on {}".format(d.strftime("%d %b %y"))
-    elif diff.days == 1:
+    if diff.days == 1:
         return "1 day ago"
-    elif diff.days > 1:
+    if diff.days > 1:
         return f"{diff.days} days ago"
-    elif s < 60:
+    if s < 60:
         return "just now"
-    elif s < 120:
+    if s < 120:
         return "1 minute ago"
-    elif s < 3600:
+    if s < 3600:
         return f"{s // 60} minutes ago"
-    elif s < 7200:
+    if s < 7200:
         return "1 hour ago"
-    else:
-        return f"{s // 3600} hours ago"
+    return f"{s // 3600} hours ago"
 
 
 @app.get("/ok")
@@ -148,9 +154,9 @@ def ok():
 @require_basic_auth
 def index():
     try:
-        with open("images/lines.json", "r") as f:
+        with open("images/lines.json") as f:
             lines = json.load(f)
-    except OSError:
+    except OSError, json.JSONDecodeError:
         lines = []
 
     devices = get_sorted_devices()
@@ -186,14 +192,15 @@ def create_image():
         line5 = ""
         line6 = ""
     else:
-        raise ValueError("Invalid action")
+        abort(HTTPStatus.BAD_REQUEST, "Invalid action")
 
     generate_image("1", line1, line2)
     generate_image("2", line3, line4)
     generate_image("3", line5, line6)
 
-    with open("images/lines.json", "w") as f:
-        json.dump([line1, line2, line3, line4, line5, line6], f)
+    write_json_atomically(
+        "images/lines.json", [line1, line2, line3, line4, line5, line6]
+    )
 
     return redirect("/", code=HTTPStatus.FOUND)
 
@@ -203,7 +210,9 @@ def get_image_png(image_id):
     if not os.path.exists(f"images/{image_id}.png"):
         generate_image(image_id, "", "")
 
-    return send_from_directory("images", f"{image_id}.png")
+    # Resolve against the working directory like every other images/ access;
+    # Flask would otherwise resolve a relative path against the app's root.
+    return send_from_directory(os.path.abspath("images"), f"{image_id}.png")
 
 
 @app.get("/images/<int:image_id>")
@@ -213,7 +222,7 @@ def get_image(image_id):
 
     with open(f"images/{image_id}.png", "rb") as file:
         image_data = file.read()
-        image_hash = hashlib.sha1(image_data).hexdigest()
+        image_hash = hashlib.sha1(image_data, usedforsecurity=False).hexdigest()
 
     if_none_match = request.headers.get("If-None-Match") or request.args.get("etag")
     device_id = request.args.get("device_id")
@@ -224,7 +233,8 @@ def get_image(image_id):
         response = make_response("", 304)
     else:
         print(
-            f"Device {get_device_name(device_id)} ({device_id}) updating image {image_id} from {if_none_match} to {image_hash}"
+            f"Device {get_device_name(device_id)} ({device_id}) updating image "
+            f"{image_id} from {if_none_match} to {image_hash}"
         )
 
         image = Image.open(f"images/{image_id}.png")
@@ -237,7 +247,7 @@ def get_image(image_id):
         response.content_type = "application/octet-stream"
 
     if device_id:
-        saved_state_writes = request.args.get("saved_state_writes")
+        saved_state_writes = request.args.get("saved_state_writes", type=int)
 
         update_device(
             device_id=device_id,
@@ -254,12 +264,13 @@ def get_image(image_id):
 @app.get("/device_booted")
 def report_device_booted():
     device_id = request.args.get("device_id")
-    saved_state_writes = request.args.get("saved_state_writes")
+    saved_state_writes = request.args.get("saved_state_writes", type=int)
     watchdog_caused_reboot = request.args.get("watchdog_caused_reboot") == "1"
 
     if watchdog_caused_reboot:
         print(
-            f"Device reboot caused by watchdog: {get_device_name(device_id)} ({device_id})"
+            "Device reboot caused by watchdog: "
+            f"{get_device_name(device_id)} ({device_id})"
         )
         ping_healthcheck(device_id, path="/failure", data="Watchdog caused reboot")
     else:
@@ -279,7 +290,7 @@ def report_device_booted():
 @app.get("/device_healthy")
 def report_device_healthy():
     device_id = request.args.get("device_id")
-    saved_state_writes = request.args.get("saved_state_writes")
+    saved_state_writes = request.args.get("saved_state_writes", type=int)
 
     print(f"Device healthy: {get_device_name(device_id)} ({device_id})")
 
@@ -298,7 +309,8 @@ def image_to_buffer(image: Image.Image) -> bytes:
     buffer = bytearray(int(image.width / 8) * image.height)
     image = image.convert("1")
     pixels = image.load()
-    assert pixels is not None
+    if pixels is None:
+        raise ValueError("Could not load image pixels")
 
     for y in range(image.height):
         for x in range(image.width):
@@ -308,8 +320,24 @@ def image_to_buffer(image: Image.Image) -> bytes:
     return bytes(buffer)
 
 
+def clean_line(text: str) -> str:
+    """Make arbitrary form input safe to render as a single line.
+
+    Pillow can't lay out newlines, carriage returns or other control
+    characters on one line (it raises), so turn them into spaces. Ordinary
+    spaces are left as typed.
+    """
+    return "".join(
+        " " if unicodedata.category(ch) in LINE_BREAKING_CATEGORIES else ch
+        for ch in text
+    )
+
+
 def generate_image(name: int | str, line1: str, line2: str):
     os.makedirs("images", exist_ok=True)
+
+    line1 = clean_line(line1)
+    line2 = clean_line(line2)
 
     image = Image.new("1", (960, 680), 0)
     draw = ImageDraw.Draw(image)
@@ -337,7 +365,9 @@ def calculate_font_size(draw: ImageDraw.ImageDraw, text: str, font_name: str):
         font = ImageFont.truetype(font_name, font_size)
         text_width = draw.textlength(text, font=font)
 
-    return ImageFont.truetype(font_name, font_size - 1)
+    # Text too wide even at 1pt still renders (clipped) rather than asking
+    # Pillow for a 0pt font, which raises.
+    return ImageFont.truetype(font_name, max(font_size - 1, 1))
 
 
 def draw_centered_text(
@@ -358,9 +388,9 @@ def draw_centered_text(
 
 def get_devices() -> dict[str, Device]:
     try:
-        with open("images/devices.json", "r") as f:
+        with open("images/devices.json") as f:
             return json.load(f)
-    except OSError:
+    except OSError, json.JSONDecodeError:
         return {}
 
 
@@ -376,8 +406,27 @@ def get_device_sort_index(device_id: str) -> int:
 
 
 def save_devices(devices: dict[str, Device]):
-    with open("images/devices.json", "w") as f:
-        json.dump(devices, f)
+    # A board can check in before any image has been generated on a fresh
+    # deploy, when images/ doesn't exist yet.
+    os.makedirs("images", exist_ok=True)
+    write_json_atomically("images/devices.json", devices)
+
+
+def write_json_atomically(path: str, data: object):
+    """Write JSON so other gunicorn workers never read a half-written file.
+
+    Writes to a temporary file in the same directory, then renames it into
+    place, which replaces the old file in one step.
+    """
+    directory = os.path.dirname(path) or "."
+    fd, tmp_path = tempfile.mkstemp(dir=directory, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp_path, path)
+    except BaseException:
+        os.unlink(tmp_path)
+        raise
 
 
 def update_device(device_id: str | None, **kwargs):
@@ -402,7 +451,7 @@ def ping_healthcheck(device_id: str | None, path: str = "", data: str = ""):
         return
 
     try:
-        requests.post(url + path, data=data)
+        requests.post(url + path, data=data, timeout=HEALTHCHECK_TIMEOUT_SECONDS)
     except requests.RequestException:
         print(f"Warning: Healthcheck ping failed for {device_id}")
 

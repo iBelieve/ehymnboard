@@ -6,7 +6,9 @@ WORKDIR /app
 
 COPY --link package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 
-# Install the pnpm version pinned in package.json's packageManager field.
+# Install the pnpm version pinned in package.json's packageManager field
+# (hadolint can't see that pin, hence the ignore).
+# hadolint ignore=DL3016
 RUN npm install -g "$(node -p 'require("./package.json").packageManager')" \
     && pnpm install --frozen-lockfile
 

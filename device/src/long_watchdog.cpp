@@ -1,6 +1,6 @@
 /*
  * eHymnBoard device firmware
- * Copyright (C) 2025  Michael Spencer <sonrisesoftware@gmail.com>
+ * Copyright (C) 2025-2026  Michael Spencer <sonrisesoftware@gmail.com>
 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,12 +22,12 @@
 #include "pico/stdlib.h"
 #include <stdio.h>
 
-uint8_t long_watchdog_timeout_seconds = 0;
-uint8_t seconds_until_watchdog_reset = 0;
+static uint8_t long_watchdog_timeout_seconds = 0;
+static uint8_t seconds_until_watchdog_reset = 0;
 
-repeating_timer_t watcher_timer;
+static repeating_timer_t watcher_timer;
 
-bool watchdog_task([[maybe_unused]] repeating_timer_t *rt)
+static bool watchdog_task([[maybe_unused]] repeating_timer_t *rt)
 {
     if (seconds_until_watchdog_reset > 0)
     {

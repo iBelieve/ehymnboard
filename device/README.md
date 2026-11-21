@@ -30,6 +30,19 @@ To flash the Pico:
 picotool load -xf ehymnboard.elf
 ```
 
+### Tests
+
+The hardware-independent parts of the firmware (HTTP header parsing, request
+paths, saved state) are unit and property tested on your computer, no Pico
+needed. Builds with the host compiler under AddressSanitizer and
+UndefinedBehaviorSanitizer:
+
+```sh
+cmake -S test -B build-test -G Ninja
+ninja -C build-test
+ctest --test-dir build-test
+```
+
 ### Monitoring Output
 
 You can monitor the serial output from the Pico using the included monitor script. It depends on `pyserial`, installable via pip. It will automatically detect the right serial device on macOS. Modify as needed for other platforms.

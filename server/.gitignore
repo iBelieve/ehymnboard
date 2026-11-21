@@ -3,3 +3,7 @@ images
 node_modules
 static/tailwind.css
 devices.json
+.hypothesis
+.pytest_cache
+.coverage
+coverage.xml
