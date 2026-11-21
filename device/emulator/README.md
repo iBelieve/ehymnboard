@@ -1,16 +1,14 @@
-# Firmware emulator (prototype)
+# Firmware emulator
 
-Runs the real firmware UF2 in [rp2040js](https://github.com/wokwi/rp2040js)
-with a fake CYW43439 WiFi chip attached, so the unmodified pico-sdk WiFi
-driver and lwIP run against a scripted access point. Nothing leaves the
-machine and no Wokwi account is needed.
+Runs the real firmware in [rp2040js](https://github.com/wokwi/rp2040js) on an
+emulated eHymnBoard: a Pico W with a fake CYW43439 WiFi chip, a scripted
+access point with its own LAN (DHCP, DNS, TCP), a mock hymn board server,
+three e-paper panels and flash that survives reboots. The unmodified pico-sdk
+WiFi driver, lwIP and the firmware's HTTP client all run as they would on a
+real board, so tests can exercise WiFi and server failures that are hard to
+set up on hardware. Everything runs locally and no Wokwi account is needed.
 
-Status (step 1 of the plan): the driver brings the fake chip up (bus init,
-225 KB firmware download, CLM, `cyw43_arch_init()`), and a WiFi scan returns
-the fake APs, so `setup_wifi()` picks `SSID_1` and starts joining. Joining,
-DHCP and the HTTP fetch are step 2 and not done yet.
-
-## Run
+## Run the scenario tests
 
 Build the firmware as usual (`device/src/secrets.h` copied from
 `secrets.example.h` matches the fake AP `SSID_1`), then:
@@ -18,22 +16,75 @@ Build the firmware as usual (`device/src/secrets.h` copied from
 ```sh
 cd device/emulator
 pnpm install
-node run.mjs ../build/ehymnboard.uf2 --timeout 120   # wall-clock seconds
+pnpm test                                   # uses ../build/ehymnboard.uf2
+FIRMWARE_UF2=/path/to/ehymnboard.uf2 pnpm test
+EMULATOR_VERBOSE=1 pnpm test                # print serial output and events
 ```
 
-`--trace` logs every gSPI transaction and ioctl. The simulation runs at about
-a sixth of real time.
+CI runs these against the firmware the `build` job produces (the `emulator`
+job in `.github/workflows/ci-device.yml`). The whole suite takes a few seconds:
+sleeps jump straight to the next timer alarm, so simulated time runs far
+faster than real time.
+
+| Test file | Covers |
+| --- | --- |
+| `happy-path.test.mjs` | Join, healthcheck, all three screens drawn intact, saved ETags give 304s, a changed image redraws only its screen |
+| `pio-bus.test.mjs` | The same first loop over the real PIO/DMA gSPI driver instead of the fast path |
+| `wifi.test.mjs` | Unknown networks skipped, wrong password retried, no known network |
+| `server-errors.test.mjs` | A 500, a connection closed mid-image, a wrong-size image, a reset connection, an unknown host |
+| `recovery.test.mjs` | WiFi lost for good, the 3 minute watchdog reboot, rejoin with ETags kept in flash |
+
+## Run the firmware interactively
+
+```sh
+node run.mjs ../build/ehymnboard.uf2 --seconds 60   # simulated seconds
+```
+
+`--trace` logs every gSPI transaction and ioctl.
+
+## Writing a test
+
+`emulator.mjs` puts the pieces together. `new Emulator({ firmware })` (or
+`boot()` from `test/helpers.mjs`) gives you:
+
+- `waitForSerial(text, ms, fromIndex)` runs until the firmware prints `text`
+  (a string or RegExp) and returns the index after it; `waitFor(what, cond, ms)`
+  runs until a condition holds. Both throw with the serial tail on timeout.
+- `server` is the `MockServer`: `setImage(screen, version)` changes an image,
+  and `override = (req) => response` answers a request yourself. A response
+  is `{ status, headers, body }`, plus `stall`, `reset` or `truncateAt` to
+  break the connection.
+- `net.requests` lists every HTTP request with its status, `displays` every
+  panel refresh with its frame, `reboots` the watchdog resets.
+- `dropLink()` takes the AP away. `aps` (an option) lists the networks in
+  range, each `{ ssid, password?, bssid?, rssi?, channel? }`.
 
 ## How it works
 
-- `fake-cyw43.mjs` watches the WL_ON, CS and CLK pins (GPIO 23, 25, 29),
-  samples the data pin (GPIO 24) on each rising clock edge and drives it with
-  response bits in the read phase. It models the gSPI registers, the
-  backplane window and core reset registers the driver polls, discards the
-  firmware download, answers ioctls/iovars over SDPCM, and sends async events
-  (scan results so far). It raises GPIO 24 as the host-wake interrupt while
-  it has packets queued.
-- `run.mjs` loads the UF2, attaches USB CDC for stdio, and steps PIO in
-  lockstep with the CPU (rp2040js normally runs PIO on a slow timer).
+- `fake-cyw43.mjs` models the WiFi chip at the gSPI level: the bus and
+  backplane registers the driver polls, the firmware download (discarded),
+  ioctls and iovars over SDPCM, async events for scans and joins (including
+  wrong-password and missing-network failures), and Ethernet frames once
+  joined. It raises GPIO 24 as the host-wake interrupt while it has packets
+  queued. It can be driven bit by bit from the PIO pins (GPIO 23, 24, 25, 29)
+  or a transfer at a time.
+- `board.mjs` builds the RP2040 and the panels on SPI0, keeps a flash image
+  (bootrom erase and program calls are answered directly, as rp2040js has no
+  QSPI flash model), and rebuilds the chip from that flash on a watchdog
+  reset. When the firmware's `.elf` sits next to its `.uf2`, calls to
+  `cyw43_spi_transfer()` are answered directly (the fast path); otherwise, or
+  with `pioBus: true`, PIO is stepped in lockstep with the CPU.
+- `virtual-net.mjs` is the LAN behind the AP: the router at 10.0.0.1 answers
+  ARP, DHCP and DNS and serves HTTP on port 80 from a small TCP stack.
 - `bootrom-b1.bin` is the RP2040 B1 bootrom (BSD-3-Clause, from
   raspberrypi/pico-bootrom via the rp2040js demo).
+
+## Limits
+
+- Timing is approximate: instruction cycles are counted, but bus and flash
+  timing are not modeled, so this won't catch timing races.
+- The unique board ID reads as zeros, and nothing types at the USB serial
+  console.
+- rp2040js workarounds live in `board.mjs`: its PIO timer, its watchdog
+  re-firing forever at expiry, and USB CDC answering every poll at once.
+- Networks are open or WPA2-PSK only: no WPA3 and no roaming between APs.

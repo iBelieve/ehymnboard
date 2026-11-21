@@ -62,23 +62,45 @@ const CONTROL_HEADER = 0;
 const ASYNCEVENT_HEADER = 1;
 const DATA_HEADER = 2;
 const WLC_UP = 2;
+const WLC_SET_SSID = 26;
+const WLC_DISASSOC = 52;
 const WLC_GET_VAR = 262;
 const WLC_SET_VAR = 263;
+const WLC_SET_WSEC_PMK = 268;
 
+const EV_SET_SSID = 0;
+const EV_AUTH = 3;
+const EV_DEAUTH_IND = 6;
+const EV_LINK = 16;
+const EV_PSK_SUP = 46;
 const EV_ESCAN_RESULT = 69;
 const STATUS_SUCCESS = 0;
+const STATUS_NO_NETWORKS = 3;
 const STATUS_PARTIAL = 8;
+const SUP_KEYED = 6;
+const SUP_MSG3_TIMEOUT = 8;
+
+// How long the fake radio takes, in simulated milliseconds
+const SCAN_MS = 300;
+const JOIN_MS = 200;
 
 const swap16x2 = (b) => [b[1], b[0], b[3], b[2]];
 
 export class FakeCYW43 {
   /**
+   * An access point: { ssid, password?, bssid?, rssi?, channel? }. No password
+   * means an open network.
+   *
    * @param {import('rp2040js').RP2040} mcu
-   * @param {{ aps?: Array<{ssid: string, bssid?: number[], rssi?: number, channel?: number, auth?: 'open'|'wpa2'}>, log?: (msg: string) => void, trace?: boolean }} opts
+   * @param {{ aps?: object[], log?: (msg: string) => void, trace?: boolean }} opts
    */
   constructor(mcu, opts = {}) {
     this.mcu = mcu;
     this.aps = opts.aps ?? [];
+    /** Called with each Ethernet frame the firmware sends. */
+    this.onEthernetFromHost = null;
+    /** Called with the joined AP, or null when the link goes down. */
+    this.onLinkChange = null;
     this.log = opts.log ?? ((msg) => console.log(`[cyw43] ${msg}`));
     this.trace = opts.trace ?? false;
     this.mac = [0x28, 0xcd, 0xc1, 0x00, 0x00, 0x01];
@@ -118,7 +140,16 @@ export class FakeCYW43 {
     this.txSeq = 0;
     this.hostSeq = 0;
     this.inTransaction = false;
-    this.stats = { transactions: 0, firmwareBytes: 0, ioctls: 0 };
+    this.pmk = '';
+    this.joined = null;
+    this.creditSent = 0;
+    this.stats = { transactions: 0, clockEdges: 0, firmwareBytes: 0, ioctls: 0, framesIn: 0, framesOut: 0 };
+  }
+
+  /** Runs fn after ms of simulated time. */
+  after(ms, fn) {
+    const alarm = this.mcu.clock.createAlarm(fn);
+    alarm.schedule(ms * 1e6);
   }
 
   // ---- gSPI bit level --------------------------------------------------------
@@ -147,6 +178,7 @@ export class FakeCYW43 {
   }
 
   clockRisingEdge() {
+    this.stats.clockEdges++;
     if (this.out) {
       // Read phase: present the next response bit; the PIO samples it on the
       // following instruction (while the clock is low).
@@ -160,12 +192,34 @@ export class FakeCYW43 {
     this.curByte = (this.curByte << 1) | bit;
     this.bitCount++;
     if ((this.bitCount & 7) === 0) {
-      this.rxBytes.push(this.curByte);
+      this.pushByte(this.curByte);
       this.curByte = 0;
-      if (this.rxBytes.length === 4 && !this.cmd) {
-        this.decodeCommand();
-      }
     }
+  }
+
+  pushByte(byte) {
+    this.rxBytes.push(byte);
+    if (this.rxBytes.length === 4 && !this.cmd) {
+      this.decodeCommand();
+    }
+  }
+
+  /**
+   * A whole gSPI transaction at once, for the emulator's fast path that
+   * replaces the firmware's PIO/DMA bus driver: sends tx (command and any
+   * write data) and returns the rxLength - tx.length bytes clocked back.
+   */
+  transfer(tx, rxLength) {
+    this.beginTransaction();
+    for (const byte of tx) {
+      this.pushByte(byte);
+    }
+    const rx = new Uint8Array(Math.max(0, rxLength - tx.length));
+    if (this.out) {
+      rx.set(this.out.subarray(0, rx.length));
+    }
+    this.endTransaction();
+    return rx;
   }
 
   decodeCommand() {
@@ -322,7 +376,10 @@ export class FakeCYW43 {
     pkt[6] = 0; // next length
     pkt[7] = headerLen;
     pkt[8] = 0; // flow control
-    pkt[9] = (this.hostSeq + 8) & 0xff; // bus data credit: allow a few more packets
+    // Bus data credit: the host may send packets up to (not including) this
+    // sequence number before it has to wait for us.
+    this.creditSent = (this.hostSeq + 16) & 0xff;
+    pkt[9] = this.creditSent;
     pkt.set(body, headerLen);
     return pkt;
   }
@@ -335,6 +392,11 @@ export class FakeCYW43 {
       return;
     }
     this.hostSeq = data[4];
+    if (((this.creditSent - this.hostSeq) & 0xff) < 4 && this.rxQueue.length === 0) {
+      // Running out of credit with nothing to send: send a bare header (a
+      // flow control packet) to grant more.
+      this.queueForHost(this.sdpcmPacket(CONTROL_HEADER, new Uint8Array(0)));
+    }
     const channel = data[5] & 0x0f;
     const headerLen = data[7];
     const payload = data.subarray(headerLen, size);
@@ -342,7 +404,10 @@ export class FakeCYW43 {
       this.handleIoctl(payload);
     } else if (channel === DATA_HEADER) {
       const bdcLen = 4 + (payload[3] << 2);
-      this.onEthernetFromHost?.(payload.subarray(bdcLen));
+      this.stats.framesIn++;
+      if (this.joined) {
+        this.onEthernetFromHost?.(payload.slice(bdcLen));
+      }
     } else {
       this.log(`ignoring host packet on channel ${channel}`);
     }
@@ -370,8 +435,16 @@ export class FakeCYW43 {
       }
     } else if (cmd === WLC_UP) {
       this.up = true;
+    } else if (cmd === WLC_SET_WSEC_PMK) {
+      const keyLen = data[0] | (data[1] << 8);
+      this.pmk = new TextDecoder().decode(data.subarray(4, 4 + keyLen));
+    } else if (cmd === WLC_SET_SSID) {
+      const ssidLen = data[0] | (data[1] << 8);
+      this.startJoin(new TextDecoder().decode(data.subarray(4, 4 + ssidLen)), iface);
+    } else if (cmd === WLC_DISASSOC) {
+      this.setLinkDown();
     }
-    if (this.trace || name === 'escan') {
+    if (this.trace) {
       this.log(`ioctl ${cmd}${name ? ` "${name}"` : ''} len ${len} itf ${iface}`);
     }
 
@@ -408,15 +481,72 @@ export class FakeCYW43 {
         this.log(`MAC set to ${this.mac.map((b) => b.toString(16).padStart(2, '0')).join(':')}`);
         break;
       case 'escan':
-        // Reply after the ioctl response so the scan state is set first.
-        setTimeout(() => this.sendScanResults(iface), 0);
+        this.after(SCAN_MS, () => this.sendScanResults(iface));
         break;
+      case 'join': {
+        const ssidLen = value[0] | (value[1] << 8);
+        this.startJoin(new TextDecoder().decode(value.subarray(4, 4 + ssidLen)), iface);
+        break;
+      }
     }
+  }
+
+  // ---- join and link ---------------------------------------------------------
+
+  startJoin(ssid, iface) {
+    this.after(JOIN_MS, () => {
+      const ap = this.aps.find((a) => a.ssid === ssid);
+      if (!ap) {
+        this.log(`join "${ssid}": no such network`);
+        this.queueForHost(this.eventPacket(EV_SET_SSID, STATUS_NO_NETWORKS, iface));
+        return;
+      }
+      this.queueForHost(this.eventPacket(EV_AUTH, STATUS_SUCCESS, iface));
+      if (ap.password && ap.password !== this.pmk) {
+        // A wrong passphrase shows up as the 4-way handshake never finishing,
+        // and the AP deauthenticating us.
+        this.log(`join "${ssid}": wrong password`);
+        this.queueForHost(this.eventPacket(EV_PSK_SUP, SUP_MSG3_TIMEOUT, iface, undefined, { reason: 14 }));
+        this.queueForHost(this.eventPacket(EV_DEAUTH_IND, STATUS_SUCCESS, iface, undefined, { reason: 2 }));
+        return;
+      }
+      this.log(`join "${ssid}": connected`);
+      this.joined = ap;
+      this.queueForHost(this.eventPacket(EV_LINK, STATUS_SUCCESS, iface, undefined, { flags: 1 }));
+      this.queueForHost(this.eventPacket(EV_SET_SSID, STATUS_SUCCESS, iface));
+      if (ap.password) {
+        this.queueForHost(this.eventPacket(EV_PSK_SUP, SUP_KEYED, iface));
+      }
+      this.onLinkChange?.(ap);
+    });
+  }
+
+  /** Drops the connection, as if the AP went away. */
+  setLinkDown() {
+    if (!this.joined) {
+      return;
+    }
+    this.log(`link to "${this.joined.ssid}" down`);
+    this.joined = null;
+    this.queueForHost(this.eventPacket(EV_LINK, STATUS_SUCCESS, 0, undefined, { flags: 0 }));
+    this.onLinkChange?.(null);
+  }
+
+  /** Delivers an Ethernet frame to the firmware. */
+  sendEthernet(frame) {
+    if (!this.joined) {
+      return;
+    }
+    const body = new Uint8Array(4 + frame.length);
+    body[0] = 0x20; // BDC version 2
+    body.set(frame, 4);
+    this.stats.framesOut++;
+    this.queueForHost(this.sdpcmPacket(DATA_HEADER, body));
   }
 
   // ---- async events ----------------------------------------------------------
 
-  eventPacket(eventType, status, iface, data = new Uint8Array(0)) {
+  eventPacket(eventType, status, iface, data = new Uint8Array(0), { flags = 0, reason = 0 } = {}) {
     // BDC header, then an Ethernet-style header with the Broadcom ethertype,
     // then the BCM event header, then wl_event_msg (big endian), then data.
     const body = new Uint8Array(4 + 24 + 48 + data.length);
@@ -435,10 +565,10 @@ export class FakeCYW43 {
     v.setUint16(eth + 22, 1); // usr subtype: event
     const ev = eth + 24;
     v.setUint16(ev + 0, 2); // version
-    v.setUint16(ev + 2, 0); // flags
+    v.setUint16(ev + 2, flags);
     v.setUint32(ev + 4, eventType);
     v.setUint32(ev + 8, status);
-    v.setUint32(ev + 12, 0); // reason
+    v.setUint32(ev + 12, reason);
     v.setUint32(ev + 16, 0); // auth type
     v.setUint32(ev + 20, data.length);
     body[ev + 46] = iface; // ifidx
@@ -450,7 +580,7 @@ export class FakeCYW43 {
     // wl_escan_result header followed by one wl_bss_info (little endian).
     const ies = [];
     ies.push(0, ap.ssid.length, ...new TextEncoder().encode(ap.ssid)); // SSID IE
-    if (ap.auth !== 'open') {
+    if (ap.password) {
       // Minimal RSN IE: version 1, CCMP group/pairwise, PSK AKM
       ies.push(48, 20, 1, 0, 0x00, 0x0f, 0xac, 4, 1, 0, 0x00, 0x0f, 0xac, 4, 1, 0, 0x00, 0x0f, 0xac, 2, 0, 0);
     }
@@ -466,7 +596,7 @@ export class FakeCYW43 {
     v.setUint32(b + 4, bssLen, true);
     buf.set(ap.bssid ?? [0x02, 0x00, 0x00, 0x00, 0x00, 0x01], b + 8);
     v.setUint16(b + 14, 100, true); // beacon period
-    v.setUint16(b + 16, ap.auth === 'open' ? 0x0001 : 0x0011, true); // ESS (+ privacy)
+    v.setUint16(b + 16, ap.password ? 0x0011 : 0x0001, true); // ESS (+ privacy)
     const ssid = new TextEncoder().encode(ap.ssid).subarray(0, 32);
     buf[b + 18] = ssid.length;
     buf.set(ssid, b + 19);
