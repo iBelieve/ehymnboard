@@ -1,0 +1,9 @@
+# pnpm 12 refuses to install a dependency release younger than this many
+# minutes (1 day, also pnpm's default), matching Dependabot's 1-day cooldown.
+minimumReleaseAge: 1440
+
+# pnpm 12 fails install on dependency build scripts nobody has reviewed.
+# @parcel/watcher's script only builds from source when no prebuilt binary
+# exists; the prebuilt @parcel/watcher-<platform> package is used instead.
+allowBuilds:
+  '@parcel/watcher': false

@@ -32,5 +32,10 @@ All checks below must pass; run them locally before committing.
   pins; CI runs `uv lock --check`
 - Lint/format: `uv run ruff check .` and `uv run ruff format --check .`
 - Types: `uv run pyright` (zero errors expected)
-- Docker: CI builds the image (`docker build server`); the tailwind/npm asset
+- Assets: pnpm, pinned by `packageManager` in `package.json`; `pnpm install`
+  then `pnpm run build` (CI uses `--frozen-lockfile`). New dependency build
+  scripts must be allowed or denied under `allowBuilds` in
+  `pnpm-workspace.yaml`, or install fails. `minimumReleaseAge` there rejects
+  releases under a day old, so don't pin a version published today
+- Docker: CI builds the image (`docker build server`); the tailwind/pnpm asset
   build runs inside it

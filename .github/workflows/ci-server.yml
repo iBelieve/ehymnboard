@@ -53,17 +53,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v7
+      # Installs the pnpm from package.json's packageManager, Node.js from
+      # server/.node-version, and runs pnpm install --frozen-lockfile.
+      - uses: pnpm/setup@v3
         with:
-          node-version-file: server/.node-version
-          cache: npm
-          cache-dependency-path: server/package-lock.json
-
-      - name: Install npm dependencies
-        run: npm ci
+          working-directory: server
+          cache: true
+          require-lockfile: true
 
       - name: Build assets
-        run: npm run build
+        run: pnpm run build
 
   docker:
     runs-on: ubuntu-latest
