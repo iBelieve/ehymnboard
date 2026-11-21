@@ -21,12 +21,10 @@
 // Pure helpers for parsing HTTP response headers. No pico-sdk dependencies, so
 // they're unit tested on the host (see test/).
 
-#include <optional>
 #include <string>
 #include <string_view>
 
 // Returns the value of the ETag header in a raw HTTP response header block
-// (status line, then "Name: value" lines separated by CRLF), or std::nullopt
-// if there isn't one (or its value is blank). Header names are matched
-// case-insensitively.
-std::optional<std::string> find_etag(std::string_view headers);
+// (status line, then "Name: value" lines separated by CRLF), or an empty string
+// if there isn't one. Header names are matched case-insensitively.
+std::string find_etag(std::string_view headers);

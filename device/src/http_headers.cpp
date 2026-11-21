@@ -20,7 +20,6 @@
 
 #include <cctype>
 #include <cstddef>
-#include <optional>
 #include <string>
 #include <string_view>
 
@@ -52,7 +51,7 @@ static std::string_view trim(std::string_view s)
     return s.substr(start, end - start + 1);
 }
 
-std::optional<std::string> find_etag(std::string_view headers)
+std::string find_etag(std::string_view headers)
 {
     constexpr std::string_view crlf = "\r\n";
 
@@ -74,16 +73,11 @@ std::optional<std::string> find_etag(std::string_view headers)
         const auto colon = line.find(':');
         if (colon != std::string_view::npos && iequals(line.substr(0, colon), "etag"))
         {
-            const auto value = trim(line.substr(colon + 1));
-            if (value.empty())
-            {
-                return std::nullopt;
-            }
-            return std::string(value);
+            return std::string(trim(line.substr(colon + 1)));
         }
 
         line_start = line_end;
     }
 
-    return std::nullopt;
+    return {};
 }
