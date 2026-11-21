@@ -12,10 +12,84 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "hypothesis>=6.170.17",
+    "lizard>=1.26.1",
     "pyright>=1.1.414",
+    "pytest>=9.2.0",
+    "pytest-cov>=7.1.0",
+    "pytest-playwright>=0.10.0",
     "ruff>=0.17.6",
+    "vulture>=2.16",
 ]
 
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
+include = [".", "../tools"]
+extraPaths = ["../tools"]
+
+[tool.ruff.lint]
+# On top of the defaults (E4, E7, E9, F): style, import order, bug-prone
+# patterns, security (bandit), complexity, simplifications and pylint.
+extend-select = [
+    "E",
+    "W",
+    "I",
+    "B",
+    "UP",
+    "S",
+    "C90",
+    "SIM",
+    "RET",
+    "PERF",
+    "PT",
+    "PL",
+    "RUF",
+]
+ignore = [
+    # Magic values like HTTP status codes and time spans read fine inline
+    "PLR2004",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004"]
+"e2e/**" = ["S101", "PLR2004"]
+"../tools/test_*.py" = ["S101", "PLR2004"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers"]
+
+[tool.coverage.run]
+source = ["."]
+omit = ["tests/*", "e2e/*", "config/*"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true
+skip_covered = true
+
+[tool.vulture]
+paths = ["app.py", "config", "tests", "e2e"]
+# Flask finds these through decorators, gunicorn reads config/gunicorn.py by
+# module attribute, Device fields are read from JSON in templates, and Flask
+# reads content_type off the response, so vulture can't see them being used.
+ignore_decorators = ["@app.*", "@pytest.fixture"]
+ignore_names = [
+    "id",
+    "last_seen",
+    "booted_at",
+    "content_type",
+    "bind",
+    "accesslog",
+    "access_log_format",
+    "workers",
+    "threads",
+    "reload",
+    "timeout",
+]
+min_confidence = 60

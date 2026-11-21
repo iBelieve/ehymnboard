@@ -1,6 +1,6 @@
 /*
  * eHymnBoard device firmware
- * Copyright (C) 2025  Michael Spencer <sonrisesoftware@gmail.com>
+ * Copyright (C) 2025-2026  Michael Spencer <sonrisesoftware@gmail.com>
 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,18 +23,23 @@
 #include "lwip/apps/http_client.h"
 #include "pico/async_context.h"
 #include "pico/cyw43_arch.h"
-#include "state.h"
+#include "request_path.h"
 #include "utils.h"
+
+namespace
+{
 
 struct HealthcheckRequest
 {
     bool complete = false;
-    httpc_result_t result;
-    u32_t status_code;
+    httpc_result_t result = HTTPC_RESULT_ERR_UNKNOWN;
+    u32_t status_code = 0;
 };
 
-void on_healthcheck_request_completed(void *arg, httpc_result_t httpc_result, [[maybe_unused]] u32_t rx_content_len,
-                                      u32_t srv_res, err_t err)
+} // namespace
+
+static void on_healthcheck_request_completed(void *arg, httpc_result_t httpc_result,
+                                             [[maybe_unused]] u32_t rx_content_len, u32_t srv_res, err_t err)
 {
     assert(arg);
     HealthcheckRequest *req = (HealthcheckRequest *)arg;
@@ -47,8 +52,8 @@ void on_healthcheck_request_completed(void *arg, httpc_result_t httpc_result, [[
     req->result = httpc_result;
 }
 
-err_t on_healthcheck_data_received([[maybe_unused]] void *arg, struct altcp_pcb *conn, struct pbuf *p,
-                                   [[maybe_unused]] err_t err)
+static err_t on_healthcheck_data_received([[maybe_unused]] void *arg, struct altcp_pcb *conn, struct pbuf *p,
+                                          [[maybe_unused]] err_t err)
 {
     assert(arg);
 
@@ -60,13 +65,11 @@ err_t on_healthcheck_data_received([[maybe_unused]] void *arg, struct altcp_pcb 
     return ERR_OK;
 }
 
-void send_healthcheck_request(const std::string &path)
+static void send_healthcheck_request(const std::string &path)
 {
     auto context = cyw43_arch_async_context();
 
-    std::string full_path = path + "?device_id=" + unique_board_id +
-                            "&saved_state_writes=" + std::to_string(flash_saved_state->write_count) +
-                            "&watchdog_caused_reboot=" + std::to_string(watchdog_caused_reboot());
+    const std::string full_path = build_request_path(path, current_device_status());
 
     HealthcheckRequest req;
 
@@ -74,8 +77,8 @@ void send_healthcheck_request(const std::string &path)
     settings.result_fn = on_healthcheck_request_completed;
 
     cyw43_arch_lwip_begin();
-    auto ret = httpc_get_file_dns("api.hymnboard.sonrise.io", 80, full_path.c_str(), &settings,
-                                  on_healthcheck_data_received, &req, nullptr);
+    const auto ret = httpc_get_file_dns("api.hymnboard.sonrise.io", 80, full_path.c_str(), &settings,
+                                        on_healthcheck_data_received, &req, nullptr);
     cyw43_arch_lwip_end();
 
     if (ret != ERR_OK)
@@ -84,13 +87,13 @@ void send_healthcheck_request(const std::string &path)
         return;
     }
 
-    auto request_start = get_absolute_time();
+    const auto request_start = get_absolute_time();
 
     while (!req.complete)
     {
         async_context_wait_for_work_ms(context, 1000);
 
-        if (absolute_time_diff_us(request_start, get_absolute_time()) > 60ll * 1000 * 1000)
+        if (absolute_time_diff_us(request_start, get_absolute_time()) > 60LL * 1000 * 1000)
         {
             printf("Healthcheck HTTP request timed out after 60s waiting for completion\n");
             return;

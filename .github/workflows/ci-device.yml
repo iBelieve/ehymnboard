@@ -5,10 +5,14 @@ on:
     branches: [master]
     paths:
       - "device/**"
+      - "tools/**"
+      - ".jscpd.json"
       - ".github/workflows/ci-device.yml"
   pull_request:
     paths:
       - "device/**"
+      - "tools/**"
+      - ".jscpd.json"
       - ".github/workflows/ci-device.yml"
 
 concurrency:
@@ -35,7 +39,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.4.0
 
       - name: Check formatting
-        run: git ls-files 'src/*.cpp' 'src/*.h' | xargs uv run clang-format --dry-run --Werror
+        run: git ls-files 'src/*.cpp' 'src/*.h' 'test/*.cpp' 'test/*.h' | xargs uv run clang-format --dry-run --Werror
 
   build:
     runs-on: ubuntu-latest
@@ -91,6 +95,61 @@ jobs:
             --extra-arg=-isystem --extra-arg="$TOOLCHAIN_DIR/arm-none-eabi/include" \
             src/*.cpp
 
+  # Unit and property tests (GoogleTest + RapidCheck) for the
+  # hardware-independent code, built for the host under ASan/UBSan with
+  # coverage.
+  host-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.4.0
+
+      - name: Install ninja
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Configure
+        run: cmake -S test -B build-test -G Ninja -DSANITIZE=ON -DCOVERAGE=ON
+
+      - name: Build
+        run: ninja -C build-test
+
+      - name: Run tests
+        run: ctest --test-dir build-test --output-on-failure
+
+      - name: Check coverage
+        run: >
+          uv run gcovr --root . --filter 'src/' --object-directory build-test
+          --exclude-throw-branches --txt --cobertura build-test/coverage.xml
+          --fail-under-line 90
+
+      - name: Check CRAP scores
+        run: >
+          uv run python ../tools/crap.py --coverage build-test/coverage.xml
+          src/http_headers.cpp src/request_path.cpp src/saved_state.cpp
+
+  # Complexity and copy-paste limits across the firmware.
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.4.0
+
+      - name: Check complexity
+        run: uv run lizard --CCN 15 --length 150 --arguments 7 --warnings_only src test
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+
+      - name: Check for duplicate code
+        if: success() || failure()
+        working-directory: .
+        run: npx --yes jscpd@5.4.3 device
+
   python:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -111,3 +170,7 @@ jobs:
       - name: Check formatting
         if: success() || failure()
         run: uv run ruff format --check .
+
+      - name: Check for dead code
+        if: success() || failure()
+        run: uv run vulture
