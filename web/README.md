@@ -42,10 +42,12 @@ set (for `pnpm dev`, put them in `.dev.vars`). After changing
 The Docker image runs the built Worker on workerd and stores Durable Object
 data under `/data`, which must be a persistent volume.
 
-> **Flash the boards first.** workerd sends the header as `ETag`. Firmware
-> before the case-insensitive header parsing in PR #16 only recognizes
-> `Etag`, never adopts the new tag, and would redraw every screen every 15
-> seconds.
+> **Header casing.** workerd sends the header as `ETag` and Flask as `Etag`,
+> but the boards never see either: Cloudflare's proxy lowercases every header
+> name to `etag`. Firmware before the case-insensitive parsing in PR #16 only
+> matches `Etag: `, so it misses the tag behind Cloudflare with either backend.
+> Flash #16 to fix that. The cutover itself changes nothing for the boards as
+> long as `api.hymnboard.sonrise.io` stays proxied.
 
 ```sh
 dokku apps:create hymnboard-web
