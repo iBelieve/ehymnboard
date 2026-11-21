@@ -44,4 +44,12 @@ export function assertFirstImagesShown(emu) {
   for (const d of emu.displays) {
     assert.deepEqual(d.frame, testImage(d.screen, 1), `screen ${d.screen} shows the image the server sent`);
   }
+  assertNoPanelFaults(emu);
+}
+
+/** Checks that the firmware broke none of the panel controller's rules. */
+export function assertNoPanelFaults(emu) {
+  for (const panel of emu.board.panels) {
+    assert.deepEqual(panel.faults, [], `screen ${panel.id} faults`);
+  }
 }

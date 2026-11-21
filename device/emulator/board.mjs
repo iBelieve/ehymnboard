@@ -21,20 +21,19 @@
 // reset rebuilds the RP2040 from the same flash, like a real reboot.
 import { ConsoleLogger, GPIOPinState, LogLevel, RP2040, Simulator, USBCDC } from 'rp2040js';
 import { elfSymbols } from './elf.mjs';
+import { EPaperPanel } from './epaper.mjs';
 import { FakeCYW43 } from './fake-cyw43.mjs';
 
 const FLASH_BASE = 0x10000000;
 const WATCHDOG_BASE = 0x40058;
 const WATCHDOG_REASON_TIMER = 1;
-const IMAGE_BYTES = 81600;
-const BUSY_MS = 5; // how long a panel holds BUSY after a reset or refresh
 const GSPI_NANOS_PER_BYTE = 8 * 32; // ~31 MHz bus clock
 
-// Pins from main.cpp: chip select, data/command and busy for screens 1-3
+// Pins from main.cpp for screens 1-3
 const PANELS = [
-  { id: 1, cs: 5, dc: 6, busy: 8 },
-  { id: 2, cs: 10, dc: 11, busy: 13 },
-  { id: 3, cs: 19, dc: 20, busy: 22 },
+  { id: 1, power: 9, cs: 5, dc: 6, reset: 7, busy: 8 },
+  { id: 2, power: 14, cs: 10, dc: 11, reset: 12, busy: 13 },
+  { id: 3, power: 26, cs: 19, dc: 20, reset: 21, busy: 22 },
 ];
 
 /** Finds a function in the bootrom's lookup table by its two-letter code. */
@@ -49,45 +48,6 @@ function romFunction(bootrom, code) {
     if (entry === want) {
       return view.getUint16(i + 2, true) & ~1;
     }
-  }
-}
-
-/** One e-paper panel: collects the frame written after command 0x24. */
-class FakePanel {
-  constructor(board, pins) {
-    this.board = board;
-    this.pins = pins;
-    this.frame = null;
-    this.command = -1;
-    this.refreshes = 0;
-  }
-
-  get selected() {
-    return this.board.mcu.gpio[this.pins.cs].value === GPIOPinState.Low;
-  }
-
-  byte(value) {
-    const isData = this.board.mcu.gpio[this.pins.dc].value === GPIOPinState.High;
-    if (!isData) {
-      this.command = value;
-      if (value === 0x24) {
-        this.frame = [];
-      } else if (value === 0x12 || value === 0x20) {
-        this.holdBusy();
-        if (value === 0x20) {
-          this.refreshes++;
-          this.board.emit('display', { screen: this.pins.id, frame: Uint8Array.from(this.frame ?? []) });
-        }
-      }
-    } else if (this.command === 0x24 && this.frame && this.frame.length < IMAGE_BYTES) {
-      this.frame.push(value);
-    }
-  }
-
-  holdBusy() {
-    const busy = this.board.mcu.gpio[this.pins.busy];
-    busy.setInputValue(true);
-    this.board.after(BUSY_MS, () => busy.setInputValue(false));
   }
 }
 
@@ -115,6 +75,14 @@ export class Board {
     this.serial = '';
     this.boots = 0;
     this.flashWrites = 0;
+    // The panels outlive a Pico reboot; they lose power when its pins reset.
+    this.panels = PANELS.map((pins) => {
+      const panel = new EPaperPanel({ id: pins.id, after: (ms, fn) => this.after(ms, fn) });
+      panel.pins = pins;
+      panel.onDisplay = ({ image, updateControl }) =>
+        this.emit('display', { screen: pins.id, frame: image, updateControl });
+      return panel;
+    });
     this.powerOn(0);
   }
 
@@ -185,15 +153,7 @@ export class Board {
       previousChip.onLinkChange?.(null);
     }
 
-    this.panels = PANELS.map((pins) => new FakePanel(this, pins));
-    mcu.spi[0].onTransmit = (value) => {
-      for (const panel of this.panels) {
-        if (panel.selected) {
-          panel.byte(value);
-        }
-      }
-      mcu.spi[0].completeTransmit(0);
-    };
+    this.wirePanels(mcu);
 
     const cdc = new USBCDC(mcu.usbCtrl);
     // USBCDC answers every OUT (host to device) poll at once with zero bytes,
@@ -207,6 +167,27 @@ export class Board {
     };
 
     mcu.core.PC = FLASH_BASE;
+  }
+
+  /** Connects the panels to a new RP2040's pins and SPI0. */
+  wirePanels(mcu) {
+    const high = (pin) => mcu.gpio[pin].value === GPIOPinState.High;
+    for (const panel of this.panels) {
+      const { power, reset, busy } = panel.pins;
+      panel.setPower(false);
+      panel.setBusy = (value) => mcu.gpio[busy].setInputValue(value);
+      mcu.gpio[power].addListener(() => panel.setPower(high(power)));
+      mcu.gpio[reset].addListener(() => panel.setReset(high(reset)));
+      panel.setReset(high(reset));
+    }
+    mcu.spi[0].onTransmit = (value) => {
+      for (const panel of this.panels) {
+        if (mcu.gpio[panel.pins.cs].value === GPIOPinState.Low) {
+          panel.byte(value, high(panel.pins.dc));
+        }
+      }
+      mcu.spi[0].completeTransmit(0);
+    };
   }
 
   /**
