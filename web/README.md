@@ -63,13 +63,45 @@ host. Check it with `curl -s -o /dev/null -D - http://<domain>/images/1`,
 which should print one `Etag:` line and no `ETag:` line. Once every board runs
 #16, delete the file to go back to dokku's stock template.
 
-Try it on a temporary domain, then move `api.hymnboard.sonrise.io` (and the
-admin domain) from the Flask app to `hymnboard-web` with `dokku domains:remove`
-and `dokku domains:add`. To roll back, move the domains back; the Flask app
-keeps its own data.
+### Rolling out alongside the Flask app
 
-Lines aren't migrated: type them in once after the switch. Every screen gets a
-new ETag, so each board redraws once.
+The Flask app (`hymnboard`) keeps running untouched the whole time, so rolling
+back is one command away.
+
+1. **Deploy next to it** with the steps above and a temporary domain, such as
+   `dokku domains:set hymnboard-web hymnboard-next.sonrise.io`. The
+   Cloudflare-proxied `*.sonrise.io` wildcard already points at this host, so
+   that needs no DNS change. Check the admin at `https://hymnboard-next.sonrise.io`
+   and the header with the `curl` above.
+2. **Copy the lines.** Nothing is migrated: type the six lines from the Flask
+   admin into the new one, so the boards keep showing the same hymns.
+3. **Switch the boards.** `api.hymnboard.sonrise.io` and the admin domain
+   resolve to this same host either way, so the switch is a dokku domain move,
+   not a DNS change. It takes effect when nginx reloads, within seconds:
+
+   ```sh
+   dokku domains:remove hymnboard api.hymnboard.sonrise.io hymnboard.sonrise.io
+   dokku domains:add hymnboard-web api.hymnboard.sonrise.io hymnboard.sonrise.io
+   ```
+
+   Requests in the moment between the two commands miss both apps, and the
+   boards simply retry on their next poll. The `mluther.org` names can follow
+   the same way, or stay on the Flask app.
+
+4. **Watch.** Every screen has a new ETag, so each board downloads each screen
+   once (three "Updating image" entries per board in healthchecks.io), then
+   gets 304s. In the admin, "last seen" keeps moving while "last updated"
+   stays put. A board that keeps re-downloading gets a "Re-downloading every
+   poll" badge and one healthchecks.io failure, "Board isn't keeping its ETag",
+   after three identical downloads in a row.
+5. **Roll back if needed** by running the two commands with the apps swapped.
+   The Flask app's data was never touched, so it serves the lines it had at the
+   switch. Retype any lines changed in the meantime, and re-upload any OTA
+   firmware uploaded to the new app. Each board redraws once more on the way
+   back.
+6. **Once it's settled**, stop the Flask app (`dokku ps:stop hymnboard`) and
+   destroy it later. Device status and firmware live in each app's own storage,
+   so nothing needs to be copied back.
 
 ## Moving to Cloudflare later
 
