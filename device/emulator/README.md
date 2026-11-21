@@ -49,14 +49,14 @@ faster than real time.
 ## Run the firmware interactively
 
 ```sh
-node run.ts ../build/ehymnboard.uf2 --seconds 60   # simulated seconds
+node src/run.ts ../build/ehymnboard.uf2 --seconds 60   # simulated seconds
 ```
 
 `--trace` logs every gSPI transaction and ioctl.
 
 ## Writing a test
 
-`emulator.ts` puts the pieces together. `new Emulator({ firmware })` (or
+`src/emulator.ts` puts the pieces together. `new Emulator({ firmware })` (or
 `boot()` from `test/helpers.ts`) gives you:
 
 - `waitForSerial(text, ms, fromIndex)` runs until the firmware prints `text`
@@ -75,6 +75,8 @@ node run.ts ../build/ehymnboard.uf2 --seconds 60   # simulated seconds
   range, each `{ ssid, password?, bssid?, rssi?, channel? }`.
 
 ## How it works
+
+The emulator's source is in `src/` and its tests are in `test/`.
 
 - `fake-cyw43.ts` models the WiFi chip at the gSPI level: the bus and
   backplane registers the driver polls, the firmware download (discarded),

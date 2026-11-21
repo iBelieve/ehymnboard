@@ -18,7 +18,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { REFRESH_MS } from "../epaper.ts";
+import { REFRESH_MS } from "../src/epaper.ts";
 import { assertNoPanelFaults, boot } from "./helpers.ts";
 
 // What Waveshare's own driver sends for one full update: init() then

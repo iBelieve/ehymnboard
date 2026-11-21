@@ -18,7 +18,7 @@
 
 import assert from "node:assert/strict";
 import path from "node:path";
-import { Emulator, type EmulatorOptions, testImage } from "../emulator.ts";
+import { Emulator, type EmulatorOptions, testImage } from "../src/emulator.ts";
 
 /** The firmware under test: $FIRMWARE_UF2, or device/build/ehymnboard.uf2. */
 export const FIRMWARE =

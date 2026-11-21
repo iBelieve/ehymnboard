@@ -19,7 +19,7 @@
 // Boots a firmware UF2 on the emulated board, with the fake AP, LAN and
 // server, and prints the firmware's serial output and emulator events.
 //
-// Usage: node run.ts <firmware.uf2> [--seconds <simulated seconds>] [--trace]
+// Usage: node src/run.ts <firmware.uf2> [--seconds <simulated seconds>] [--trace]
 import { parseArgs } from "node:util";
 import { Emulator } from "./emulator.ts";
 
@@ -31,7 +31,7 @@ const { values, positionals } = parseArgs({
   },
 });
 if (positionals.length !== 1) {
-  console.error("usage: node run.ts <firmware.uf2> [--seconds <simulated seconds>] [--trace]");
+  console.error("usage: node src/run.ts <firmware.uf2> [--seconds <simulated seconds>] [--trace]");
   process.exit(2);
 }
 
