@@ -1,10 +1,11 @@
 name: Check Pico SDK version
 
 # Dependabot can't track the Pico SDK or the Arm toolchain (they are pinned in
-# ci-device.yml and device/CMakeLists.txt, not in a package manifest), so this
-# job keeps a single tracking issue, labelled pico-sdk-update, while a newer
-# raspberrypi/pico-sdk release is out. A later release updates that issue in
-# place (keeping its comments) and the issue is closed once the pin catches up.
+# .github/actions/build-firmware/action.yml and device/CMakeLists.txt, not in a
+# package manifest), so this job keeps a single tracking issue, labelled
+# pico-sdk-update, while a newer raspberrypi/pico-sdk release is out. A later
+# release updates that issue in place (keeping its comments) and the issue is
+# closed once the pin catches up.
 # Closing the issue by hand skips that release until a newer one appears.
 
 on:
@@ -33,17 +34,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           LABEL: pico-sdk-update
         run: |
-          pinned="$(sed -n "s/^ *PICO_SDK_VERSION: *[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\} *$/\1/p" .github/workflows/ci-device.yml)"
+          pinned="$(sed -n "s/^ *PICO_SDK_VERSION: *[\"']\{0,1\}\([^\"']*\)[\"']\{0,1\} *$/\1/p" .github/actions/build-firmware/action.yml)"
           cmake_pinned="$(sed -n 's/^set(sdkVersion \(.*\))$/\1/p' device/CMakeLists.txt)"
           latest="$(gh release view --repo raspberrypi/pico-sdk --json tagName --jq .tagName)"
           echo "Pinned: $pinned (CMakeLists.txt: $cmake_pinned), latest: $latest"
 
           if [ -z "$pinned" ] || [ -z "$cmake_pinned" ] || [ -z "$latest" ]; then
-            echo "::error::Could not read a Pico SDK version; check PICO_SDK_VERSION in ci-device.yml and sdkVersion in device/CMakeLists.txt."
+            echo "::error::Could not read a Pico SDK version; check PICO_SDK_VERSION in .github/actions/build-firmware/action.yml and sdkVersion in device/CMakeLists.txt."
             exit 1
           fi
           if [ "$pinned" != "$cmake_pinned" ]; then
-            echo "::error::ci-device.yml pins Pico SDK $pinned but device/CMakeLists.txt pins $cmake_pinned; bump them together."
+            echo "::error::.github/actions/build-firmware/action.yml pins Pico SDK $pinned but device/CMakeLists.txt pins $cmake_pinned; bump them together."
             exit 1
           fi
 
@@ -73,7 +74,7 @@ jobs:
 
           To update, bump the versions together:
 
-          - \`PICO_SDK_VERSION\` (and \`ARM_GCC_VERSION\` if the SDK's recommended toolchain changed) in \`.github/workflows/ci-device.yml\`
+          - \`PICO_SDK_VERSION\` (and \`ARM_GCC_VERSION\` if the SDK's recommended toolchain changed) in \`.github/actions/build-firmware/action.yml\`
           - \`sdkVersion\`, \`toolchainVersion\` and \`picotoolVersion\` in \`device/CMakeLists.txt\`
           - the \`~/.pico-sdk\` paths in \`device/.vscode/*.json\`
           - the versions in \`CLAUDE.md\`

@@ -1,0 +1,77 @@
+name: Build firmware
+description: >
+  Builds the device firmware (device/build) with the pinned Pico SDK and Arm
+  toolchain and the example secrets, warnings as errors. Expects the repository
+  checked out with submodules.
+
+runs:
+  using: composite
+  steps:
+    # The versions every firmware build in CI uses. check-pico-sdk.yml reads
+    # PICO_SDK_VERSION from here; bump it with sdkVersion in
+    # device/CMakeLists.txt.
+    - name: Pinned toolchain versions
+      shell: bash
+      env:
+        PICO_SDK_VERSION: "2.3.1"
+        ARM_GCC_VERSION: "15.2.Rel1"
+      run: |
+        echo "PICO_SDK_VERSION=$PICO_SDK_VERSION" >> "$GITHUB_ENV"
+        echo "ARM_GCC_VERSION=$ARM_GCC_VERSION" >> "$GITHUB_ENV"
+
+    - uses: carlosperate/arm-none-eabi-gcc-action@v1
+      with:
+        release: ${{ env.ARM_GCC_VERSION }}
+
+    - name: Cache pico-sdk
+      id: cache-pico-sdk
+      uses: actions/cache@v6
+      with:
+        path: pico-sdk
+        key: pico-sdk-${{ env.PICO_SDK_VERSION }}
+
+    - name: Checkout pico-sdk
+      if: steps.cache-pico-sdk.outputs.cache-hit != 'true'
+      uses: actions/checkout@v7
+      with:
+        repository: raspberrypi/pico-sdk
+        ref: ${{ env.PICO_SDK_VERSION }}
+        path: pico-sdk
+        submodules: recursive
+
+    - name: Install ninja
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+    - name: Create secrets.h and secrets.cmake
+      shell: bash
+      working-directory: device
+      run: |
+        cp src/secrets.example.h src/secrets.h
+        cp secrets.example.cmake secrets.cmake
+
+    - uses: astral-sh/setup-uv@v10.4.0
+
+    # pycryptodome, for encrypting the OTA image during the build
+    - name: Install Python dependencies
+      shell: bash
+      working-directory: device
+      run: uv sync
+
+    - name: Configure
+      shell: bash
+      working-directory: device
+      run: >
+        cmake -S . -B build -G Ninja
+        -DPICO_SDK_PATH="$GITHUB_WORKSPACE/pico-sdk"
+        -DWERROR=ON
+
+    - name: Build
+      shell: bash
+      working-directory: device
+      run: ninja -C build
+
+    - name: Check OTA image was built
+      shell: bash
+      working-directory: device
+      run: test -s build/ehymnboard_fota_image_encrypted.bin && test -s build/lib/pico_fota_bootloader/pico_fota_bootloader.uf2

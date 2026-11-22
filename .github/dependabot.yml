@@ -34,6 +34,21 @@ updates:
           - minor
           - patch
 
+  - package-ecosystem: npm
+    directory: /e2e
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 1
+    groups:
+      e2e-minor-and-patch:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
   - package-ecosystem: uv
     directories:
       - /server
@@ -67,7 +82,9 @@ updates:
           - patch
 
   - package-ecosystem: github-actions
-    directory: /
+    directories:
+      - /
+      - /.github/actions/build-firmware
     schedule:
       interval: weekly
     cooldown:

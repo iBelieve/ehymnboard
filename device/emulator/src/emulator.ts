@@ -20,6 +20,7 @@
 // the hymn board server, plus helpers for tests to drive and observe them.
 import fs from "node:fs";
 import path from "node:path";
+import { forwardTo } from "./backend.ts";
 import { Board, type BoardEvents } from "./board.ts";
 import type { AccessPoint } from "./fake-cyw43.ts";
 import { type HttpRequest, type HttpResponse, VirtualNetwork } from "./virtual-net.ts";
@@ -135,6 +136,13 @@ export class MockServer {
 export interface EmulatorOptions {
   firmware: string;
   /**
+   * A real server to send the board's requests to (`http://host:port`)
+   * instead of the mock `server`. Drive the board with the async methods
+   * (`runFor`, `untilSerial`, `until`): they stop the simulated clock while
+   * the server answers.
+   */
+  backend?: string;
+  /**
    * pico_fota_bootloader's UF2, flashed first. Defaults to the one in the
    * firmware's build directory, if there is one.
    */
@@ -182,7 +190,7 @@ export class Emulator {
       after: (ms, fn) => this.board.after(ms, fn),
       send: (frame) => this.board.chip.sendEthernet(frame),
       dns: { [SERVER_HOST]: true },
-      http: (req) => this.server.handle(req),
+      http: opts.backend ? forwardTo(opts.backend) : (req) => this.server.handle(req),
       log: (msg) => log(`[net   ${stamp()}ms] ${msg}`),
     });
     this.board.chip.onEthernetFromHost = (frame) => this.net.receive(frame);
@@ -225,7 +233,7 @@ export class Emulator {
 
   /** Runs for `ms` of simulated time. */
   run(ms: number) {
-    this.board.run(ms);
+    this.#runSync(ms, () => false);
   }
 
   /**
@@ -233,6 +241,73 @@ export class Emulator {
    * or RegExp). Returns the index just past the match; throws after `ms`.
    */
   waitForSerial(text: string | RegExp, ms: number, fromIndex = 0) {
+    const { search, found } = this.#serialSearch(text, fromIndex);
+    if (!this.#runSync(ms, search)) {
+      throw this.#serialTimeout(text, ms);
+    }
+    return found();
+  }
+
+  /** Runs until a condition holds; throws after `ms`. */
+  waitFor(what: string, condition: () => boolean, ms: number) {
+    if (!this.#runSync(ms, condition)) {
+      throw this.#timeout(what, ms);
+    }
+  }
+
+  /** `run` for a `backend`: the clock stops while the server answers. */
+  async runFor(ms: number) {
+    await this.#runAsync(ms, () => false);
+  }
+
+  /** `waitForSerial` for a `backend`. */
+  async untilSerial(text: string | RegExp, ms: number, fromIndex = 0) {
+    const { search, found } = this.#serialSearch(text, fromIndex);
+    if (!(await this.#runAsync(ms, search))) {
+      throw this.#serialTimeout(text, ms);
+    }
+    return found();
+  }
+
+  /** `waitFor` for a `backend`. */
+  async until(what: string, condition: () => boolean, ms: number) {
+    if (!(await this.#runAsync(ms, condition))) {
+      throw this.#timeout(what, ms);
+    }
+  }
+
+  #runSync(ms: number, stop: () => boolean) {
+    const done = this.board.run(ms, () => this.net.pending > 0 || stop());
+    if (this.net.pending > 0) {
+      throw new Error("a request is waiting for the backend: use the async run methods");
+    }
+    return done;
+  }
+
+  /**
+   * Runs for up to `ms` of simulated time until `stop()`, pausing the clock
+   * whenever a request is waiting for the backend, so a slow server never
+   * looks slow to the firmware.
+   */
+  async #runAsync(ms: number, stop: () => boolean) {
+    const end = this.simMs + ms;
+    for (;;) {
+      const left = end - this.simMs;
+      if (left <= 0) {
+        return stop();
+      }
+      this.board.run(left, () => this.net.pending > 0 || stop());
+      if (this.net.pending === 0) {
+        return stop();
+      }
+      await this.net.settled();
+      if (stop()) {
+        return true;
+      }
+    }
+  }
+
+  #serialSearch(text: string | RegExp, fromIndex: number) {
     let found = -1;
     const search = () => {
       if (typeof text === "string") {
@@ -246,22 +321,19 @@ export class Emulator {
       }
       return found >= 0;
     };
-    if (!this.board.run(ms, search)) {
-      const tail = this.serial.slice(-2000);
-      throw new Error(
-        `no ${String(text)} on serial after ${ms} ms of simulated time; last output:\n${tail}`,
-      );
-    }
-    return found;
+    return { search, found: () => found };
   }
 
-  /** Runs until a condition holds; throws after `ms`. */
-  waitFor(what: string, condition: () => boolean, ms: number) {
-    if (!this.board.run(ms, condition)) {
-      throw new Error(
-        `timed out after ${ms} ms of simulated time waiting for ${what}; last output:\n${this.serial.slice(-2000)}`,
-      );
-    }
+  #serialTimeout(text: string | RegExp, ms: number) {
+    return new Error(
+      `no ${String(text)} on serial after ${ms} ms of simulated time; last output:\n${this.serial.slice(-2000)}`,
+    );
+  }
+
+  #timeout(what: string, ms: number) {
+    return new Error(
+      `timed out after ${ms} ms of simulated time waiting for ${what}; last output:\n${this.serial.slice(-2000)}`,
+    );
   }
 
   /** Unplugs the board and plugs it back in. */
