@@ -27,7 +27,7 @@ OTA endpoints `/firmware/latest` and `/firmware/image`.
 
 ```sh
 pnpm install
-pnpm dev          # Vite + the Worker in workerd, with hot reload
+pnpm dev          # Vite + the Worker in workerd, with hot reload, on :8000
 pnpm test         # rasterizer + Worker tests
 pnpm typecheck && pnpm lint && pnpm format:check  # tsc 7, oxlint (type-aware via tsrs), Prettier
 pnpm build        # dist/client (admin) and dist/ehymnboard (Worker)
@@ -49,7 +49,7 @@ dokku builder:set hymnboard-web build-dir web
 dokku storage:ensure-directory hymnboard-web
 dokku storage:mount hymnboard-web /var/lib/dokku/data/storage/hymnboard-web:/data
 dokku config:set hymnboard-web BASIC_AUTH_USERNAME=... BASIC_AUTH_PASSWORD=...
-dokku ports:set hymnboard-web http:80:5000
+dokku ports:set hymnboard-web http:80:8000
 git push dokku-web master   # a remote pointing at hymnboard-web
 ```
 
