@@ -23,7 +23,7 @@ const config :Workerd.Config = (
     (name = "internet", network = (allow = ["public"], tlsOptions = (trustBrowserCas = true))),
   ],
   # Overridden at runtime with --socket-addr.
-  sockets = [(name = "http", address = "0.0.0.0:8000", http = (), service = "main")],
+  sockets = [(name = "http", address = "0.0.0.0:5000", http = (), service = "main")],
 );
 
 const main :Workerd.Worker = (

@@ -44,14 +44,14 @@ a server, then:
 cd e2e
 pnpm install
 pnpm exec playwright install chromium
-E2E_BASE_URL=http://localhost:8000 E2E_USERNAME=e2e E2E_PASSWORD=e2e-password pnpm test
+E2E_BASE_URL=http://localhost:5000 E2E_USERNAME=e2e E2E_PASSWORD=e2e-password pnpm test
 ```
 
 To start the server for this, run its Docker image, as CI does, or `pnpm dev`
-in `web/` (both listen on port 8000):
+in `web/` (both listen on port 5000):
 
 ```sh
-docker build -t hymnboard web && docker run --rm -p 8000:8000 \
+docker build -t hymnboard web && docker run --rm -p 5000:5000 \
   -e BASIC_AUTH_USERNAME=e2e -e BASIC_AUTH_PASSWORD=e2e-password hymnboard
 ```
 
@@ -62,7 +62,7 @@ server can't update a board by surprise.
 
 | Variable                       | Default                              |
 | ------------------------------ | ------------------------------------ |
-| `E2E_BASE_URL`                 | `http://localhost:8000` (plain HTTP) |
+| `E2E_BASE_URL`                 | `http://localhost:5000` (plain HTTP) |
 | `E2E_USERNAME`, `E2E_PASSWORD` | none: the server's basic auth, if on |
 | `FIRMWARE_UF2`                 | `../device/build/ehymnboard.uf2`     |
 | `E2E_CHROMIUM_EXECUTABLE`      | Playwright's own Chromium            |

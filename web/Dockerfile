@@ -30,10 +30,10 @@ COPY --link --from=build /app/dist ./dist
 # with empty lines and device history.
 VOLUME /data
 
-EXPOSE 8000
+EXPOSE 5000
 
 # BASIC_AUTH_USERNAME and BASIC_AUTH_PASSWORD come from the environment.
 CMD ["workerd", "serve", "dist/workerd.capnp", \
-     "--socket-addr", "http=0.0.0.0:8000", \
+     "--socket-addr", "http=0.0.0.0:5000", \
      "--directory-path", "client-files=/app/dist/client", \
      "--directory-path", "do-storage=/data"]

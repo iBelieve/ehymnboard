@@ -27,7 +27,7 @@ OTA endpoints `/firmware/latest` and `/firmware/image`.
 
 ```sh
 pnpm install
-pnpm dev          # Vite + the Worker in workerd, with hot reload, on :8000
+pnpm dev          # Vite + the Worker in workerd, with hot reload, on :5000
 pnpm test         # rasterizer + Worker tests
 pnpm typecheck && pnpm lint && pnpm format:check  # tsc 7, oxlint (type-aware via tsrs), Prettier
 pnpm build        # dist/client (admin) and dist/ehymnboard (Worker)
@@ -41,17 +41,25 @@ set (for `pnpm dev`, put them in `.dev.vars`). After changing
 ## Self-hosting (dokku)
 
 The Docker image runs the built Worker on workerd and stores Durable Object
-data under `/data`, which must be a persistent volume.
+data under `/data`, which must be a persistent volume. Run the `dokku`
+commands on the host, or from a machine on the tailnet as
+`ssh dokku@dev.sonrise.io dokku …`.
 
 ```sh
-dokku apps:create hymnboard-web
-dokku builder:set hymnboard-web build-dir web
-dokku storage:ensure-directory hymnboard-web
-dokku storage:mount hymnboard-web /var/lib/dokku/data/storage/hymnboard-web:/data
-dokku config:set hymnboard-web BASIC_AUTH_USERNAME=... BASIC_AUTH_PASSWORD=...
-dokku ports:set hymnboard-web http:80:8000
-git push dokku-web master   # a remote pointing at hymnboard-web
+APP=hymnboard-web   # any name; the staging app is hymnboard-test
+dokku apps:create "$APP"
+dokku builder:set "$APP" build-dir web
+dokku storage:ensure-directory "$APP"
+dokku storage:mount "$APP" "/var/lib/dokku/data/storage/$APP:/data"
+dokku config:set "$APP" BASIC_AUTH_USERNAME=... BASIC_AUTH_PASSWORD=...
+dokku ports:set "$APP" http:80:5000
+git push "dokku@dev.sonrise.io:$APP" master
 ```
+
+The Durable Object's SQLite database lives in
+`/var/lib/dokku/data/storage/$APP/ehymnboard-HymnBoard/` on the host. To start
+an app over with empty data, `dokku ps:stop "$APP"`, delete that directory,
+then `dokku ps:start "$APP"`.
 
 The boards need firmware with the case-insensitive header parsing from PR #16
 (both run it since 688965a): workerd always writes the header as `ETag`, and
@@ -67,11 +75,11 @@ If the Flask app ever has to be rebuilt, deploy commit 02ece7f, the last with
 `server/`, the same way it was deployed before:
 
 ```sh
-git push dokku-flask 02ece7f:refs/heads/master   # a remote pointing at hymnboard
+git push dokku@dev.sonrise.io:hymnboard 02ece7f:refs/heads/master   # its deploy branch
 ```
 
 1. **Deploy next to it** with the steps above and a temporary domain, such as
-   `dokku domains:set hymnboard-web hymnboard-next.sonrise.io`. The
+   `dokku domains:set "$APP" hymnboard-next.sonrise.io`. The
    Cloudflare-proxied `*.sonrise.io` wildcard already points at this host, so
    that needs no DNS change. Check the admin at `https://hymnboard-next.sonrise.io`.
 2. **Copy the lines.** Nothing is migrated: type the six lines from the Flask
@@ -82,7 +90,7 @@ git push dokku-flask 02ece7f:refs/heads/master   # a remote pointing at hymnboar
 
    ```sh
    dokku domains:remove hymnboard api.hymnboard.sonrise.io hymnboard.sonrise.io
-   dokku domains:add hymnboard-web api.hymnboard.sonrise.io hymnboard.sonrise.io
+   dokku domains:add "$APP" api.hymnboard.sonrise.io hymnboard.sonrise.io
    ```
 
    Requests in the moment between the two commands miss both apps, and the
