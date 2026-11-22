@@ -77,7 +77,10 @@ export interface HttpRequest {
   path: string;
   query: Record<string, string>;
   host: string;
-  /** The request exactly as the firmware sent it, up to the blank line. */
+  /**
+   * The request exactly as the firmware sent it, up to the blank line (the
+   * firmware only sends GETs, so there's no body).
+   */
   raw: string;
 }
 
@@ -97,6 +100,9 @@ export interface HttpResponse {
    */
   raw?: Uint8Array;
 }
+
+/** A request the router received, and the status it answered with, if any. */
+export type Served = HttpRequest & { status: number | undefined };
 
 export interface NetworkOptions {
   after: (ms: number, fn: () => void) => void;
@@ -139,8 +145,8 @@ export class VirtualNetwork {
   clientMac: number[] | null = null;
   connections = new Map<string, Connection>();
   ipId = 1;
-  /** Every HTTP request served, with the status it got. */
-  requests: (HttpRequest & { status: number | undefined })[] = [];
+  /** Every HTTP request received, with the status it got (none if it got no answer). */
+  requests: Served[] = [];
   readonly #pending = new Set<Promise<void>>();
 
   constructor(opts: NetworkOptions) {
@@ -459,9 +465,11 @@ export class VirtualNetwork {
     const query = Object.fromEntries(new URLSearchParams(qs));
     const hostLine = headerLines.find((h) => h.toLowerCase().startsWith("host:"));
     const req = { method, path, query, host: hostLine ? hostLine.slice(5).trim() : "", raw: head };
+    const served: Served = { ...req, status: undefined };
+    this.requests.push(served);
     const res = this.http(req) ?? {};
     if (!(res instanceof Promise)) {
-      this.answer(c, req, res);
+      this.answer(c, served, res);
       return;
     }
     // Hold the connection, sending nothing, until the answer comes.
@@ -479,15 +487,15 @@ export class VirtualNetwork {
         }
         c.stalled = false;
         c.out = null;
-        this.answer(c, req, answer);
+        this.answer(c, served, answer);
         this.pump(c);
       });
     this.#pending.add(done);
   }
 
-  answer(c: Connection, req: HttpRequest, res: HttpResponse) {
+  answer(c: Connection, req: Served, res: HttpResponse) {
     const code = res.raw ? statusOf(res.raw) : res.status;
-    this.requests.push({ ...req, status: code });
+    req.status = code;
     const target = req.raw.split(" ")[1] ?? req.path;
     this.log(
       `HTTP ${req.method} ${target} -> ${res.reset ? "RST" : res.stall ? "no response" : (code ?? 200)}`,
