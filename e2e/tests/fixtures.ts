@@ -32,9 +32,9 @@ export const FIRMWARE =
 export const LINE_COUNT = 6;
 
 /**
- * The admin page. Both servers (Flask's form and the React app) show six
- * text boxes in order, Apply and Clear buttons, a line per board and a
- * picture of the board, so the selectors stick to those.
+ * The admin page, found by what a person sees on it: six text boxes in
+ * order, Apply and Clear buttons, a line per board and a picture of the
+ * board. Nothing depends on how the page is built.
  */
 export class AdminPage {
   readonly page: Page;
@@ -50,7 +50,7 @@ export class AdminPage {
   async open() {
     await this.page.goto("/");
     await expect(this.lines).toHaveCount(LINE_COUNT);
-    // The React app enables the boxes once it has loaded the lines.
+    // A page that loads its lines with a script may disable the boxes until then.
     await expect(this.lines.last()).toBeEnabled();
   }
 
@@ -124,7 +124,7 @@ export class AdminPage {
 
   /** Clicks Apply or Clear and waits for the server to take the change. */
   async #submit(button: "Apply" | "Clear") {
-    // Flask posts the form and redirects; the React app sends a PUT.
+    // Whatever request saves the change: a form post or a script's fetch.
     const saved = this.page.waitForResponse((r) => r.request().method() !== "GET");
     await this.page.getByRole("button", { name: button }).click();
     expect((await saved).status()).toBeLessThan(400);

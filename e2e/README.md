@@ -29,8 +29,8 @@ update checks take no real time. Each test boots a fresh board with blank
 flash. The board's serial output, its requests and a PNG of every frame its
 panels showed are attached to the report.
 
-The selectors stick to what both admin pages share: six text boxes in
-order, Apply and Clear buttons, a line per board ("… (last seen …") and an
+The selectors stick to what a person sees on the admin page: six text boxes
+in order, Apply and Clear buttons, a line per board ("… (last seen …") and an
 SVG picture of the board with one `<image>` per screen. A new admin page
 that keeps those passes unchanged.
 
