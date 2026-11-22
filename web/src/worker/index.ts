@@ -107,11 +107,14 @@ app.get("/device_booted", async (c) => {
   let otaAt: string | undefined;
   const name = getDeviceName(device_id);
 
-  if (otaStatus === "updated") {
+  // An OTA report needs a valid version; otherwise it's an ordinary boot.
+  const validOtaVersion = otaVersion !== undefined && FIRMWARE_VERSION_PATTERN.test(otaVersion);
+
+  if (otaStatus === "updated" && validOtaVersion) {
     otaAt = new Date().toISOString();
     console.log(`Device installed firmware ${otaVersion}: ${name} (${device_id})`);
     ping(c, device_id, "/log", `Installed firmware ${otaVersion}`);
-  } else if (otaStatus === "rolled_back") {
+  } else if (otaStatus === "rolled_back" && validOtaVersion) {
     otaAt = new Date().toISOString();
     console.log(`Device rolled back firmware ${otaVersion}: ${name} (${device_id})`);
     ping(c, device_id, "/failure", `Firmware ${otaVersion} failed and was rolled back`);

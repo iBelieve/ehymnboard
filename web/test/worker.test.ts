@@ -139,6 +139,16 @@ describe("device status", () => {
     await settle();
     expect(pings.map((p) => p.body)).toEqual(["Installed firmware v2"]);
   });
+
+  test("an OTA status without a valid version is an ordinary boot", async () => {
+    const right = "E661A4D41787452B";
+    await get(`/device_booted?device_id=${right}&watchdog_caused_reboot=1&ota_status=updated`);
+    await get(`/device_booted?device_id=${right}&ota_status=rolled_back&ota_version=bad%20version`);
+    await settle();
+    expect(pings.map((p) => p.body)).toEqual(["Watchdog caused reboot", "Device booted"]);
+    const state = await (await get("/api/state", AUTH)).json<BoardState>();
+    expect(state.devices.find((d) => d.id === right)!.ota_status).toBeNull();
+  });
 });
 
 function poll(etag = "") {
