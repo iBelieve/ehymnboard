@@ -56,8 +56,9 @@ docker build -t hymnboard web && docker run --rm -p 8000:5000 \
 ```
 
 The tests change the server's lines and published firmware, so don't point
-them at a server in use. The OTA test leaves the server offering the build
-under test.
+them at a server in use. Each test publishes the build under test as the server's firmware release
+before its board boots and again when it ends, so a release left on the
+server can't update a board by surprise.
 
 | Variable                       | Default                              |
 | ------------------------------ | ------------------------------------ |
