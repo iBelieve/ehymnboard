@@ -28,8 +28,9 @@ const ANSWER_TIMEOUT_MS = 30_000;
 
 /**
  * Forwards each request, unchanged (Host header and all), to the server at
- * `baseUrl` (http only). The firmware asks for `Connection: Close`, so the
- * answer is everything the server sends before it closes.
+ * `baseUrl` (http only). The firmware only sends GETs and asks for
+ * `Connection: Close`, so the answer is everything the server sends before
+ * it closes, or up to its Content-Length if it keeps the connection open.
  */
 export function forwardTo(baseUrl: string) {
   const url = new URL(baseUrl);
@@ -41,19 +42,41 @@ export function forwardTo(baseUrl: string) {
   return (req: HttpRequest) => exchange(host, port, req.raw);
 }
 
+/** The length of a complete response in `bytes`, once its head and Content-Length body are in. */
+function completeLength(bytes: Buffer) {
+  const headEnd = bytes.indexOf("\r\n\r\n");
+  if (headEnd < 0) {
+    return undefined;
+  }
+  const head = bytes.subarray(0, headEnd).toString("latin1");
+  const length = /^content-length:\s*(\d+)\s*$/im.exec(head)?.[1];
+  const total = length === undefined ? undefined : headEnd + 4 + Number(length);
+  return total !== undefined && bytes.length >= total ? total : undefined;
+}
+
 function exchange(host: string, port: number, request: string): Promise<HttpResponse> {
   return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
+    let received = Buffer.alloc(0);
+    const done = (bytes: Buffer) => {
+      resolve({ raw: new Uint8Array(bytes) });
+      socket.destroy();
+    };
     const socket = net.connect({ host, port });
     socket.setTimeout(ANSWER_TIMEOUT_MS, () => {
       socket.destroy(new Error(`no answer from ${host}:${port} in ${ANSWER_TIMEOUT_MS} ms`));
     });
     socket.on("connect", () => socket.write(request));
-    socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+    socket.on("data", (chunk: Buffer) => {
+      received = Buffer.concat([received, chunk]);
+      const length = completeLength(received);
+      if (length !== undefined) {
+        done(received.subarray(0, length));
+      }
+    });
     socket.on("error", reject);
     socket.on("close", (hadError) => {
       if (!hadError) {
-        resolve({ raw: new Uint8Array(Buffer.concat(chunks)) });
+        done(received);
       }
     });
   });

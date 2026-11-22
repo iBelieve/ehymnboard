@@ -292,6 +292,10 @@ export class Emulator {
   async #runAsync(ms: number, stop: () => boolean) {
     const end = this.simMs + ms;
     for (;;) {
+      await this.net.settled();
+      if (stop()) {
+        return true;
+      }
       const left = end - this.simMs;
       if (left <= 0) {
         return stop();
@@ -299,10 +303,6 @@ export class Emulator {
       this.board.run(left, () => this.net.pending > 0 || stop());
       if (this.net.pending === 0) {
         return stop();
-      }
-      await this.net.settled();
-      if (stop()) {
-        return true;
       }
     }
   }

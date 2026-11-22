@@ -19,8 +19,15 @@
 // The two actors of every test: an usher on the admin page (a Playwright
 // page, driven only through what a person sees and clicks) and a board (the
 // real firmware in the emulator, sending its requests to the same server).
+import fs from "node:fs";
 import path from "node:path";
-import { test as base, expect, type Page, type TestInfo } from "@playwright/test";
+import {
+  type APIRequestContext,
+  test as base,
+  expect,
+  type Page,
+  type TestInfo,
+} from "@playwright/test";
 import { Emulator } from "../../device/emulator/src/emulator.ts";
 import { toPng } from "./frames.ts";
 
@@ -30,6 +37,34 @@ export const FIRMWARE =
   path.join(import.meta.dirname, "..", "..", "device", "build", "ehymnboard.uf2");
 
 export const LINE_COUNT = 6;
+
+/** Publishes a firmware release the way a release is published (`POST /firmware`). */
+export async function publishRelease(
+  request: APIRequestContext,
+  version: string,
+  image: Uint8Array,
+) {
+  const response = await request.post("/firmware", {
+    multipart: {
+      version,
+      image: {
+        name: "ehymnboard_fota_image_encrypted.bin",
+        mimeType: "application/octet-stream",
+        buffer: Buffer.from(image),
+      },
+    },
+  });
+  expect(response.status(), await response.text()).toBe(201);
+}
+
+/** The version and encrypted OTA image of the firmware under test, from its build directory. */
+function buildRelease() {
+  const dir = path.dirname(FIRMWARE);
+  return {
+    version: fs.readFileSync(path.join(dir, "firmware_version.txt"), "utf8").trim(),
+    image: fs.readFileSync(path.join(dir, "ehymnboard_fota_image_encrypted.bin")),
+  };
+}
 
 /**
  * The admin page, found by what a person sees on it: six text boxes in
@@ -127,7 +162,15 @@ export class AdminPage {
     // Whatever request saves the change: a form post or a script's fetch.
     const saved = this.page.waitForResponse((r) => r.request().method() !== "GET");
     await this.page.getByRole("button", { name: button }).click();
-    expect((await saved).status()).toBeLessThan(400);
+    const response = await saved;
+    expect(response.status()).toBeLessThan(400);
+    // A form post redirects back to the page: let that finish before the
+    // next navigation, so it doesn't interrupt it.
+    let request = response.request();
+    for (let next = request.redirectedTo(); next; next = next.redirectedTo()) {
+      request = next;
+    }
+    await request.response();
     await this.page.waitForLoadState();
   }
 }
@@ -200,7 +243,9 @@ export class Board {
 /**
  * `admin` is the admin page; `backend` is the server's origin; `board`
  * boots a fresh board (blank flash) per test, and its logs and every frame
- * it showed are attached to the report.
+ * it showed are attached to the report. Before the board boots, the server
+ * is made to offer the firmware under test, so a release left over on the
+ * server can't update the board in the middle of a test.
  */
 export const test = base.extend<{ admin: AdminPage; backend: string; board: Board }>({
   admin: async ({ page, backend }, use) => {
@@ -216,7 +261,9 @@ export const test = base.extend<{ admin: AdminPage; backend: string; board: Boar
     }
     await use(new URL(baseURL).origin);
   },
-  board: async ({ backend }, use, testInfo) => {
+  board: async ({ backend, request }, use, testInfo) => {
+    const release = buildRelease();
+    await publishRelease(request, release.version, release.image);
     const board = new Board(backend);
     await use(board);
     await board.attachTo(testInfo);

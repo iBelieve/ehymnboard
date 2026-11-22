@@ -22,40 +22,18 @@
 // the bootloader, reboots into it and commits it, and the admin page shows
 // the board on the new version.
 import { OtaBuild } from "../../device/emulator/src/ota-image.ts";
-import type { APIRequestContext } from "@playwright/test";
-import { expect, FIRMWARE, test } from "./fixtures.ts";
-
-const build = new OtaBuild(FIRMWARE);
-// The same build relabelled as a new release: an image the bootloader
-// accepts (same key) that reports another version.
-const NEXT = build.nextVersion("ota2");
-
-async function publish(request: APIRequestContext, version: string, image: Uint8Array) {
-  const response = await request.post("/firmware", {
-    multipart: {
-      version,
-      image: {
-        name: "ehymnboard_fota_image_encrypted.bin",
-        mimeType: "application/octet-stream",
-        buffer: Buffer.from(image),
-      },
-    },
-  });
-  expect(response.status(), await response.text()).toBe(201);
-}
-
-// Whatever happens, leave the server offering the build under test, so the
-// next board to boot isn't updated by surprise.
-test.afterEach(async ({ request }) => {
-  await publish(request, build.version, build.imageFor(build.version));
-});
+import { expect, FIRMWARE, publishRelease, test } from "./fixtures.ts";
 
 test("a published release is installed over the air and reported", async ({
   admin,
   board,
   request,
 }) => {
-  await publish(request, build.version, build.imageFor(build.version));
+  // The same build relabelled as a new release: an image the bootloader
+  // accepts (same key) that reports another version. (The board fixture has
+  // the server offering the build's own version.)
+  const build = new OtaBuild(FIRMWARE);
+  const NEXT = build.nextVersion("ota2");
   await admin.apply(["Hymn", "1", "", "", "", "2"]);
 
   // On the current release, the board stays put and shows the hymns.
@@ -66,7 +44,7 @@ test("a published release is installed over the air and reported", async ({
   expect(shown).toBe(3);
 
   // A new release is published.
-  await publish(request, NEXT, build.imageFor(NEXT));
+  await publishRelease(request, NEXT, build.imageFor(NEXT));
   await admin.open();
   await expect(admin.page.getByText(`Latest firmware ${NEXT}`)).toBeVisible();
 

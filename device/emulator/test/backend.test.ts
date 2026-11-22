@@ -20,6 +20,7 @@
 // one standing in for the hymn board server), as the full-stack e2e tests do.
 import assert from "node:assert/strict";
 import http from "node:http";
+import net from "node:net";
 import { test } from "node:test";
 import { IMAGE_BYTES, SERVER_HOST, testImage } from "../src/emulator.ts";
 import { boot } from "./helpers.ts";
@@ -95,6 +96,34 @@ test("passes the server's framing through: lwIP's client doesn't decode chunked 
     await emu.untilSerial(`Image is the wrong size: ${IMAGE_BYTES + 14} bytes received`, 30_000);
     assert.equal(emu.displays.length, 0);
   } finally {
+    server.close();
+  }
+});
+
+test("takes an answer by its Content-Length from a server that keeps the connection open", async () => {
+  const body = testImage(1, 3);
+  const server = net.createServer((socket) => {
+    socket.once("data", (request) => {
+      const image = String(request).startsWith("GET /images/");
+      const head = image
+        ? `HTTP/1.1 200 OK\r\nEtag: kept-open\r\nContent-Length: ${body.length}\r\n\r\n`
+        : "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n";
+      socket.write(head);
+      if (image) {
+        socket.write(body);
+      }
+      // ...and never closes, ignoring Connection: Close.
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  try {
+    const emu = boot({ backend: `http://127.0.0.1:${address.port}` });
+    await emu.untilSerial("State saved to flash", 30_000);
+    assert.deepEqual(emu.displays[0].frame, body);
+  } finally {
+    // The emulator hangs up once it has the Content-Length, so this returns.
     server.close();
   }
 });
