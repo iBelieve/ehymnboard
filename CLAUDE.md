@@ -8,9 +8,12 @@ Docker image deployed via dokku. `hardware/` is the KiCad design (no CI).
 
 GitHub Actions runs on any change to `device/**` or `server/**`, or to the
 shared `tools/` and `.jscpd.json` (`.github/workflows/ci-device.yml`,
-`ci-server.yml`). **The device build treats all compiler warnings as errors in
-CI** (`-Wall -Wextra` plus `-DWERROR=ON`), so fix warnings before pushing even
-if a local build only prints them.
+`ci-server.yml`). The full-stack e2e tests (`ci-e2e.yml`) run on any change to
+`device/`, `server/`, `web/` or `e2e/`. Firmware builds in CI go through
+`.github/actions/build-firmware`, which pins the Pico SDK and Arm toolchain.
+**The device build treats all compiler warnings as errors in CI** (`-Wall
+-Wextra` plus `-DWERROR=ON`), so fix warnings before pushing even if a local
+build only prints them.
 
 All checks below must pass; run them locally before committing.
 
@@ -73,6 +76,22 @@ All checks below must pass; run them locally before committing.
   releases under a day old, so don't pin a version published today
 - Docker: CI builds the image (`docker build server`); the tailwind/pnpm asset
   build runs inside it
+
+### e2e/
+
+Full-stack tests: the firmware in the emulator talks to a running server's
+real HTTP while Playwright drives its admin page (only through the page; no
+server internals). CI runs them against every server in `e2e/backends.json`
+whose directory has a Dockerfile. Same TypeScript conventions as the emulator.
+
+- Needs the firmware build and `pnpm install` in `device/emulator` (the tests
+  import it)
+- `pnpm install`, `pnpm exec playwright install chromium`, then with a server
+  running: `E2E_BASE_URL=http://localhost:8000 E2E_USERNAME=… E2E_PASSWORD=… pnpm test`
+- `pnpm run typecheck`, `pnpm run lint`, `pnpm run format:check`
+- Selectors must work on every admin page in `backends.json`: keep the six
+  text boxes, Apply/Clear buttons, "<board> (last seen …" line and the SVG
+  board picture with one `<image>` per screen when changing a UI
 
 ### .github/workflows/
 

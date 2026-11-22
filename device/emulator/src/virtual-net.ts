@@ -77,6 +77,8 @@ export interface HttpRequest {
   path: string;
   query: Record<string, string>;
   host: string;
+  /** The request exactly as the firmware sent it, up to the blank line. */
+  raw: string;
 }
 
 export interface HttpResponse {
@@ -89,6 +91,11 @@ export interface HttpResponse {
   reset?: boolean;
   /** Close the connection after this many body bytes. */
   truncateAt?: number;
+  /**
+   * The whole response, status line and headers included, sent byte for byte
+   * instead of one built from the fields above.
+   */
+  raw?: Uint8Array;
 }
 
 export interface NetworkOptions {
@@ -96,7 +103,12 @@ export interface NetworkOptions {
   send: (frame: Uint8Array) => void;
   /** Each name the router resolves maps to true; any other name gets NXDOMAIN. */
   dns: Partial<Record<string, boolean>>;
-  http: (req: HttpRequest) => HttpResponse | undefined;
+  /**
+   * Answers a request. A promise holds the connection open until it settles,
+   * and `pending` counts it meanwhile, so a caller can stop the clock and
+   * wait for a real server.
+   */
+  http: (req: HttpRequest) => HttpResponse | Promise<HttpResponse> | undefined;
   log?: (msg: string) => void;
 }
 
@@ -129,6 +141,7 @@ export class VirtualNetwork {
   ipId = 1;
   /** Every HTTP request served, with the status it got. */
   requests: (HttpRequest & { status: number | undefined })[] = [];
+  readonly #pending = new Set<Promise<void>>();
 
   constructor(opts: NetworkOptions) {
     this.after = opts.after;
@@ -136,6 +149,18 @@ export class VirtualNetwork {
     this.dns = opts.dns;
     this.http = opts.http;
     this.log = opts.log ?? ((msg) => console.log(`[net] ${msg}`));
+  }
+
+  /** How many requests are waiting for an answer from a promise. */
+  get pending() {
+    return this.#pending.size;
+  }
+
+  /** Resolves once every pending request has its answer. */
+  async settled() {
+    while (this.#pending.size > 0) {
+      await Promise.all(this.#pending);
+    }
   }
 
   /** Forgets all TCP connections, as a router reboot or a link drop would. */
@@ -427,16 +452,45 @@ export class VirtualNetwork {
   }
 
   respond(c: Connection) {
-    const [requestLine, ...headerLines] = c.request.split("\r\n");
+    const head = c.request.slice(0, c.request.indexOf("\r\n\r\n") + 4);
+    const [requestLine, ...headerLines] = head.split("\r\n");
     const [method, target = ""] = requestLine.split(" ");
     const [path, qs = ""] = target.split("?");
     const query = Object.fromEntries(new URLSearchParams(qs));
     const hostLine = headerLines.find((h) => h.toLowerCase().startsWith("host:"));
-    const req = { method, path, query, host: hostLine ? hostLine.slice(5).trim() : "" };
+    const req = { method, path, query, host: hostLine ? hostLine.slice(5).trim() : "", raw: head };
     const res = this.http(req) ?? {};
-    this.requests.push({ ...req, status: res.status });
+    if (!(res instanceof Promise)) {
+      this.answer(c, req, res);
+      return;
+    }
+    // Hold the connection, sending nothing, until the answer comes.
+    c.out = new Uint8Array(0);
+    c.stalled = true;
+    const done = res
+      .catch((e: unknown): HttpResponse => {
+        this.log(`HTTP ${method} ${target} failed: ${String(e)}`);
+        return { reset: true };
+      })
+      .then((answer) => {
+        this.#pending.delete(done);
+        if (c.closed || this.connections.get(c.key) !== c) {
+          return; // the link or the router went away meanwhile
+        }
+        c.stalled = false;
+        c.out = null;
+        this.answer(c, req, answer);
+        this.pump(c);
+      });
+    this.#pending.add(done);
+  }
+
+  answer(c: Connection, req: HttpRequest, res: HttpResponse) {
+    const code = res.raw ? statusOf(res.raw) : res.status;
+    this.requests.push({ ...req, status: code });
+    const target = req.raw.split(" ")[1] ?? req.path;
     this.log(
-      `HTTP ${method} ${target} -> ${res.reset ? "RST" : res.stall ? "no response" : (res.status ?? 200)}`,
+      `HTTP ${req.method} ${target} -> ${res.reset ? "RST" : res.stall ? "no response" : (code ?? 200)}`,
     );
 
     if (res.reset) {
@@ -448,6 +502,11 @@ export class VirtualNetwork {
     if (res.stall) {
       c.out = new Uint8Array(0);
       c.stalled = true;
+      return;
+    }
+    if (res.raw) {
+      c.out = res.raw;
+      this.scheduleResend(c);
       return;
     }
     const status = res.status ?? 200;
@@ -545,6 +604,13 @@ export class VirtualNetwork {
     v.setUint16(16, sum);
     this.sendIp(ROUTER_IP, dst, IP_TCP, seg);
   }
+}
+
+/** The status code in a raw HTTP response's status line. */
+function statusOf(raw: Uint8Array) {
+  const line = new TextDecoder().decode(raw.subarray(0, 64)).split("\r\n")[0];
+  const code = Number(/^HTTP\/1\.[01] (\d{3})/.exec(line)?.[1]);
+  return Number.isNaN(code) ? undefined : code;
 }
 
 const STATUS_TEXT: Record<number, string> = {

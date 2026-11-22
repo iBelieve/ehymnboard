@@ -1,0 +1,4 @@
+[
+  { "name": "flask", "dir": "server", "port": 8000 },
+  { "name": "web", "dir": "web", "port": 5000 }
+]

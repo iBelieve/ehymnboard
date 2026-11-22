@@ -1,0 +1,186 @@
+name: CI (e2e)
+
+# Full-stack end-to-end tests (e2e/): the firmware built here runs in the
+# emulator and talks to the server's Docker image over its real HTTP, while
+# Playwright drives the server's admin page. It runs against every server in
+# e2e/backends.json whose directory has a Dockerfile, so a rewrite of the
+# server is held to the same tests as the one it replaces.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "device/**"
+      - "server/**"
+      - "web/**"
+      - "e2e/**"
+      - ".github/actions/build-firmware/**"
+      - ".github/workflows/ci-e2e.yml"
+  pull_request:
+    paths:
+      - "device/**"
+      - "server/**"
+      - "web/**"
+      - "e2e/**"
+      - ".github/actions/build-firmware/**"
+      - ".github/workflows/ci-e2e.yml"
+
+concurrency:
+  group: ci-e2e-${{ github.ref }}
+  # Cancel superseded runs on PR branches only; let every master commit finish
+  # so each one keeps its own CI result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: e2e
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - uses: ./.github/actions/build-firmware
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-firmware
+          path: |
+            device/build/ehymnboard.uf2
+            device/build/ehymnboard.elf
+            device/build/ehymnboard_fota_image_encrypted.bin
+            device/build/firmware_version.txt
+            device/build/lib/pico_fota_bootloader/pico_fota_bootloader.uf2
+          if-no-files-found: error
+
+  backends:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: List the servers to test
+        id: list
+        working-directory: .
+        run: |
+          present="$(for f in */Dockerfile; do dirname "$f"; done | jq -Rsc 'split("\n") | map(select(. != ""))')"
+          matrix="$(jq -c --argjson present "$present" 'map(select(.dir as $d | $present | any(. == $d)))' e2e/backends.json)"
+          echo "Testing against: $matrix"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  # Type checks, lints and formats the tests themselves.
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # Installs the pnpm from package.json's packageManager, Node.js from
+      # e2e/.node-version, and runs pnpm install --frozen-lockfile.
+      - id: setup
+        uses: pnpm/setup@v3
+        with:
+          working-directory: e2e
+          cache: true
+          require-lockfile: true
+
+      # The tests import the emulator, so its types come from its packages.
+      - name: Install emulator dependencies
+        run: pnpm --dir ../device/emulator install --frozen-lockfile
+
+      - name: Type check
+        run: pnpm run typecheck
+
+      - name: Lint
+        if: (success() || failure()) && steps.setup.outcome == 'success'
+        run: pnpm run lint
+
+      - name: Check formatting
+        if: (success() || failure()) && steps.setup.outcome == 'success'
+        run: pnpm run format:check
+
+  e2e:
+    needs: [firmware, backends]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: ${{ fromJSON(needs.backends.outputs.matrix) }}
+    name: e2e (${{ matrix.backend.name }})
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: e2e-firmware
+          path: device/build
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build ${{ matrix.backend.name }} image
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.backend.dir }}
+          push: false
+          load: true
+          tags: ehymnboard-e2e-${{ matrix.backend.name }}:ci
+          cache-from: type=gha,scope=e2e-${{ matrix.backend.name }}
+          cache-to: type=gha,mode=max,scope=e2e-${{ matrix.backend.name }}
+
+      - name: Start server
+        env:
+          IMAGE: ehymnboard-e2e-${{ matrix.backend.name }}:ci
+          PORT: ${{ matrix.backend.port }}
+        run: |
+          docker run -d --name server -p "8000:$PORT" \
+            -e BASIC_AUTH_USERNAME=e2e -e BASIC_AUTH_PASSWORD=e2e-password \
+            "$IMAGE"
+          for _ in $(seq 30); do
+            curl -fsS http://localhost:8000/ok && exit 0
+            sleep 1
+          done
+          docker logs server
+          exit 1
+
+      - id: setup
+        uses: pnpm/setup@v3
+        with:
+          working-directory: e2e
+          cache: true
+          require-lockfile: true
+
+      - name: Install emulator dependencies
+        run: pnpm --dir ../device/emulator install --frozen-lockfile
+
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run end-to-end tests
+        env:
+          E2E_BASE_URL: http://localhost:8000
+          E2E_USERNAME: e2e
+          E2E_PASSWORD: e2e-password
+        run: pnpm test
+
+      - name: Server logs
+        if: failure()
+        run: docker logs server
+
+      # Traces, serial logs, the board's requests and every frame its panels
+      # showed, for each test.
+      - name: Upload report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-report-${{ matrix.backend.name }}
+          path: |
+            e2e/playwright-report
+            e2e/test-results

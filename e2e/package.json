@@ -1,0 +1,21 @@
+{
+  "name": "ehymnboard-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc -p .",
+    "lint": "oxlint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "packageManager": "pnpm@12.21.0",
+  "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "@types/node": "^26.6.6",
+    "oxlint": "1.94.0",
+    "prettier": "3.10.1",
+    "tsrs": "7.1.0-beta.tsrs3",
+    "typescript": "7.0.2"
+  }
+}
