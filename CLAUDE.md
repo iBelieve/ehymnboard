@@ -12,9 +12,12 @@ KiCad design (no CI).
 GitHub Actions runs on any change to `device/**`, `server/**` or `web/**`
 (`.github/workflows/ci-device.yml`, `ci-server.yml`, `ci-web.yml`); the device
 and server workflows also run on changes to the shared `tools/` and
-`.jscpd.json`. **The device build treats all compiler warnings as errors in
-CI** (`-Wall -Wextra` plus `-DWERROR=ON`), so fix warnings before pushing even
-if a local build only prints them.
+`.jscpd.json`. The full-stack e2e tests (`ci-e2e.yml`) run on any change to
+`device/`, `server/`, `web/` or `e2e/`, against `web/`'s Docker image.
+Firmware builds in CI go through `.github/actions/build-firmware`, which pins
+the Pico SDK and Arm toolchain. **The device build treats all compiler
+warnings as errors in CI** (`-Wall -Wextra` plus `-DWERROR=ON`), so fix
+warnings before pushing even if a local build only prints them.
 
 All checks below must pass; run them locally before committing.
 
@@ -92,6 +95,24 @@ All checks below must pass; run them locally before committing.
   bytes: the firmware hard-codes them. The rasterizer is compared against
   Flask's output in `test/render.test.ts`
 - Docker: CI builds the image (`docker build web`)
+
+### e2e/
+
+Full-stack tests: the firmware in the emulator talks to a running server's
+real HTTP while Playwright drives its admin page (only through the page; no
+server internals). CI runs them against the server's Docker image
+(`SERVER_DIR`/`SERVER_PORT` in `ci-e2e.yml`). Same TypeScript conventions as
+the emulator.
+
+- Needs the firmware build and `pnpm install` in `device/emulator` (the tests
+  import it)
+- `pnpm install`, `pnpm exec playwright install chromium`, then with a server
+  running: `E2E_BASE_URL=http://localhost:8000 E2E_USERNAME=… E2E_PASSWORD=… pnpm test`
+- `pnpm run typecheck`, `pnpm run lint`, `pnpm run format:check`
+- The selectors are what a person sees, so a rewritten admin page passes
+  unchanged if it keeps the six text boxes, Apply/Clear buttons,
+  "<board> (last seen …" line and the SVG board picture with one `<image>`
+  per screen. A test that must change for a rewrite flags a behaviour change
 
 ### .github/workflows/
 

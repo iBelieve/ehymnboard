@@ -49,6 +49,7 @@ faster than real time.
 | `panels.test.ts`        | Each screen gets exactly Waveshare's documented full-update sequence with no controller faults; a panel stuck busy makes the firmware time out and reboot |
 | `epaper.test.ts`        | The panel model on its own: RAM window and address counters, gate lines, BUSY, deep sleep and fault detection                                             |
 | `recovery.test.ts`      | WiFi lost for good, the 3 minute watchdog reboot, rejoin with ETags kept in flash                                                                         |
+| `backend.test.ts`       | Requests forwarded to a real HTTP server: its answers shown, 304s, Host kept, framing passed through as sent, a refused connection                        |
 | `ota.test.ts`           | OTA updates through the bootloader: installed, committed, kept through a power cut; rolled back and skipped; power cut mid-download; bad images           |
 
 ## Run the firmware interactively
@@ -81,6 +82,13 @@ node src/run.ts ../build/ehymnboard.uf2 --seconds 60   # simulated seconds
   build's `ehymnboard_fota_image_encrypted.bin` with the key from
   `device/secrets.cmake` (or `$PFB_AES_KEY`, or the example key) and makes
   images of the same build under another version: `imageFor(nextVersion("ota2"))`.
+- `backend: "http://host:port"` (an option) sends the board's requests to a
+  real server instead of `server`, byte for byte, and passes its answers back
+  unchanged; the full-stack tests in [`e2e/`](../../e2e/README.md) use it.
+  Drive such a board with the async `runFor`, `untilSerial` and `until`
+  (`run`, `waitForSerial` and `waitFor` with the same arguments), which stop
+  the simulated clock while the server answers; the synchronous methods
+  throw if a request is waiting.
 - `powerCycle()` unplugs the board and plugs it back in. `dropLink()` takes the AP away. `aps` (an option) lists the networks in
   range, each `{ ssid, password?, bssid?, rssi?, channel? }`.
 
@@ -114,6 +122,7 @@ The emulator's source is in `src/` and its tests are in `test/`.
   with `pioBus: true`, PIO is stepped in lockstep with the CPU.
 - `virtual-net.ts` is the LAN behind the AP: the router at 10.0.0.1 answers
   ARP, DHCP and DNS and serves HTTP on port 80 from a small TCP stack.
+  `backend.ts` forwards that HTTP to a real server when `backend` is set.
 - `bootrom-b1.bin` is the RP2040 B1 bootrom (BSD-3-Clause, from
   raspberrypi/pico-bootrom via the rp2040js demo).
 
