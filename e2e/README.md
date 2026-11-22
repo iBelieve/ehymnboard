@@ -6,9 +6,9 @@ running hymn board server over real HTTP. A browser drives that server's
 admin page with [Playwright](https://playwright.dev). The tests never reach
 into the server: the usher's side goes through the page, as a person would,
 and the board's side is the firmware's own HTTP client. A server rewrite is
-held to the same tests as the server it replaces. CI runs them against
-every server in [`backends.json`](backends.json) whose directory has a
-Dockerfile.
+held to the same tests as the server it replaces: if it behaves the same,
+the tests pass unchanged. CI (`.github/workflows/ci-e2e.yml`) runs them
+against the server's Docker image.
 
 | Test file       | Covers                                                                                                                                                                                                                                                   |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -86,9 +86,9 @@ pnpm run lint           # oxlint, type-aware rules via tsrs
 pnpm run format:check   # Prettier
 ```
 
-## Adding a server
+## Testing a replacement server
 
-Add it to `backends.json` with its directory and the port its image listens
-on. The image must serve the device API and the admin page on that port,
+Point `SERVER_DIR` and `SERVER_PORT` in `ci-e2e.yml` at it: its directory
+and the port its image listens on. The image must serve the device API and the admin page on that port,
 with basic auth from `BASIC_AUTH_USERNAME` and `BASIC_AUTH_PASSWORD`, and
 answer `GET /ok` once it's ready.
