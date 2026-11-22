@@ -52,16 +52,9 @@ dokku ports:set hymnboard-web http:80:5000
 git push dokku-web master   # a remote pointing at hymnboard-web
 ```
 
-**ETag header casing.** workerd always writes the header as `ETag`, and
-Cloudflare passes that through unchanged. Firmware before the case-insensitive
-parsing in PR #16 only matches `Etag: `, so it would never adopt the new tag
-and would redraw every screen every 15 seconds. `nginx.conf.sigil` in this
-directory is dokku's v0.32.3 nginx template trimmed to plain HTTP (Cloudflare
-terminates TLS), with the header renamed to `Etag`. dokku uses it on every
-deploy because the build dir is `web/`, so there's nothing to set up on the
-host. Check it with `curl -s -o /dev/null -D - http://<domain>/images/1`,
-which should print one `Etag:` line and no `ETag:` line. Once every board runs
-#16, delete the file to go back to dokku's stock template.
+The boards need firmware with the case-insensitive header parsing from PR #16
+(both run it since 688965a): workerd always writes the header as `ETag`, and
+older firmware only matched `Etag: `.
 
 ### Rolling out alongside the Flask app
 
@@ -71,8 +64,7 @@ back is one command away.
 1. **Deploy next to it** with the steps above and a temporary domain, such as
    `dokku domains:set hymnboard-web hymnboard-next.sonrise.io`. The
    Cloudflare-proxied `*.sonrise.io` wildcard already points at this host, so
-   that needs no DNS change. Check the admin at `https://hymnboard-next.sonrise.io`
-   and the header with the `curl` above.
+   that needs no DNS change. Check the admin at `https://hymnboard-next.sonrise.io`.
 2. **Copy the lines.** Nothing is migrated: type the six lines from the Flask
    admin into the new one, so the boards keep showing the same hymns.
 3. **Switch the boards.** `api.hymnboard.sonrise.io` and the admin domain
