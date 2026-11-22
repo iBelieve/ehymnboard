@@ -151,6 +151,8 @@ describe("device status", () => {
   });
 });
 
+const STUCK = 3;
+
 function poll(etag = "") {
   return get(`/images/2?device_id=${LEFT}&etag=${etag}`);
 }
@@ -193,6 +195,26 @@ describe("boards that don't keep their ETag", () => {
     expect(failures()).toEqual([]);
     expect(await stuckAt()).toBeNull();
   });
+
+  test("stay flagged through a new image until the stuck screen gets a 304", async () => {
+    for (let i = 0; i < STUCK; i++) await poll();
+    await settle();
+    expect(failures()).toHaveLength(1);
+
+    // A new image for the stuck screen, and a 304 for another one.
+    await putLines(["", "", "new", "", "", ""]);
+    const etag = (await poll()).headers.get("Etag")!;
+    const state = await (await get("/api/state", AUTH)).json<BoardState>();
+    const screen1 = state.screens.find((s) => s.id === 1)!.etag;
+    expect((await get(`/images/1?device_id=${LEFT}&etag=${screen1}`)).status).toBe(304);
+    await poll();
+    await settle();
+    expect(await stuckAt()).toBeTruthy();
+    expect(failures()).toHaveLength(1);
+
+    expect((await poll(etag)).status).toBe(304);
+    expect(await stuckAt()).toBeNull();
+  });
 });
 
 describe("admin API", () => {
@@ -206,6 +228,16 @@ describe("admin API", () => {
 
   test("rejects anything but six strings", async () => {
     expect((await putLines(["1", "2"])).status).toBe(400);
+    for (const body of ["null", "[]", "not json", '"lines"']) {
+      const res = await exports.default.fetch(
+        new Request("http://api.hymnboard.sonrise.io/api/lines", {
+          method: "PUT",
+          headers: { ...AUTH, "Content-Type": "application/json" },
+          body,
+        }),
+      );
+      expect(res.status, body).toBe(400);
+    }
   });
 
   test("saves trimmed lines and serves the stored screen bits", async () => {

@@ -236,8 +236,9 @@ async function getState(env: Env): Promise<BoardState> {
 app.get("/api/state", requireAuth, async (c) => c.json(await getState(c.env)));
 
 app.put("/api/lines", requireAuth, async (c) => {
-  const body = await c.req.json<{ lines?: unknown }>().catch(() => ({ lines: undefined }));
-  const lines = body.lines;
+  const body: unknown = await c.req.json().catch(() => undefined);
+  const lines =
+    typeof body === "object" && body !== null && "lines" in body ? body.lines : undefined;
   if (!isLines(lines) || lines.some((line) => line.length > MAX_LINE_LENGTH)) {
     return c.text("Expected { lines: [six strings] }", 400);
   }

@@ -26,7 +26,13 @@ export default {
     }
 
     let path = new URL(request.url).pathname;
-    let res = path.endsWith("/") ? undefined : await env.FILES.fetch(fileRequest(path, request));
+    if (path.endsWith("/")) {
+      path += "index.html";
+    }
+    // Only files have an extension; workerd answers a directory with a JSON
+    // listing, so treat that as a miss.
+    const isFile = path.slice(path.lastIndexOf("/")).includes(".");
+    let res = isFile ? await env.FILES.fetch(fileRequest(path, request)) : undefined;
     if (!res || !res.ok) {
       // Like Cloudflare, only page navigations fall back to the app.
       if (!request.headers.get("Accept")?.includes("text/html")) {

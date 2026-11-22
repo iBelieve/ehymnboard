@@ -5,7 +5,11 @@ export default defineConfig({
   test: {
     projects: [
       {
-        test: { name: "render", include: ["test/render.test.ts"], environment: "node" },
+        test: {
+          name: "node",
+          include: ["test/render.test.ts", "test/prettyDate.test.ts"],
+          environment: "node",
+        },
       },
       {
         plugins: [

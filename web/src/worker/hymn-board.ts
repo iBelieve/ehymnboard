@@ -22,7 +22,8 @@ const DEVICE_FIELDS = new Set([
 // reset of the board's saved state.
 export const STUCK_ETAG_DOWNLOADS = 3;
 
-type ScreenRow = { id: number; etag: string; buffer: ArrayBuffer };
+type StoredScreen = { etag: string; buffer: ArrayBuffer };
+type ScreenRow = StoredScreen & { id: number };
 type FirmwareRow = FirmwareInfo & { image: ArrayBuffer };
 
 export type ImageResult =
@@ -101,20 +102,27 @@ export class HymnBoard extends DurableObject<Env> {
     return isLines(lines) ? lines : [...EMPTY_LINES];
   }
 
-  /** Renders and stores all three screens, then saves the lines. */
+  /**
+   * Renders all three screens, then stores them and the lines in one
+   * transaction, so a board never sees a mix of old and new screens.
+   */
   async setLines(lines: Lines): Promise<void> {
     const font = getFont();
-    for (let id = 1; id <= SCREEN_COUNT; id++) {
-      const [line1, line2] = linesForScreen(lines, id);
-      await this.storeScreen(id, renderScreen(font, line1, line2));
-    }
-    this.sql.exec(
-      "INSERT OR REPLACE INTO settings (key, value) VALUES ('lines', ?)",
-      JSON.stringify(lines),
+    const screens = await Promise.all(
+      Array.from({ length: SCREEN_COUNT }, (_, i) =>
+        hashScreen(renderScreen(font, ...linesForScreen(lines, i + 1))),
+      ),
     );
+    this.ctx.storage.transactionSync(() => {
+      screens.forEach((screen, i) => this.writeScreen(i + 1, screen));
+      this.sql.exec(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('lines', ?)",
+        JSON.stringify(lines),
+      );
+    });
   }
 
-  async getScreen(id: number): Promise<{ etag: string; buffer: ArrayBuffer }> {
+  async getScreen(id: number): Promise<StoredScreen> {
     const row = this.sql
       .exec<ScreenRow>("SELECT id, etag, buffer FROM screens WHERE id = ?", id)
       .toArray()[0];
@@ -123,7 +131,9 @@ export class HymnBoard extends DurableObject<Env> {
     }
     // Never rendered (a fresh install): render it from the saved lines.
     const [line1, line2] = linesForScreen(this.getLines(), id);
-    return this.storeScreen(id, renderScreen(getFont(), line1, line2));
+    const screen = await hashScreen(renderScreen(getFont(), line1, line2));
+    this.writeScreen(id, screen);
+    return screen;
   }
 
   getScreenEtags(): { id: number; etag: string }[] {
@@ -163,7 +173,9 @@ export class HymnBoard extends DurableObject<Env> {
   /**
    * Counts identical downloads of a screen by a board (servedEtag is undefined
    * for a 304). Returns true when this download newly flags the board as not
-   * keeping its ETag. The flag clears once none of its screens are stuck.
+   * keeping its ETag. A stuck screen stays stuck through new images until the
+   * board answers it with a 304, and the flag clears once none of its screens
+   * are stuck.
    */
   private trackDownload(
     deviceId: string,
@@ -197,7 +209,12 @@ export class HymnBoard extends DurableObject<Env> {
         screenId,
       )
       .toArray()[0];
-    const downloads = previous?.etag === servedEtag ? previous.downloads + 1 : 1;
+    let downloads = 1;
+    if (previous?.etag === servedEtag) {
+      downloads = previous.downloads + 1;
+    } else if (previous && previous.downloads >= STUCK_ETAG_DOWNLOADS) {
+      downloads = STUCK_ETAG_DOWNLOADS;
+    }
     this.sql.exec(
       "INSERT OR REPLACE INTO served_screens (device_id, screen_id, etag, downloads) VALUES (?, ?, ?, ?)",
       deviceId,
@@ -270,18 +287,20 @@ export class HymnBoard extends DurableObject<Env> {
     return info;
   }
 
-  private async storeScreen(id: number, bytes: Uint8Array) {
-    const buffer = bytes.slice().buffer;
-    // SHA-1 because the device stores a 40-character etag.
-    const etag = toHex(await crypto.subtle.digest("SHA-1", buffer));
+  private writeScreen(id: number, { etag, buffer }: StoredScreen): void {
     this.sql.exec(
       "INSERT OR REPLACE INTO screens (id, etag, buffer) VALUES (?, ?, ?)",
       id,
       etag,
       buffer,
     );
-    return { etag, buffer };
   }
+}
+
+async function hashScreen(bytes: Uint8Array): Promise<StoredScreen> {
+  const buffer = bytes.slice().buffer;
+  // SHA-1 because the device stores a 40-character etag.
+  return { etag: toHex(await crypto.subtle.digest("SHA-1", buffer)), buffer };
 }
 
 function toHex(digest: ArrayBuffer): string {

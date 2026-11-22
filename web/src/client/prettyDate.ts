@@ -1,11 +1,13 @@
 /** "just now", "5 minutes ago", "on 20 Nov 26", like the Flask admin. */
 export function prettyDate(iso: string, now = new Date()): string {
   const date = new Date(iso);
-  const diffMs = now.getTime() - date.getTime();
+  // A browser clock a little behind the server's would otherwise make recent
+  // times look like future dates.
+  const diffMs = Math.max(0, now.getTime() - date.getTime());
   const days = Math.floor(diffMs / 86_400_000);
   const seconds = Math.floor((diffMs % 86_400_000) / 1000);
 
-  if (days > 7 || days < 0) {
+  if (days > 7) {
     const month = date.toLocaleString("en-US", { month: "short" });
     const day = String(date.getDate()).padStart(2, "0");
     return `on ${day} ${month} ${String(date.getFullYear()).slice(2)}`;
