@@ -20,7 +20,7 @@ export default defineConfig({
             },
           }),
         ],
-        test: { name: "worker", include: ["test/worker.test.ts"] },
+        test: { name: "worker", include: ["test/worker.test.ts", "test/migrations.test.ts"] },
       },
     ],
   },

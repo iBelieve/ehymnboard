@@ -6,5 +6,11 @@
     "lib": ["ES2023"],
     "types": ["vite/client", "@cloudflare/vitest-plugin/types"]
   },
-  "include": ["worker-configuration.d.ts", "src/worker", "src/shared", "test/worker.test.ts"]
+  "include": [
+    "worker-configuration.d.ts",
+    "src/worker",
+    "src/shared",
+    "test/worker.test.ts",
+    "test/migrations.test.ts"
+  ]
 }

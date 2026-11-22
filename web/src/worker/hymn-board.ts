@@ -3,6 +3,7 @@ import { getFont } from "../shared/font";
 import { renderScreen } from "../shared/render";
 import { EMPTY_LINES, isLines, linesForScreen, SCREEN_COUNT, type Lines } from "../shared/screen";
 import type { Device, DeviceStatusParams, FirmwareInfo } from "../shared/api";
+import { migrate } from "./migrations";
 
 // Column names are interpolated into SQL, so only these are accepted.
 const DEVICE_FIELDS = new Set([
@@ -48,50 +49,17 @@ export class HymnBoard extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS screens (
-        id INTEGER PRIMARY KEY,
-        etag TEXT NOT NULL,
-        buffer BLOB NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS devices (
-        id TEXT PRIMARY KEY,
-        saved_state_writes INTEGER,
-        last_seen TEXT,
-        last_updated_at TEXT,
-        booted_at TEXT,
-        firmware_version TEXT,
-        ota_status TEXT,
-        ota_version TEXT,
-        ota_at TEXT,
-        etag_stuck_at TEXT
-      );
-      -- The last screen each board downloaded, and how many times in a row.
-      CREATE TABLE IF NOT EXISTS served_screens (
-        device_id TEXT NOT NULL,
-        screen_id INTEGER NOT NULL,
-        etag TEXT NOT NULL,
-        downloads INTEGER NOT NULL,
-        PRIMARY KEY (device_id, screen_id)
-      );
-      CREATE TABLE IF NOT EXISTS firmware (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        version TEXT NOT NULL,
-        size INTEGER NOT NULL,
-        sha256 TEXT NOT NULL,
-        uploaded_at TEXT NOT NULL,
-        image BLOB NOT NULL
-      );
-    `);
-    // Added after the first release; CREATE TABLE IF NOT EXISTS won't add it.
-    const columns = this.sql.exec<{ name: string }>("PRAGMA table_info(devices)").toArray();
-    if (!columns.some((column) => column.name === "etag_stuck_at")) {
-      this.sql.exec("ALTER TABLE devices ADD COLUMN etag_stuck_at TEXT");
-    }
+    // Each instance migrates itself before it handles its first request.
+    void ctx.blockConcurrencyWhile(() => {
+      try {
+        migrate(ctx.storage);
+        return Promise.resolve();
+      } catch (error) {
+        // Otherwise only the reset of the object shows up, not the SQL error.
+        console.error("Schema migration failed:", error);
+        return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
   }
 
   getLines(): Lines {
