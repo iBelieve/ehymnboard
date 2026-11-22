@@ -82,6 +82,15 @@ jobs:
       - name: Build
         run: ninja -C build
 
+      - name: Upload firmware
+        uses: actions/upload-artifact@v7
+        with:
+          name: firmware
+          path: |
+            device/build/ehymnboard.uf2
+            device/build/ehymnboard.elf
+          if-no-files-found: error
+
       - uses: astral-sh/setup-uv@v10.4.0
 
       - name: Run clang-tidy
@@ -128,6 +137,48 @@ jobs:
         run: >
           uv run python ../tools/crap.py --coverage build-test/coverage.xml
           src/http_headers.cpp src/request_path.cpp src/saved_state.cpp
+
+  # Boots the built firmware in rp2040js with a fake WiFi chip, access point,
+  # LAN and server (device/emulator), and runs the scenario tests against it.
+  # The emulator itself is TypeScript, type checked and linted by oxlint.
+  emulator:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: device/emulator
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: firmware
+          path: device/build
+
+      # Installs the pnpm from package.json's packageManager, Node.js from
+      # device/emulator/.node-version, and runs pnpm install --frozen-lockfile.
+      - id: setup
+        uses: pnpm/setup@v3
+        with:
+          working-directory: device/emulator
+          cache: true
+          require-lockfile: true
+
+      - name: Type check
+        run: pnpm run typecheck
+
+      - name: Lint
+        if: (success() || failure()) && steps.setup.outcome == 'success'
+        run: pnpm run lint
+
+      - name: Check formatting
+        if: (success() || failure()) && steps.setup.outcome == 'success'
+        run: pnpm run format:check
+
+      - name: Run scenario tests
+        if: (success() || failure()) && steps.setup.outcome == 'success'
+        run: pnpm test
 
   # Complexity and copy-paste limits across the firmware.
   quality:
