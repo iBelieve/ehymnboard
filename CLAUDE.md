@@ -9,7 +9,7 @@ Docker image deployed via dokku. `hardware/` is the KiCad design (no CI).
 GitHub Actions runs on any change to `device/**` or `server/**`, or to the
 shared `tools/` and `.jscpd.json` (`.github/workflows/ci-device.yml`,
 `ci-server.yml`). The full-stack e2e tests (`ci-e2e.yml`) run on any change to
-`device/`, `server/`, `web/` or `e2e/`. Firmware builds in CI go through
+`device/`, `server/` or `e2e/`. Firmware builds in CI go through
 `.github/actions/build-firmware`, which pins the Pico SDK and Arm toolchain.
 **The device build treats all compiler warnings as errors in CI** (`-Wall
 -Wextra` plus `-DWERROR=ON`), so fix warnings before pushing even if a local

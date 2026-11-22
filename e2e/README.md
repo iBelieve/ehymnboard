@@ -88,7 +88,8 @@ pnpm run format:check   # Prettier
 
 ## Testing a replacement server
 
-Point `SERVER_DIR` and `SERVER_PORT` in `ci-e2e.yml` at it: its directory
-and the port its image listens on. The image must serve the device API and the admin page on that port,
+Point `SERVER_DIR` and `SERVER_PORT` in `ci-e2e.yml` at it (its directory
+and the port its image listens on), and add its directory to the workflow's
+`paths`. The image must serve the device API and the admin page on that port,
 with basic auth from `BASIC_AUTH_USERNAME` and `BASIC_AUTH_PASSWORD`, and
 answer `GET /ok` once it's ready.
