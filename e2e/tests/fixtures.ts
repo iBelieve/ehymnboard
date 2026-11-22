@@ -26,6 +26,7 @@ import {
   test as base,
   expect,
   type Page,
+  type Response as PlaywrightResponse,
   type TestInfo,
 } from "@playwright/test";
 import { Emulator } from "../../device/emulator/src/emulator.ts";
@@ -62,7 +63,9 @@ function buildRelease() {
   const dir = path.dirname(FIRMWARE);
   return {
     version: fs.readFileSync(path.join(dir, "firmware_version.txt"), "utf8").trim(),
-    image: fs.readFileSync(path.join(dir, "ehymnboard_fota_image_encrypted.bin")),
+    image: fs.readFileSync(
+      path.join(dir, `${path.basename(FIRMWARE, ".uf2")}_fota_image_encrypted.bin`),
+    ),
   };
 }
 
@@ -159,19 +162,30 @@ export class AdminPage {
 
   /** Clicks Apply or Clear and waits for the server to take the change. */
   async #submit(button: "Apply" | "Clear") {
-    // Whatever request saves the change: a form post or a script's fetch.
-    const saved = this.page.waitForResponse((r) => r.request().method() !== "GET");
-    await this.page.getByRole("button", { name: button }).click();
-    const response = await saved;
-    expect(response.status()).toBeLessThan(400);
-    // A form post redirects back to the page: let that finish before the
-    // next navigation, so it doesn't interrupt it.
-    let request = response.request();
-    for (let next = request.redirectedTo(); next; next = next.redirectedTo()) {
-      request = next;
+    // A form post redirects back to the page: note the pages it loads, so
+    // the next navigation doesn't cut that reload off.
+    const pages: unknown[] = [];
+    const onResponse = (r: PlaywrightResponse) => {
+      if (r.request().isNavigationRequest() && r.request().method() === "GET") {
+        pages.push(r);
+      }
+    };
+    this.page.on("response", onResponse);
+    try {
+      // Whatever request saves the change: a form post or a script's fetch.
+      const saved = this.page.waitForResponse((r) => r.request().method() !== "GET");
+      await this.page.getByRole("button", { name: button }).click();
+      const response = await saved;
+      expect(response.status()).toBeLessThan(400);
+      if (response.status() >= 300) {
+        await expect
+          .poll(() => pages.length, { message: "page reloaded after saving" })
+          .toBeGreaterThan(0);
+        await this.page.waitForLoadState();
+      }
+    } finally {
+      this.page.off("response", onResponse);
     }
-    await request.response();
-    await this.page.waitForLoadState();
   }
 }
 
@@ -243,9 +257,9 @@ export class Board {
 /**
  * `admin` is the admin page; `backend` is the server's origin; `board`
  * boots a fresh board (blank flash) per test, and its logs and every frame
- * it showed are attached to the report. Before the board boots, the server
- * is made to offer the firmware under test, so a release left over on the
- * server can't update the board in the middle of a test.
+ * it showed are attached to the report. Before the board boots, and again
+ * after the test, the server is made to offer the firmware under test, so
+ * a release left over on the server can't update a board by surprise.
  */
 export const test = base.extend<{ admin: AdminPage; backend: string; board: Board }>({
   admin: async ({ page, backend }, use) => {
@@ -267,6 +281,9 @@ export const test = base.extend<{ admin: AdminPage; backend: string; board: Boar
     const board = new Board(backend);
     await use(board);
     await board.attachTo(testInfo);
+    // Leave the server offering the build under test, not a release a test
+    // published, for whatever checks in next.
+    await publishRelease(request, release.version, release.image);
   },
 });
 

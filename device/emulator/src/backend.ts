@@ -42,23 +42,30 @@ export function forwardTo(baseUrl: string) {
   return (req: HttpRequest) => exchange(host, port, req.raw);
 }
 
-/** The length of a complete response in `bytes`, once its head and Content-Length body are in. */
-function completeLength(bytes: Buffer) {
-  const headEnd = bytes.indexOf("\r\n\r\n");
-  if (headEnd < 0) {
-    return undefined;
+/**
+ * Where a response ends, from its head: right after the head for a status
+ * with no body (1xx, 204, 304, whatever Content-Length says), after
+ * Content-Length bytes otherwise, or unknown (read until the server closes).
+ */
+function responseLength(head: string) {
+  const status = Number(/^HTTP\/1\.[01] (\d{3})/.exec(head)?.[1]);
+  if ((status >= 100 && status < 200) || status === 204 || status === 304) {
+    return 0;
   }
-  const head = bytes.subarray(0, headEnd).toString("latin1");
   const length = /^content-length:\s*(\d+)\s*$/im.exec(head)?.[1];
-  const total = length === undefined ? undefined : headEnd + 4 + Number(length);
-  return total !== undefined && bytes.length >= total ? total : undefined;
+  return length === undefined ? undefined : Number(length);
 }
 
 function exchange(host: string, port: number, request: string): Promise<HttpResponse> {
   return new Promise((resolve, reject) => {
-    let received = Buffer.alloc(0);
-    const done = (bytes: Buffer) => {
-      resolve({ raw: new Uint8Array(bytes) });
+    const chunks: Buffer[] = [];
+    let received = 0;
+    // Once the head is in: how many bytes the whole response is, if known.
+    let total: number | undefined;
+    let headSeen = false;
+    const done = () => {
+      const all = Buffer.concat(chunks, received);
+      resolve({ raw: new Uint8Array(total === undefined ? all : all.subarray(0, total)) });
       socket.destroy();
     };
     const socket = net.connect({ host, port });
@@ -67,16 +74,26 @@ function exchange(host: string, port: number, request: string): Promise<HttpResp
     });
     socket.on("connect", () => socket.write(request));
     socket.on("data", (chunk: Buffer) => {
-      received = Buffer.concat([received, chunk]);
-      const length = completeLength(received);
-      if (length !== undefined) {
-        done(received.subarray(0, length));
+      chunks.push(chunk);
+      received += chunk.length;
+      if (!headSeen) {
+        const sofar = Buffer.concat(chunks, received);
+        const headEnd = sofar.indexOf("\r\n\r\n");
+        if (headEnd < 0) {
+          return;
+        }
+        headSeen = true;
+        const body = responseLength(sofar.subarray(0, headEnd).toString("latin1"));
+        total = body === undefined ? undefined : headEnd + 4 + body;
+      }
+      if (total !== undefined && received >= total) {
+        done();
       }
     });
     socket.on("error", reject);
     socket.on("close", (hadError) => {
       if (!hadError) {
-        done(received);
+        done();
       }
     });
   });

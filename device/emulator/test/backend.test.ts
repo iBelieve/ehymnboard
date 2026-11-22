@@ -100,18 +100,24 @@ test("passes the server's framing through: lwIP's client doesn't decode chunked 
   }
 });
 
-test("takes an answer by its Content-Length from a server that keeps the connection open", async () => {
+test("frames answers by Content-Length and status when the server keeps the connection open", async () => {
   const body = testImage(1, 3);
+  const sockets = new Set<net.Socket>();
   const server = net.createServer((socket) => {
-    socket.once("data", (request) => {
-      const image = String(request).startsWith("GET /images/");
-      const head = image
-        ? `HTTP/1.1 200 OK\r\nEtag: kept-open\r\nContent-Length: ${body.length}\r\n\r\n`
-        : "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n";
-      socket.write(head);
-      if (image) {
+    sockets.add(socket);
+    socket.once("data", (data) => {
+      const request = String(data);
+      let head = "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n";
+      if (request.includes("etag=kept-open")) {
+        // A 304 may carry the entity's Content-Length but has no body.
+        head = `HTTP/1.1 304 Not Modified\r\nEtag: kept-open\r\nContent-Length: ${body.length}\r\n\r\n`;
+      } else if (request.startsWith("GET /images/")) {
+        head = `HTTP/1.1 200 OK\r\nEtag: kept-open\r\nContent-Length: ${body.length}\r\n\r\n`;
+        socket.write(head);
         socket.write(body);
+        return;
       }
+      socket.write(head);
       // ...and never closes, ignoring Connection: Close.
     });
   });
@@ -120,11 +126,20 @@ test("takes an answer by its Content-Length from a server that keeps the connect
   assert.ok(address && typeof address !== "string");
   try {
     const emu = boot({ backend: `http://127.0.0.1:${address.port}` });
-    await emu.untilSerial("State saved to flash", 30_000);
+    const at = await emu.untilSerial("State saved to flash", 30_000);
     assert.deepEqual(emu.displays[0].frame, body);
+    const asleep = await emu.untilSerial("Sleeping for 15 seconds", 30_000, at);
+    await emu.untilSerial("Sleeping for 15 seconds", 30_000, asleep);
+    const images = emu.net.requests.filter((r) => r.path.startsWith("/images/"));
+    assert.deepEqual(
+      images.map((r) => r.status),
+      [200, 200, 200, 304, 304, 304],
+    );
   } finally {
-    // The emulator hangs up once it has the Content-Length, so this returns.
-    server.close();
+    for (const socket of sockets) {
+      socket.destroy();
+    }
+    await new Promise((resolve) => server.close(resolve));
   }
 });
 
