@@ -18,7 +18,6 @@
 
 #pragma once
 
-#include <cstdint>
 #include <string>
 
 // Over-the-air firmware updates, using pico_fota_bootloader. The bootloader
@@ -39,9 +38,9 @@ inline std::string ota_boot_version;
 // Records what the bootloader did on this boot. Call early in main().
 void ota_handle_boot();
 
-// Called at the end of each main loop iteration (counting from 1). Once the
-// screens have reached the server, tells the bootloader that newly installed
-// firmware works, and every so often asks the server for an update. If there
-// is one, downloads, verifies and installs it, and doesn't return (the board
-// reboots into the bootloader).
-void ota_loop(uint32_t loop_count, bool any_success);
+// Called at the end of each main loop iteration. Once the screens have
+// reached the server, tells the bootloader that newly installed firmware
+// works, and on the first such loop and then every 10 minutes asks the server
+// for an update. If there is one, downloads, verifies and installs it, and
+// doesn't return (the board reboots into the bootloader).
+void ota_loop(bool any_success);

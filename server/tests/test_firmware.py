@@ -149,6 +149,17 @@ def test_unknown_ota_status_is_ignored(client: FlaskClient, workdir: Path):
     assert "ota_status" not in device
 
 
+@pytest.mark.parametrize("version", ["", "&ota_version=", "&ota_version=a/b"])
+def test_ota_status_without_a_valid_version_is_a_plain_boot(
+    client: FlaskClient, workdir: Path, pings: PingRecorder, version: str
+):
+    client.get(f"/device_booted?device_id={LEFT_BOARD}&ota_status=rolled_back{version}")
+
+    assert pings.pings[0].data == "Device booted"
+    device = json.loads((workdir / "images/devices.json").read_text())[LEFT_BOARD]
+    assert "ota_status" not in device
+
+
 def test_devices_page_shows_firmware(client: FlaskClient):
     upload(client)
     client.get(

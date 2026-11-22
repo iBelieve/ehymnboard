@@ -29,15 +29,20 @@ inline constexpr uint16_t STATE_VERSION = 2;
 // cmake/firmware_version.cmake
 inline constexpr std::size_t OTA_VERSION_SIZE = 48; // 47 + 1 for null terminator
 
+// The first STATE_VERSION with the OTA fields, which stay where they are in
+// every later version too
+inline constexpr uint16_t OTA_STATE_SINCE_VERSION = 2;
+
 // Example Etag: 2e16e58b5d7ca51f8e5972e3de922816bab545bf
 struct SavedState
 {
     uint64_t magic = SAVED_STATE_MAGIC;
     uint16_t version = STATE_VERSION;
-    int write_count = 0;
-    char etag1[41] = {}; // 40 + 1 for null terminator
-    char etag2[41] = {}; // 40 + 1 for null terminator
-    char etag3[41] = {}; // 40 + 1 for null terminator
+
+    // The OTA fields come first and never move, so that firmware on either
+    // side of a STATE_VERSION change can still read them (see reset()). An
+    // update that changes the layout and is rolled back must still be
+    // recorded as rejected by the older firmware.
 
     // The OTA version being installed by the last reboot, so that if the
     // bootloader rolls it back we know which version failed
@@ -45,6 +50,11 @@ struct SavedState
     // A version that was rolled back; we don't retry it until the server
     // offers a different one
     char ota_rejected_version[OTA_VERSION_SIZE] = {};
+
+    int write_count = 0;
+    char etag1[41] = {}; // 40 + 1 for null terminator
+    char etag2[41] = {}; // 40 + 1 for null terminator
+    char etag3[41] = {}; // 40 + 1 for null terminator
 
     SavedState() : write_count(1)
     {
@@ -59,6 +69,10 @@ struct SavedState
     // A copy with the OTA fields replaced (each under OTA_VERSION_SIZE
     // characters), keeping the etags and counting the write
     SavedState with_ota(const std::string &attempted_version, const std::string &rejected_version) const;
+
+    // A fresh state to replace this one when it has the wrong version,
+    // keeping the OTA fields if its layout has them
+    SavedState reset() const;
 
     std::string attempted_version() const;
     std::string rejected_version() const;

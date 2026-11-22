@@ -20,6 +20,7 @@
 
 #include <array>
 #include <cstring>
+#include <optional>
 #include <string>
 
 #include "firmware_version.h"
@@ -69,6 +70,8 @@ bool wait_for_completion(const volatile bool &complete, int64_t timeout_us)
     while (!complete)
     {
         async_context_wait_for_work_ms(context, 100);
+        // The timeout, not the watchdog, bounds the wait
+        long_watchdog_update();
 
         if (absolute_time_diff_us(start, get_absolute_time()) > timeout_us)
         {
@@ -564,11 +567,10 @@ static void ota_check_for_update()
     pfb_perform_update();
 }
 
-void ota_loop(uint32_t loop_count, bool any_success)
+void ota_loop(bool any_success)
 {
-    // Check on the first loop and then about every 10 minutes (each loop is
-    // at least 15 seconds)
-    constexpr uint32_t CHECK_EVERY_LOOPS = 40;
+    constexpr int64_t CHECK_INTERVAL_US = 10LL * 60 * 1000 * 1000;
+    static std::optional<absolute_time_t> last_check;
 
     if (!any_success)
     {
@@ -579,8 +581,12 @@ void ota_loop(uint32_t loop_count, bool any_success)
     // committed, any reboot rolls it back
     ota_commit_firmware();
 
-    if (loop_count % CHECK_EVERY_LOOPS == 1)
+    // Checks on the first loop that reaches the server, and from then on
+    // whenever one does after the interval
+    const auto now = get_absolute_time();
+    if (!last_check || absolute_time_diff_us(*last_check, now) >= CHECK_INTERVAL_US)
     {
+        last_check = now;
         ota_check_for_update();
     }
 }

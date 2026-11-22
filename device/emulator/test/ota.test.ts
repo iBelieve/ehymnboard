@@ -129,6 +129,17 @@ test("a power cut during the download keeps the old firmware, then installs on t
   assert.equal(requests(emu, "/firmware/image").length, 2);
 });
 
+test("checks for an update on the first loop that reaches the server", () => {
+  const emu = boot();
+  emu.server.firmware = { version: NEXT, image: build.imageFor(NEXT) };
+  emu.server.override = (req) => (req.path.startsWith("/images/") ? { status: 500 } : undefined);
+  const at = emu.waitForSerial("Refreshing screens (loop=2", 60_000);
+  assert.equal(requests(emu, "/firmware/latest").length, 0, "no check after a failed loop");
+
+  emu.server.override = null;
+  emu.waitForSerial(`OTA: updating from ${build.version} to ${NEXT}`, 60_000, at);
+});
+
 /**
  * Boots with the server offering NEXT, answering the download with `image`;
  * returns once the firmware has given up on it with `failure`.

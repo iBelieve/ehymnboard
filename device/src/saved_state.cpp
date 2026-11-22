@@ -28,6 +28,10 @@
 
 static_assert(sizeof(SavedState::etag1) == MAX_ETAG_LENGTH + 1, "SavedState etags must fit any etag find_etag accepts");
 
+// Firmware reads these from states saved by other versions of itself
+static_assert(offsetof(SavedState, ota_attempted_version) == 10 && offsetof(SavedState, ota_rejected_version) == 58,
+              "The OTA fields must not move");
+
 template <std::size_t N> static void copy_string(char (&dest)[N], const std::string &value)
 {
     hard_assert(value.length() < N);
@@ -65,6 +69,19 @@ SavedState SavedState::with_ota(const std::string &attempted_version, const std:
 
     copy_string(next.ota_attempted_version, attempted_version);
     copy_string(next.ota_rejected_version, rejected_version);
+
+    return next;
+}
+
+SavedState SavedState::reset() const
+{
+    SavedState next;
+
+    if (version >= OTA_STATE_SINCE_VERSION)
+    {
+        copy_string(next.ota_attempted_version, attempted_version());
+        copy_string(next.ota_rejected_version, rejected_version());
+    }
 
     return next;
 }

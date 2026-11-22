@@ -154,3 +154,31 @@ RC_GTEST_PROP(SavedState, RoundTripsAnyVersionThatFits, ())
     RC_ASSERT(next.attempted_version() == attempted);
     RC_ASSERT(next.rejected_version() == rejected);
 }
+
+TEST(SavedState, ResetKeepsOtaHistoryFromAnotherLayout)
+{
+    // A rolled back update that saved a newer layout must still be rejected
+    const SavedState first;
+    auto newer = SavedState(&first, "aaa", "bbb", "ccc").with_ota("v3", "v1");
+    newer.version = STATE_VERSION + 1;
+
+    const auto state = newer.reset();
+
+    EXPECT_FALSE(state.is_wrong_version());
+    EXPECT_EQ(state.write_count, 1);
+    EXPECT_STREQ(state.etag1, "");
+    EXPECT_EQ(state.attempted_version(), "v3");
+    EXPECT_EQ(state.rejected_version(), "v1");
+}
+
+TEST(SavedState, ResetDropsWhatALayoutWithoutOtaHasThere)
+{
+    SavedState older;
+    older.version = OTA_STATE_SINCE_VERSION - 1;
+    std::memset(older.ota_attempted_version, 'x', sizeof(older.ota_attempted_version));
+
+    const auto state = older.reset();
+
+    EXPECT_EQ(state.attempted_version(), "");
+    EXPECT_EQ(state.rejected_version(), "");
+}

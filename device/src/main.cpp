@@ -89,7 +89,7 @@ int main()
     {
         printf("Flash saved state is wrong version (flash=%d, current=%d), resetting...\n", flash_saved_state->version,
                STATE_VERSION);
-        SavedState new_state;
+        auto new_state = flash_saved_state->reset();
         new_state.save();
     }
 
@@ -201,7 +201,7 @@ int main()
 
         report_device_healthy();
 
-        ota_loop(loop_count, any_success);
+        ota_loop(any_success);
 
         printf("Sleeping for 15 seconds...\n");
         sleep_ms(15000);

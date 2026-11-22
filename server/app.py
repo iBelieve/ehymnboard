@@ -306,7 +306,9 @@ def report_device_booted():
     ota_version = request.args.get("ota_version")
     ota_at = None
 
-    if ota_status in OTA_BOOT_PINGS:
+    if ota_status in OTA_BOOT_PINGS and FIRMWARE_VERSION_PATTERN.match(
+        ota_version or ""
+    ):
         # Installing an update (and the reboot that triggers a rollback)
         # reboots through the watchdog, so this replaces the watchdog report
         ota_at = datetime.now(UTC).isoformat()
