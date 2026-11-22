@@ -1,17 +1,16 @@
 name: CI (e2e)
 
 # Full-stack end-to-end tests (e2e/): the firmware built here runs in the
-# emulator and talks to the server's Docker image over its real HTTP, while
-# Playwright drives the server's admin page. To test a replacement server,
-# point SERVER_DIR and SERVER_PORT at it and add its directory to the paths
-# below; the tests themselves shouldn't need to change.
+# emulator and talks to the server's (web/) Docker image over its real HTTP,
+# while Playwright drives the server's admin page. To test a replacement
+# server, point SERVER_DIR and SERVER_PORT at it and add its directory to the
+# paths below; the tests themselves shouldn't need to change.
 
 on:
   push:
     branches: [master]
     paths:
       - "device/**"
-      - "server/**"
       - "web/**"
       - "e2e/**"
       - ".github/actions/build-firmware/**"
@@ -19,7 +18,6 @@ on:
   pull_request:
     paths:
       - "device/**"
-      - "server/**"
       - "web/**"
       - "e2e/**"
       - ".github/actions/build-firmware/**"

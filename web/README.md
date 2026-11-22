@@ -1,6 +1,7 @@
 # eHymnBoard web app and backend (Workers)
 
-The successor to `server/`: a Cloudflare Worker written in TypeScript with
+The hymn board server (it replaced the Flask app that lived in `server/`,
+last at commit 02ece7f): a Cloudflare Worker written in TypeScript with
 [Hono](https://hono.dev), a React admin built with Vite, and a single
 `HymnBoard` Durable Object (SQLite-backed) that holds the lines, the rendered
 screens, device status and the OTA firmware image. It is self-hosted on
@@ -59,7 +60,15 @@ older firmware only matched `Etag: `.
 ### Rolling out alongside the Flask app
 
 The Flask app (`hymnboard`) keeps running untouched the whole time, so rolling
-back is one command away.
+back is one command away. Its code is no longer in this repository, so rolling
+back uses the build that app already has deployed, not a redeploy from
+`master`. Don't push `master` to `hymnboard`: it no longer has the Flask app.
+If the Flask app ever has to be rebuilt, deploy commit 02ece7f, the last with
+`server/`, the same way it was deployed before:
+
+```sh
+git push dokku-flask 02ece7f:refs/heads/master   # a remote pointing at hymnboard
+```
 
 1. **Deploy next to it** with the steps above and a temporary domain, such as
    `dokku domains:set hymnboard-web hymnboard-next.sonrise.io`. The

@@ -47,17 +47,11 @@ pnpm exec playwright install chromium
 E2E_BASE_URL=http://localhost:8000 E2E_USERNAME=e2e E2E_PASSWORD=e2e-password pnpm test
 ```
 
-To start the Flask server for this, run it in a scratch copy of `server/`,
-because it writes `images/` in its working directory:
+To start the server for this, run its Docker image, as CI does (it listens
+on port 5000):
 
 ```sh
-BASIC_AUTH_USERNAME=e2e BASIC_AUTH_PASSWORD=e2e-password uv run gunicorn -c python:config.gunicorn app:app
-```
-
-You can also run either server's Docker image, as CI does:
-
-```sh
-docker build -t hymnboard server && docker run --rm -p 8000:8000 \
+docker build -t hymnboard web && docker run --rm -p 8000:5000 \
   -e BASIC_AUTH_USERNAME=e2e -e BASIC_AUTH_PASSWORD=e2e-password hymnboard
 ```
 

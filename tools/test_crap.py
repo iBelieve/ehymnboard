@@ -1,4 +1,4 @@
-"""Tests for the CRAP gate (run from server/: ``uv run pytest ../tools``)."""
+"""Tests for the CRAP gate (run from device/: ``uv run pytest ../tools``)."""
 
 from pathlib import Path
 

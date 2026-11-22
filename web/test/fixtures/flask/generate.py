@@ -1,6 +1,7 @@
 """Regenerates the Flask rendering fixtures for test/render.test.ts.
 
-Run from server/ (it imports app.py):
+Run from server/ in a checkout of commit 02ece7f, the last with the Flask
+server (it imports app.py):
 
     uv run python ../web/test/fixtures/flask/generate.py
 """

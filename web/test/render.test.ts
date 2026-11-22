@@ -5,8 +5,8 @@ import { getFont } from "../src/shared/font";
 import { fitFontSize, renderScreen } from "../src/shared/render";
 import { SCREEN_BYTES, SCREEN_HEIGHT, SCREEN_WIDTH } from "../src/shared/screen";
 
-// Rendered by the Flask server (server/app.py, Pillow) for the same lines.
-// Regenerate with test/fixtures/flask/generate.py.
+// Rendered by the old Flask server (server/app.py at commit 02ece7f, Pillow)
+// for the same lines. Regenerate with test/fixtures/flask/generate.py.
 const fixtures = new URL("./fixtures/flask/", import.meta.url);
 type Case = { lines: [string, string]; sizes: [number | null, number | null] };
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- our own fixture
