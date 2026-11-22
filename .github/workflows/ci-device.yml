@@ -46,6 +46,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - uses: carlosperate/arm-none-eabi-gcc-action@v1
         with:
@@ -70,8 +72,16 @@ jobs:
       - name: Install ninja
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
-      - name: Create secrets.h
-        run: cp src/secrets.example.h src/secrets.h
+      - name: Create secrets.h and secrets.cmake
+        run: |
+          cp src/secrets.example.h src/secrets.h
+          cp secrets.example.cmake secrets.cmake
+
+      - uses: astral-sh/setup-uv@v10.4.0
+
+      # pycryptodome, for encrypting the OTA image during the build
+      - name: Install Python dependencies
+        run: uv sync
 
       - name: Configure
         run: >
@@ -82,13 +92,21 @@ jobs:
       - name: Build
         run: ninja -C build
 
+      - name: Check OTA image was built
+        run: test -s build/ehymnboard_fota_image_encrypted.bin && test -s build/lib/pico_fota_bootloader/pico_fota_bootloader.uf2
+
       - name: Upload firmware
         uses: actions/upload-artifact@v7
         with:
           name: firmware
+          # The OTA image, its version and the bootloader are for the
+          # emulator's OTA tests.
           path: |
             device/build/ehymnboard.uf2
             device/build/ehymnboard.elf
+            device/build/ehymnboard_fota_image_encrypted.bin
+            device/build/firmware_version.txt
+            device/build/lib/pico_fota_bootloader/pico_fota_bootloader.uf2
           if-no-files-found: error
 
       - uses: astral-sh/setup-uv@v10.4.0

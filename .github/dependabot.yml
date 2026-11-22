@@ -80,3 +80,10 @@ updates:
         update-types:
           - minor
           - patch
+
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 1

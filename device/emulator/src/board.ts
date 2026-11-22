@@ -93,6 +93,11 @@ function romFunction(bootrom: Uint8Array, code: string) {
 
 export interface BoardOptions {
   firmware: Uint8Array;
+  /**
+   * A UF2 flashed before the firmware, for an OTA build: the firmware is then
+   * linked after pico_fota_bootloader, which starts at the beginning of flash.
+   */
+  bootloader?: Uint8Array;
   bootrom: Uint8Array;
   aps: AccessPoint[];
   trace?: boolean;
@@ -142,12 +147,10 @@ export class Board {
 
   constructor(opts: BoardOptions) {
     this.opts = opts;
-    for (let off = 0; off + 512 <= opts.firmware.length; off += 512) {
-      const view = new DataView(opts.firmware.buffer, opts.firmware.byteOffset + off, 512);
-      const addr = view.getUint32(12, true);
-      const size = view.getUint32(16, true);
-      this.flash.set(opts.firmware.subarray(off + 32, off + 32 + size), addr - FLASH_BASE);
+    if (opts.bootloader) {
+      this.flashUF2(opts.bootloader);
     }
+    this.flashUF2(opts.firmware);
     this.romErase = romFunction(opts.bootrom, "RE");
     this.romProgram = romFunction(opts.bootrom, "RP");
     this.spiTransfer = opts.elf ? (elfSymbols(opts.elf).get("cyw43_spi_transfer") ?? 1) & ~1 : 1;
@@ -162,6 +165,16 @@ export class Board {
       return panel;
     });
     this.powerOn(0);
+  }
+
+  /** Writes a UF2's blocks into flash, like dropping it on the BOOTSEL drive. */
+  flashUF2(uf2: Uint8Array) {
+    for (let off = 0; off + 512 <= uf2.length; off += 512) {
+      const view = new DataView(uf2.buffer, uf2.byteOffset + off, 512);
+      const addr = view.getUint32(12, true);
+      const size = view.getUint32(16, true);
+      this.flash.set(uf2.subarray(off + 32, off + 32 + size), addr - FLASH_BASE);
+    }
   }
 
   on<K extends keyof BoardEvents>(event: K, fn: (arg: BoardEvents[K]) => void) {
@@ -216,7 +229,7 @@ export class Board {
     if (watchdogReason) {
       watchdog.reason = watchdogReason;
     }
-    if (oldWatchdog) {
+    if (oldWatchdog && watchdogReason) {
       watchdog.scratchData.set(oldWatchdog.scratchData);
     }
     watchdog.onWatchdogTrigger = () => {
@@ -245,6 +258,18 @@ export class Board {
 
     this.wirePanels(mcu);
 
+    this.attachSerial(mcu);
+
+    mcu.core.PC = FLASH_BASE;
+  }
+
+  /**
+   * Plugs a USB host's CDC serial driver into the RP2040. USBCDC enumerates
+   * the device once, so every time the firmware (re)enables its controller,
+   * as the app does after pico_fota_bootloader has used USB, a fresh one
+   * enumerates it again, like a host seeing the device come back.
+   */
+  attachSerial(mcu: RP2040) {
     const cdc = new USBCDC(mcu.usbCtrl);
     // USBCDC answers every OUT (host to device) poll at once with zero bytes,
     // so TinyUSB re-arms the endpoint every 10 us and the CPU never sleeps.
@@ -255,8 +280,19 @@ export class Board {
       this.serial += text;
       this.emit("serial", text);
     };
+    mcu.usbCtrl.onUSBEnabled = () => {
+      this.attachSerial(mcu);
+      mcu.usbCtrl.resetDevice();
+    };
+  }
 
-    mcu.core.PC = FLASH_BASE;
+  /**
+   * Cuts the power and turns it back on: the firmware starts over from flash,
+   * and unlike a watchdog reset nothing survives in the scratch registers.
+   */
+  powerCycle() {
+    this.pendingReboot = 0;
+    this.powerOn(0);
   }
 
   /** Connects the panels to a new RP2040's pins and SPI0. */

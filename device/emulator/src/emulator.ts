@@ -19,6 +19,7 @@
 // Puts it all together: the emulated board, the fake AP's LAN and a mock of
 // the hymn board server, plus helpers for tests to drive and observe them.
 import fs from "node:fs";
+import path from "node:path";
 import { Board, type BoardEvents } from "./board.ts";
 import type { AccessPoint } from "./fake-cyw43.ts";
 import { type HttpRequest, type HttpResponse, VirtualNetwork } from "./virtual-net.ts";
@@ -27,6 +28,20 @@ export const SERVER_HOST = "api.hymnboard.sonrise.io";
 export const IMAGE_BYTES = 81600;
 
 const BOOTROM = new URL("./bootrom-b1.bin", import.meta.url);
+
+/**
+ * pico_fota_bootloader's UF2 from the same build: an OTA build's firmware
+ * can't boot without it.
+ */
+function bootloaderFor(uf2: string) {
+  const bootloader = path.join(
+    path.dirname(uf2),
+    "lib",
+    "pico_fota_bootloader",
+    "pico_fota_bootloader.uf2",
+  );
+  return fs.existsSync(bootloader) ? fs.readFileSync(bootloader) : undefined;
+}
 
 function elfFor(uf2: string, pioBus: boolean | undefined) {
   const elf = uf2.replace(/\.uf2$/, ".elf");
@@ -38,9 +53,16 @@ export function testImage(screen: number, version: number) {
   return new Uint8Array(IMAGE_BYTES).fill((screen * 16 + version) & 0xff);
 }
 
+/** A firmware update the server offers: its version and encrypted OTA image. */
+export interface FirmwareUpdate {
+  version: string;
+  image: Uint8Array;
+}
+
 /**
  * The hymn board server as the firmware sees it: /images/N with Etag/304,
- * and the two healthchecks. `override` lets a test answer a request itself.
+ * the two healthchecks and, once `firmware` is set, an OTA update.
+ * `override` lets a test answer a request itself.
  */
 export class MockServer {
   images = new Map(
@@ -50,6 +72,7 @@ export class MockServer {
     ]),
   );
   override: ((req: HttpRequest) => HttpResponse | undefined) | null = null;
+  firmware: FirmwareUpdate | null = null;
 
   setImage(screen: number, version: number) {
     this.images.set(screen, { etag: `v${version}-${screen}`, body: testImage(screen, version) });
@@ -77,12 +100,45 @@ export class MockServer {
     if (req.path === "/device_booted" || req.path === "/device_healthy") {
       return { status: 204 };
     }
+    if (req.path.startsWith("/firmware/")) {
+      return this.handleFirmware(req);
+    }
+    return { status: 404 };
+  }
+
+  /** Like the real server: every board not on `firmware.version` installs it. */
+  handleFirmware(req: HttpRequest): HttpResponse {
+    const firmware = this.firmware;
+    if (req.path === "/firmware/latest") {
+      if (!firmware || req.query.version === firmware.version) {
+        return { status: 204 };
+      }
+      return { status: 200, headers: { "Content-Type": "text/plain" }, body: firmware.version };
+    }
+    if (req.path === "/firmware/image") {
+      if (!firmware) {
+        return { status: 404 };
+      }
+      if (req.query.target_version !== firmware.version) {
+        return { status: 409 };
+      }
+      return {
+        status: 200,
+        headers: { "Content-Type": "application/octet-stream" },
+        body: firmware.image,
+      };
+    }
     return { status: 404 };
   }
 }
 
 export interface EmulatorOptions {
   firmware: string;
+  /**
+   * pico_fota_bootloader's UF2, flashed first. Defaults to the one in the
+   * firmware's build directory, if there is one.
+   */
+  bootloader?: string;
   /** Defaults to one WPA2 network matching secrets.example.h. */
   aps?: AccessPoint[];
   quiet?: boolean;
@@ -105,17 +161,15 @@ export class Emulator {
   readonly net: VirtualNetwork;
   readonly displays: Display[] = [];
   reboots = 0;
+  readonly #quiet: boolean;
 
   constructor(opts: EmulatorOptions) {
-    const log = (msg: string) => {
-      this.logLines.push(msg);
-      if (!opts.quiet) {
-        console.log(msg);
-      }
-    };
-    const stamp = () => this.board.simMs.toFixed(0).padStart(7);
+    this.#quiet = !!opts.quiet;
+    const log = (msg: string) => this.#log(msg);
+    const stamp = () => this.#stamp();
     this.board = new Board({
       firmware: fs.readFileSync(opts.firmware),
+      bootloader: opts.bootloader ? fs.readFileSync(opts.bootloader) : bootloaderFor(opts.firmware),
       elf: elfFor(opts.firmware, opts.pioBus),
       bootrom: fs.readFileSync(BOOTROM),
       aps: opts.aps ?? [
@@ -148,6 +202,17 @@ export class Emulator {
     if (opts.echo) {
       this.board.on("serial", (text) => process.stdout.write(text));
     }
+  }
+
+  #log(msg: string) {
+    this.logLines.push(msg);
+    if (!this.#quiet) {
+      console.log(msg);
+    }
+  }
+
+  #stamp() {
+    return this.board.simMs.toFixed(0).padStart(7);
   }
 
   get serial() {
@@ -197,6 +262,12 @@ export class Emulator {
         `timed out after ${ms} ms of simulated time waiting for ${what}; last output:\n${this.serial.slice(-2000)}`,
       );
     }
+  }
+
+  /** Unplugs the board and plugs it back in. */
+  powerCycle() {
+    this.#log(`[board ${this.#stamp()}ms] power cycle`);
+    this.board.powerCycle();
   }
 
   /** Drops the WiFi link, as if the AP went away. */

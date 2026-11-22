@@ -87,3 +87,98 @@ RC_GTEST_PROP(SavedState, RoundTripsAnyEtagThatFits, ())
     RC_ASSERT(next.is_valid());
     RC_ASSERT(!next.is_wrong_version());
 }
+
+TEST(SavedState, InitialStateHasNoOtaHistory)
+{
+    const auto state = SavedState::initial();
+
+    EXPECT_EQ(state.attempted_version(), "");
+    EXPECT_EQ(state.rejected_version(), "");
+}
+
+TEST(SavedState, WithOtaKeepsEtagsAndCountsWrites)
+{
+    const SavedState first;
+    const SavedState second(&first, "aaa", "bbb", "ccc");
+
+    const auto third = second.with_ota("v2", "v1");
+
+    EXPECT_EQ(third.write_count, 3);
+    EXPECT_STREQ(third.etag1, "aaa");
+    EXPECT_STREQ(third.etag2, "bbb");
+    EXPECT_STREQ(third.etag3, "ccc");
+    EXPECT_EQ(third.attempted_version(), "v2");
+    EXPECT_EQ(third.rejected_version(), "v1");
+}
+
+TEST(SavedState, ScreenUpdateKeepsOtaHistory)
+{
+    const auto first = SavedState().with_ota("v2", "v1");
+
+    const SavedState second(&first, "aaa", "", "");
+
+    EXPECT_EQ(second.attempted_version(), "v2");
+    EXPECT_EQ(second.rejected_version(), "v1");
+}
+
+TEST(SavedState, RejectsOversizedVersion)
+{
+    const SavedState state;
+
+    EXPECT_THROW(state.with_ota(std::string(OTA_VERSION_SIZE, 'a'), ""), std::logic_error);
+    EXPECT_THROW(state.with_ota("", std::string(OTA_VERSION_SIZE, 'a')), std::logic_error);
+}
+
+TEST(SavedState, UnterminatedFlashStringsAreCut)
+{
+    // Corrupt flash with no terminators reads as the longest string that fits
+    SavedState state;
+    std::memset(state.ota_attempted_version, 'a', sizeof(state.ota_attempted_version));
+    std::memset(state.etag1, 'b', sizeof(state.etag1));
+
+    EXPECT_EQ(state.attempted_version(), std::string(OTA_VERSION_SIZE - 1, 'a'));
+    EXPECT_EQ(state.with_ota("", "").etag1, std::string(sizeof(state.etag1) - 1, 'b'));
+}
+
+RC_GTEST_PROP(SavedState, RoundTripsAnyVersionThatFits, ())
+{
+    const auto version = [] {
+        return rc::gen::container<std::string>(*rc::gen::inRange<std::size_t>(0, OTA_VERSION_SIZE),
+                                               rc::gen::inRange('0', 'z'));
+    };
+    const auto attempted = *version();
+    const auto rejected = *version();
+
+    const auto next = SavedState().with_ota(attempted, rejected);
+
+    RC_ASSERT(next.attempted_version() == attempted);
+    RC_ASSERT(next.rejected_version() == rejected);
+}
+
+TEST(SavedState, ResetKeepsOtaHistoryFromAnotherLayout)
+{
+    // A rolled back update that saved a newer layout must still be rejected
+    const SavedState first;
+    auto newer = SavedState(&first, "aaa", "bbb", "ccc").with_ota("v3", "v1");
+    newer.version = STATE_VERSION + 1;
+
+    const auto state = newer.reset();
+
+    EXPECT_FALSE(state.is_wrong_version());
+    EXPECT_EQ(state.write_count, 1);
+    EXPECT_STREQ(state.etag1, "");
+    EXPECT_EQ(state.attempted_version(), "v3");
+    EXPECT_EQ(state.rejected_version(), "v1");
+}
+
+TEST(SavedState, ResetDropsWhatALayoutWithoutOtaHasThere)
+{
+    SavedState older;
+    older.version = OTA_STATE_SINCE_VERSION - 1;
+    std::memset(older.ota_attempted_version, 'x', sizeof(older.ota_attempted_version));
+
+    const auto state = older.reset();
+
+    EXPECT_EQ(state.attempted_version(), "");
+    EXPECT_EQ(state.rejected_version(), "");
+}

@@ -26,6 +26,11 @@ std::string build_request_path(const std::string &path, const DeviceStatus &stat
                          "&saved_state_writes=" + std::to_string(status.saved_state_writes) +
                          "&watchdog_caused_reboot=" + (status.watchdog_caused_reboot ? "1" : "0");
 
+    if (!status.firmware_version.empty())
+    {
+        result += "&firmware_version=" + status.firmware_version;
+    }
+
     if (!etag.empty())
     {
         result += "&etag=" + etag;

@@ -83,6 +83,7 @@ ignore_names = [
     "id",
     "last_seen",
     "booted_at",
+    "uploaded_at",
     "content_type",
     "bind",
     "accesslog",
