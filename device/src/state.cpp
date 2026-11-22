@@ -42,9 +42,14 @@ static int flash_safe_execute(std::function<void()> func, uint32_t enter_exit_ti
         &func, enter_exit_timeout_ms);
 }
 
+void save_ota_state(const std::string &attempted_version, const std::string &rejected_version)
+{
+    flash_saved_state->with_ota(attempted_version, rejected_version).save();
+}
+
 void SavedState::save()
 {
-    uint8_t page_buf[FLASH_PAGE_SIZE];
+    uint8_t page_buf[FLASH_PAGE_SIZE] = {};
 
     memcpy(page_buf, this, sizeof(SavedState));
 

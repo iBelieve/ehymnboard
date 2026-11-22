@@ -26,6 +26,9 @@
 #include "pico/stdlib.h"
 #include "request_path.h"
 
+inline constexpr const char *SERVER_HOST = "api.hymnboard.sonrise.io";
+inline constexpr uint16_t SERVER_PORT = 80;
+
 inline std::string unique_board_id;
 
 std::string get_unique_board_id();

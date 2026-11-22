@@ -17,8 +17,11 @@
  */
 
 #include "fetch_image.h"
+#include "firmware_version.h"
 #include "healthchecks.h"
 #include "long_watchdog.h"
+#include "ota.h"
+#include "pico/binary_info.h"
 #include "pico/cyw43_arch.h"
 #include "pico/stdlib.h"
 #include "pico/unique_id.h"
@@ -59,6 +62,9 @@ static FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std:
     return ret;
 }
 
+// Shown by `picotool info`
+bi_decl(bi_program_version_string(FIRMWARE_VERSION));
+
 int main()
 {
     stdio_init_all();
@@ -83,7 +89,7 @@ int main()
     {
         printf("Flash saved state is wrong version (flash=%d, current=%d), resetting...\n", flash_saved_state->version,
                STATE_VERSION);
-        SavedState new_state;
+        auto new_state = flash_saved_state->reset();
         new_state.save();
     }
 
@@ -93,6 +99,8 @@ int main()
     {
         printf("Rebooted due to watchdog timeout!\n");
     }
+
+    ota_handle_boot();
 
     setup_wifi();
 
@@ -192,6 +200,8 @@ int main()
         }
 
         report_device_healthy();
+
+        ota_loop(any_success);
 
         printf("Sleeping for 15 seconds...\n");
         sleep_ms(15000);

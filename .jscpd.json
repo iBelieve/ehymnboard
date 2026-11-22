@@ -14,7 +14,8 @@
     "**/package-lock.json",
     "**/pnpm-lock.yaml",
     "**/static/**",
-    "**/*.svg"
+    "**/*.svg",
+    "device/lib/**"
   ],
   "absolute": false
 }

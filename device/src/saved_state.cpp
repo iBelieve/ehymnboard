@@ -28,19 +28,70 @@
 
 static_assert(sizeof(SavedState::etag1) == MAX_ETAG_LENGTH + 1, "SavedState etags must fit any etag find_etag accepts");
 
-template <std::size_t N> static void copy_etag(char (&dest)[N], const std::string &etag)
-{
-    hard_assert(etag.length() < N);
+// Firmware reads these from states saved by other versions of itself
+static_assert(offsetof(SavedState, ota_attempted_version) == 10 && offsetof(SavedState, ota_rejected_version) == 58,
+              "The OTA fields must not move");
 
-    etag.copy(dest, etag.length());
-    dest[etag.length()] = '\0';
+template <std::size_t N> static void copy_string(char (&dest)[N], const std::string &value)
+{
+    hard_assert(value.length() < N);
+
+    value.copy(dest, value.length());
+    dest[value.length()] = '\0';
+}
+
+// Flash contents aren't trusted to be terminated, so this stops at N - 1
+template <std::size_t N> static std::string read_string(const char (&src)[N])
+{
+    std::size_t length = 0;
+    while (length < N - 1 && src[length] != '\0')
+    {
+        length++;
+    }
+    return {src, length};
 }
 
 SavedState::SavedState(const SavedState *prev_state, const std::string &etag1, const std::string &etag2,
                        const std::string &etag3)
     : write_count(prev_state->write_count + 1)
 {
-    copy_etag(this->etag1, etag1);
-    copy_etag(this->etag2, etag2);
-    copy_etag(this->etag3, etag3);
+    copy_string(this->etag1, etag1);
+    copy_string(this->etag2, etag2);
+    copy_string(this->etag3, etag3);
+
+    copy_string(ota_attempted_version, prev_state->attempted_version());
+    copy_string(ota_rejected_version, prev_state->rejected_version());
+}
+
+SavedState SavedState::with_ota(const std::string &attempted_version, const std::string &rejected_version) const
+{
+    SavedState next(this, read_string(etag1), read_string(etag2), read_string(etag3));
+
+    copy_string(next.ota_attempted_version, attempted_version);
+    copy_string(next.ota_rejected_version, rejected_version);
+
+    return next;
+}
+
+SavedState SavedState::reset() const
+{
+    SavedState next;
+
+    if (version >= OTA_STATE_SINCE_VERSION)
+    {
+        copy_string(next.ota_attempted_version, attempted_version());
+        copy_string(next.ota_rejected_version, rejected_version());
+    }
+
+    return next;
+}
+
+std::string SavedState::attempted_version() const
+{
+    return read_string(ota_attempted_version);
+}
+
+std::string SavedState::rejected_version() const
+{
+    return read_string(ota_rejected_version);
 }

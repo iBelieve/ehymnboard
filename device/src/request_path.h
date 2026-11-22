@@ -30,8 +30,12 @@ struct DeviceStatus
     std::string board_id;
     int saved_state_writes = 0;
     bool watchdog_caused_reboot = false;
+    // From cmake/firmware_version.cmake (letters, digits and '-'); omitted
+    // when empty
+    std::string firmware_version;
 };
 
 // Appends the device status (and the etag, when there is one) to path as query
-// parameters. The values are hex IDs and digits, so they need no URL encoding.
+// parameters. The values are hex IDs, digits and version strings, so they need
+// no URL encoding.
 std::string build_request_path(const std::string &path, const DeviceStatus &status, const std::string &etag = "");
