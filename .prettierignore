@@ -1,0 +1,23 @@
+# Prettier formats the whole repository from the root (it also skips what the
+# root .gitignore does). Left out:
+
+# Lockfile and generated output, including what the packages' own .gitignore
+# files cover (Prettier reads only the root one)
+pnpm-lock.yaml
+web/dist
+web/.wrangler
+web/.dev.vars*
+web/worker-configuration.d.ts
+web/test/fixtures
+e2e/test-results/
+e2e/playwright-report/
+*.tsbuildinfo
+
+# Third-party code and files other tools write: the bootloader submodule, the
+# vendored KiCad library and Waveshare driver, and the Pico VS Code
+# extension's settings
+device/lib/
+device/build*/
+hardware/KiCad-RP-Pico/
+thirdparty/
+device/.vscode/

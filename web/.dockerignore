@@ -1,7 +1,0 @@
-node_modules
-dist
-.wrangler
-*.log
-# Local secrets: the Vite plugin would copy .dev.vars into dist/.
-.dev.vars*
-.env*

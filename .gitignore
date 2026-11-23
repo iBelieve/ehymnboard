@@ -3,3 +3,4 @@ __pycache__
 /device/logs
 /.claude/scheduled_tasks.lock
 secrets.cmake
+node_modules/

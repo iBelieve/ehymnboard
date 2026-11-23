@@ -3,8 +3,8 @@ name: CI (e2e)
 # Full-stack end-to-end tests (e2e/): the firmware built here runs in the
 # emulator and talks to the server's (web/) Docker image over its real HTTP,
 # while Playwright drives the server's admin page. To test a replacement
-# server, point SERVER_DIR and SERVER_PORT at it and add its directory to the
-# paths below; the tests themselves shouldn't need to change.
+# server, point SERVER_DIR, SERVER_CONTEXT and SERVER_PORT at it and add its
+# directory to the paths below; the tests themselves shouldn't need to change.
 
 on:
   push:
@@ -13,6 +13,13 @@ on:
       - "device/**"
       - "web/**"
       - "e2e/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".node-version"
+      - ".oxlintrc.base.json"
+      - "tsconfig.base.json"
+      - ".dockerignore"
       - ".github/actions/build-firmware/**"
       - ".github/workflows/ci-e2e.yml"
   pull_request:
@@ -20,6 +27,13 @@ on:
       - "device/**"
       - "web/**"
       - "e2e/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".node-version"
+      - ".oxlintrc.base.json"
+      - "tsconfig.base.json"
+      - ".dockerignore"
       - ".github/actions/build-firmware/**"
       - ".github/workflows/ci-e2e.yml"
 
@@ -30,7 +44,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
+  # The server's directory (its Dockerfile is there) and its Docker build
+  # context: web/ builds from the root, where the pnpm workspace's lockfile is.
+  # A server that builds from its own directory sets both to it.
   SERVER_DIR: web
+  SERVER_CONTEXT: .
   # The image listens on $PORT. 5000 is what dokku gives it in production.
   SERVER_PORT: "5000"
 
@@ -61,25 +79,21 @@ jobs:
             device/build/lib/pico_fota_bootloader/pico_fota_bootloader.uf2
           if-no-files-found: error
 
-  # Type checks, lints and formats the tests themselves.
+  # Type checks and lints the tests themselves (formatting is ci-format.yml).
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
 
-      # Installs the pnpm from package.json's packageManager, Node.js from
-      # e2e/.node-version, and runs pnpm install --frozen-lockfile.
+      # Installs the pnpm from the root package.json's packageManager, Node.js
+      # from .node-version, and runs pnpm install --frozen-lockfile for the
+      # whole workspace, the emulator the tests import included.
       - id: setup
         uses: pnpm/setup@v3
         with:
-          working-directory: e2e
           cache: true
           require-lockfile: true
-
-      # The tests import the emulator, so its types come from its packages.
-      - name: Install emulator dependencies
-        run: pnpm --dir ../device/emulator install --frozen-lockfile
 
       - name: Type check
         run: pnpm run typecheck
@@ -87,10 +101,6 @@ jobs:
       - name: Lint
         if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm run lint
-
-      - name: Check formatting
-        if: (success() || failure()) && steps.setup.outcome == 'success'
-        run: pnpm run format:check
 
   e2e:
     needs: firmware
@@ -109,7 +119,8 @@ jobs:
       - name: Build server image
         uses: docker/build-push-action@v7
         with:
-          context: ${{ env.SERVER_DIR }}
+          context: ${{ env.SERVER_CONTEXT }}
+          file: ${{ env.SERVER_DIR }}/Dockerfile
           push: false
           load: true
           tags: ehymnboard-e2e-server:ci
@@ -131,12 +142,8 @@ jobs:
       - id: setup
         uses: pnpm/setup@v3
         with:
-          working-directory: e2e
           cache: true
           require-lockfile: true
-
-      - name: Install emulator dependencies
-        run: pnpm --dir ../device/emulator install --frozen-lockfile
 
       - name: Install browser
         run: pnpm exec playwright install --with-deps chromium

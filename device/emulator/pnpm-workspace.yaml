@@ -1,3 +1,0 @@
-# Same supply-chain settings as web/: refuse dependency releases younger
-# than a day, matching Dependabot's 1-day cooldown.
-minimumReleaseAge: 1440

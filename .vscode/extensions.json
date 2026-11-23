@@ -3,6 +3,8 @@
     "ms-python.python",
     "visualstudioexptteam.vscodeintellicode",
     "ms-python.vscode-pylance",
-    "raspberry-pi.raspberry-pi-pico"
+    "raspberry-pi.raspberry-pi-pico",
+    "oxc.oxc-vscode",
+    "esbenp.prettier-vscode"
   ]
 }

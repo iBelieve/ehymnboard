@@ -36,9 +36,9 @@ that keeps those passes unchanged.
 
 ## Run them
 
-Build the firmware (see [device/README.md](../device/README.md)) and
-install the emulator's packages (`pnpm install` in `device/emulator`). Start
-a server, then:
+Build the firmware (see [device/README.md](../device/README.md)) and start
+a server, then (`pnpm install` installs the whole workspace, the emulator
+included):
 
 ```sh
 cd e2e
@@ -47,11 +47,11 @@ pnpm exec playwright install chromium
 E2E_BASE_URL=http://localhost:8000 E2E_USERNAME=e2e E2E_PASSWORD=e2e-password pnpm test
 ```
 
-To start the server for this, run its Docker image, as CI does, or `pnpm dev`
-in `web/` (both listen on port 8000):
+To start the server for this, run its Docker image, as CI does (built from
+the repository root), or `pnpm dev` in `web/` (both listen on port 8000):
 
 ```sh
-docker build -t hymnboard web && docker run --rm -p 8000:8000 \
+docker build -t hymnboard -f web/Dockerfile . && docker run --rm -p 8000:8000 \
   -e BASIC_AUTH_USERNAME=e2e -e BASIC_AUTH_PASSWORD=e2e-password hymnboard
 ```
 
@@ -76,15 +76,16 @@ build's key must match `device/secrets.cmake` (or the example key).
 Checks, all run in CI (`.github/workflows/ci-e2e.yml`):
 
 ```sh
-pnpm run typecheck      # tsc 7 (needs device/emulator's packages installed)
+pnpm run typecheck      # tsc 7
 pnpm run lint           # oxlint, type-aware rules via tsrs
-pnpm run format:check   # Prettier
+# Prettier runs from the repository root: pnpm run format:check
 ```
 
 ## Testing a replacement server
 
-Point `SERVER_DIR` and `SERVER_PORT` in `ci-e2e.yml` at it (its directory
-and the port its image listens on), and add its directory to the workflow's
-`paths`. The image must serve the device API and the admin page on that port,
+Point `SERVER_DIR`, `SERVER_CONTEXT` and `SERVER_PORT` in `ci-e2e.yml` at
+it (the directory with its Dockerfile, the image's build context, usually that
+same directory, and the port its image listens on), and add its directory to
+the workflow's `paths`. The image must serve the device API and the admin page on that port,
 with basic auth from `BASIC_AUTH_USERNAME` and `BASIC_AUTH_PASSWORD`, and
 answer `GET /ok` once it's ready.

@@ -32,7 +32,7 @@ build step and only erasable syntax). Its own checks, all run in CI:
 ```sh
 pnpm run typecheck      # tsc 7
 pnpm run lint           # oxlint, type-aware rules via tsrs
-pnpm run format:check   # Prettier (pnpm run format to fix)
+# Prettier runs from the repository root: pnpm run format:check
 ```
 
 CI runs the tests against the firmware the `build` job produces (the `emulator`

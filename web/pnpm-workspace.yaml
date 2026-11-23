@@ -1,8 +1,0 @@
-# pnpm 12 refuses to install a dependency release younger than this many
-# minutes (1 day, also pnpm's default), matching Dependabot's 1-day cooldown.
-minimumReleaseAge: 1440
-
-# Build scripts pnpm 12 may run: both download a prebuilt platform binary.
-allowBuilds:
-  esbuild: true
-  workerd: true
