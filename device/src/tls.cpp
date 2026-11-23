@@ -187,36 +187,49 @@ static bool same_name(const mbedtls_x509_name *a, const mbedtls_x509_name *b)
     return a == nullptr && b == nullptr;
 }
 
-// mbedTLS asks for the trusted roots that could have issued `child` (the
-// last certificate of the chain the server sent). Only roots whose name
-// matches are parsed, straight from flash (no copy), so the roots cost no RAM
-// between handshakes; mbedTLS frees the chain afterwards.
+// mbedTLS asks for the trusted roots that could have issued `child`, for each
+// certificate of the chain the server sent in turn. The roots are parsed
+// straight from flash (no copy) and only those whose name matches are kept,
+// so the roots cost no RAM between handshakes; mbedTLS frees the chain
+// afterwards. Running out of memory fails the handshake as that, rather than
+// as a chain from no trusted root.
 static int find_trusted_roots([[maybe_unused]] void *context, const mbedtls_x509_crt *child,
                               mbedtls_x509_crt **candidates)
 {
     mbedtls_x509_crt *chain = nullptr;
+    int result = 0;
     for (const auto &root : TLS_ROOTS)
     {
         auto *crt = static_cast<mbedtls_x509_crt *>(mbedtls_calloc(1, sizeof(mbedtls_x509_crt)));
         if (crt == nullptr)
         {
+            result = MBEDTLS_ERR_X509_ALLOC_FAILED;
             break;
         }
         mbedtls_x509_crt_init(crt);
-        const bool matches = mbedtls_x509_crt_parse_der_nocopy(crt, root.der, root.length) == 0 &&
-                             same_name(&crt->subject, &child->issuer);
-        if (!matches)
+        const int parsed = mbedtls_x509_crt_parse_der_nocopy(crt, root.der, root.length);
+        if (parsed != 0 || !same_name(&crt->subject, &child->issuer))
         {
             mbedtls_x509_crt_free(crt);
             mbedtls_free(crt);
+            if (parsed == MBEDTLS_ERR_X509_ALLOC_FAILED)
+            {
+                result = parsed;
+                break;
+            }
             continue;
         }
         printf("TLS: checking the server's chain against %s\n", root.name);
         crt->next = chain;
         chain = crt;
     }
+    if (result != 0)
+    {
+        printf("TLS: out of memory checking the server's chain\n");
+    }
+    // mbedTLS frees these even when this fails
     *candidates = chain;
-    return 0;
+    return result;
 }
 
 // Logs why a certificate in the server's chain was refused; the handshake

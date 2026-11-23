@@ -33,7 +33,9 @@
 // An altcp allocator function: a TLS connection that only completes its
 // handshake with a server that proves it is `host` (a const char *, which
 // must outlive the connection). Called with lwIP's lock held, as httpc and
-// WsClient do.
+// WsClient do. Every connection resumes the one remembered session (see
+// tls_remember_session), whatever its host, and a resumed session skips the
+// certificate check: a firmware image must only use this for one host.
 struct altcp_pcb *tls_new_connection(void *host, u8_t ip_type);
 
 // For httpc_connection_t::altcp_allocator and WsClient: TLS connections to
@@ -42,12 +44,13 @@ altcp_allocator_t *server_tls_allocator();
 
 // Keeps the TLS session of an established connection so the next connection
 // can resume it, skipping the certificate checks and key exchange. Call once
-// the connection is up (its first data, or WsClient's on_open).
+// the connection is up (its response headers, or WsClient's on_connected).
+// `conn` must come from tls_new_connection.
 void tls_remember_session(struct altcp_pcb *conn);
 
 // An httpc_connection_t::headers_done_fn that remembers the connection's
-// session, for a request whose answer may have no body (a 204), which never
-// reaches the data callback
+// session: every answer has headers, but a 204 or 304 has no body for the
+// data callback
 err_t tls_remember_httpc_session(httpc_state_t *connection, void *arg, struct pbuf *hdr, u16_t hdr_len,
                                  u32_t content_len);
 

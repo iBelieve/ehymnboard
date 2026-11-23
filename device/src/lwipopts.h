@@ -99,6 +99,9 @@
 #define LWIP_ALTCP             1
 #define LWIP_ALTCP_TLS         1
 #define LWIP_ALTCP_TLS_MBEDTLS 1
+// A TLS connection takes two altcp pcbs (its TLS layer's and its TCP's), but
+// lwIP's default is one per TCP pcb: room for every TCP pcb to carry TLS
+#define MEMP_NUM_ALTCP_PCB (2 * MEMP_NUM_TCP_PCB)
 // altcp_tls_mbedtls defaults to MBEDTLS_SSL_VERIFY_OPTIONAL, which completes
 // the handshake whatever the certificate. Refuse a server that can't prove
 // who it is.

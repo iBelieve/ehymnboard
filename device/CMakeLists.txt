@@ -38,8 +38,9 @@ pico_sdk_init()
 # firmware doesn't commit itself. See README.md ("OTA updates").
 #
 # The OTA image is AES encrypted (it contains the WiFi passphrases from
-# secrets.h and is served over plain HTTP), so builds need a key. Put it in
-# secrets.cmake (see secrets.example.cmake) or pass -DPFB_AES_KEY=...
+# secrets.h, and firmware from before TLS downloads it over plain HTTP), so
+# builds need a key. Put it in secrets.cmake (see secrets.example.cmake) or
+# pass -DPFB_AES_KEY=...
 include(${CMAKE_CURRENT_LIST_DIR}/secrets.cmake OPTIONAL)
 if (NOT PFB_AES_KEY)
     message(FATAL_ERROR "PFB_AES_KEY is not set: copy secrets.example.cmake to secrets.cmake and set a key")

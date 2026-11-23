@@ -22,8 +22,11 @@ def read_roots(path: Path) -> list[tuple[str, bytes]]:
     text = path.read_text()
     roots = []
     for match in CERT.finditer(text):
-        if "-----BEGIN CERTIFICATE-----" in match.group("between"):
+        between = match.group("between")
+        if "-----BEGIN CERTIFICATE-----" in between:
             sys.exit(f"{path}: a certificate has no '# Name:' line above it")
+        if re.search(r"^# Name: ", between, re.MULTILINE):
+            sys.exit(f"{path}: a certificate has two '# Name:' lines above it")
         roots.append((match.group("name"), base64.b64decode(match.group("body"))))
     if len(roots) != text.count("-----BEGIN CERTIFICATE-----"):
         sys.exit(f"{path}: every certificate needs a '# Name:' line above it")

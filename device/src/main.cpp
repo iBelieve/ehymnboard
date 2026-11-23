@@ -332,7 +332,7 @@ int main()
     );
 
     // The server pushes the board's state over a WebSocket; images still come
-    // over plain HTTP (fetch_image), only when one changes
+    // over HTTPS requests (fetch_image), only when one changes
     Board board(jitter_seed_for(unique_board_id), now_ms());
     auto &screens = board.screens;
     screens.panels = {&screen1, &screen2, &screen3};

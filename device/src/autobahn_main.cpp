@@ -20,8 +20,8 @@
 // the Autobahn test suite's fuzzingserver, as the suite's echo client: it asks
 // the server how many cases there are, runs each one by echoing back every
 // message it gets, then asks the server to write its report. The emulator runs
-// it (see emulator/autobahn/), sending port 80 on to the fuzzingserver;
-// it isn't meant for a real board.
+// it (see emulator/autobahn/), ending the board's TLS (port 443) and passing
+// the plain bytes on to the fuzzingserver; it isn't meant for a real board.
 
 #include <cstdio>
 #include <cstdlib>

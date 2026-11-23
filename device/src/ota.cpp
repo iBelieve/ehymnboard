@@ -101,7 +101,6 @@ VersionCheckRequest version_check;
 err_t on_version_check_data(void *arg, struct altcp_pcb *conn, struct pbuf *p, [[maybe_unused]] err_t err)
 {
     auto *req = static_cast<VersionCheckRequest *>(arg);
-    tls_remember_session(conn);
 
     req->body_len += pbuf_copy_partial(p, req->body.data() + req->body_len, req->body.size() - req->body_len, 0);
 
@@ -138,6 +137,8 @@ std::optional<std::string> fetch_target_version()
 
     static httpc_connection_t settings = {};
     settings.result_fn = on_version_check_completed;
+    // Usually a 204, with no body for on_version_check_data
+    settings.headers_done_fn = tls_remember_httpc_session;
     settings.altcp_allocator = server_tls_allocator();
 
     const std::string path = "/firmware/latest" + ota_query();
@@ -225,10 +226,10 @@ struct DownloadRequest
 
 DownloadRequest download;
 
-err_t on_download_headers([[maybe_unused]] httpc_state_t *connection, void *arg, struct pbuf *hdr,
-                          [[maybe_unused]] u16_t hdr_len, u32_t content_len)
+err_t on_download_headers(httpc_state_t *connection, void *arg, struct pbuf *hdr, u16_t hdr_len, u32_t content_len)
 {
     auto *req = static_cast<DownloadRequest *>(arg);
+    tls_remember_httpc_session(connection, arg, hdr, hdr_len, content_len);
 
     // "HTTP/1.1 200 ..."
     if (pbuf_memcmp(hdr, 9, "200", 3) != 0)
@@ -252,7 +253,6 @@ err_t on_download_headers([[maybe_unused]] httpc_state_t *connection, void *arg,
 err_t on_download_data(void *arg, struct altcp_pcb *conn, struct pbuf *p, [[maybe_unused]] err_t err)
 {
     auto *req = static_cast<DownloadRequest *>(arg);
-    tls_remember_session(conn);
 
     if (!req->accepting || req->overflow)
     {

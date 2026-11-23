@@ -71,9 +71,19 @@ static void send_healthcheck_request(const std::string &path, const std::string 
 
     const std::string full_path = build_request_path(path, current_device_status()) + extra_query;
 
-    HealthcheckRequest req;
+    // httpc holds on to these until it calls on_healthcheck_request_completed,
+    // which can be after the wait below gives up, so they outlive this call,
+    // and a new request waits for the last one to finish
+    static HealthcheckRequest req;
+    static bool running = false;
+    if (running && !req.complete)
+    {
+        printf("Previous healthcheck HTTP request still running, skipping\n");
+        return;
+    }
+    req = HealthcheckRequest{};
 
-    httpc_connection_t settings = {};
+    static httpc_connection_t settings = {};
     settings.result_fn = on_healthcheck_request_completed;
     // The answer is a 204, with no body for on_healthcheck_data_received
     settings.headers_done_fn = tls_remember_httpc_session;
@@ -83,6 +93,7 @@ static void send_healthcheck_request(const std::string &path, const std::string 
     const auto ret = httpc_get_file_dns(SERVER_HOST, SERVER_PORT, full_path.c_str(), &settings,
                                         on_healthcheck_data_received, &req, nullptr);
     cyw43_arch_lwip_end();
+    running = ret == ERR_OK;
 
     if (ret != ERR_OK)
     {

@@ -47,11 +47,13 @@ struct FetchImageHttpRequest
 
 } // namespace
 
-static err_t on_headers_received([[maybe_unused]] httpc_state_t *connection, void *arg, struct pbuf *hdr, u16_t hdr_len,
-                                 [[maybe_unused]] u32_t content_len)
+static err_t on_headers_received(httpc_state_t *connection, void *arg, struct pbuf *hdr, u16_t hdr_len,
+                                 u32_t content_len)
 {
     assert(arg);
     FetchImageHttpRequest *req = (FetchImageHttpRequest *)arg;
+    // Here rather than on the body, which a 304 doesn't have
+    tls_remember_httpc_session(connection, arg, hdr, hdr_len, content_len);
 
     // The headers can span several pbufs (and the last can hold the start of
     // the body), so copy exactly the header block out before parsing it.
@@ -76,7 +78,6 @@ static err_t on_http_data_received([[maybe_unused]] void *arg, struct altcp_pcb 
                                    [[maybe_unused]] err_t err)
 {
     assert(arg);
-    tls_remember_session(conn);
 
     const auto space_left = image_buffer.size() - image_buffer_offset;
     const auto bytes_to_copy = p->tot_len < space_left ? p->tot_len : space_left;
@@ -118,9 +119,19 @@ FetchImageResult fetch_image(int image, std::string &etag)
     // http_client library doesn't support custom headers.
     const std::string path = build_request_path("/images/" + std::to_string(image), current_device_status(), etag);
 
-    FetchImageHttpRequest req;
+    // httpc holds on to these until it calls on_http_req_completed, which can
+    // be after the wait below gives up, so they outlive this call, and a new
+    // request waits for the last one to finish
+    static FetchImageHttpRequest req;
+    static bool running = false;
+    if (running && !req.complete)
+    {
+        printf("Previous fetch image HTTP request still running, skipping\n");
+        return FetchImageResult::ERROR;
+    }
+    req = FetchImageHttpRequest{};
 
-    httpc_connection_t settings = {};
+    static httpc_connection_t settings = {};
     settings.headers_done_fn = on_headers_received;
     settings.result_fn = on_http_req_completed;
     settings.altcp_allocator = server_tls_allocator();
@@ -132,6 +143,7 @@ FetchImageResult fetch_image(int image, std::string &etag)
     const auto ret =
         httpc_get_file_dns(SERVER_HOST, SERVER_PORT, path.c_str(), &settings, on_http_data_received, &req, nullptr);
     cyw43_arch_lwip_end();
+    running = ret == ERR_OK;
 
     if (ret != ERR_OK)
     {
