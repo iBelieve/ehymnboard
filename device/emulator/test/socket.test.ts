@@ -209,7 +209,8 @@ test("downloads that keep failing for 3 minutes reboot the board, though the soc
   const after = emu.simMs - failedAt;
   assert.ok(after >= 170_000 && after <= 200_000, `rebooted ${(after / 1000).toFixed(0)} s in`);
   assert.equal(emu.server.openSockets.length, 1, "the socket was up all along");
-  emu.waitFor("a watchdog reset", () => emu.reboots === 1, 30_000);
+  // reset_pico() waits 30 s before the watchdog fires
+  emu.waitFor("a watchdog reset", () => emu.reboots === 1, 40_000);
 });
 
 test("a download that stops being wanted no longer counts as failing", () => {
