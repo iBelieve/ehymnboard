@@ -172,6 +172,23 @@ Basic auth comes from the Worker's secrets, `BASIC_AUTH_USERNAME` and
 is open to anyone, so keep them set, and set them before the first deploy of
 any new Worker.
 
+### Previews
+
+Every push to another branch that changes the web app gets its own
+[Worker Preview](https://developers.cloudflare.com/workers/previews/): a URL
+of its own, shown in a comment on the pull request, with its own empty Durable
+Object, so a branch never touches the main deploy's data or another branch's.
+Previews take nothing from the top-level settings, so `wrangler.jsonc`'s
+`previews` block repeats the Durable Object binding; it has no `HEALTHCHECKS`,
+so previews never ping healthchecks.io. Workers Builds runs the same build
+command and variable for previews, with `pnpm exec wrangler preview` as the
+preview command.
+
+Preview URLs are public, so the basic-auth secrets are set in the Previews
+base config too (`pnpm exec wrangler preview base-config secret put
+BASIC_AUTH_PASSWORD`, and the same for the username); new previews start
+with them.
+
 ### Making it production
 
 Add `"vars": { "HEALTHCHECKS": "on" }` to `wrangler.jsonc` (and stop the dokku

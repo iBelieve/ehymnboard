@@ -23,6 +23,18 @@
   // healthchecks.io, so the Cloudflare deploy can't touch the boards' checks.
   // Set "vars": { "HEALTHCHECKS": "on" } when Cloudflare becomes prod.
   "workers_dev": true,
-  // Durable Object Workers get no version preview URLs anyway.
+  // The older version preview URLs don't work with Durable Objects; Worker
+  // Previews (below) replace them.
   "preview_urls": false,
+  // Worker Previews: Workers Builds deploys each non-master branch to its own
+  // URL with its own, empty Durable Object. Previews inherit nothing from the
+  // settings above, so the binding is repeated here, and with no HEALTHCHECKS
+  // var they never ping healthchecks.io. Their basic-auth secrets are set
+  // with `wrangler preview base-config secret put` (see README.md).
+  "previews": {
+    "durable_objects": {
+      "bindings": [{ "name": "HYMN_BOARD", "class_name": "HymnBoard" }],
+    },
+    "observability": { "enabled": true },
+  },
 }
