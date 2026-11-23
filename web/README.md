@@ -154,17 +154,16 @@ deploys every push to `master` that changes the web app. Its settings (Worker
 | ----------------- | ------------------------------------------------------------------------------------------------------- |
 | Branch            | `master`                                                                                                |
 | Root directory    | `web`                                                                                                   |
-| Build command     | `pnpm install --frozen-lockfile --filter ehymnboard-web && pnpm run build`                              |
+| Build command     | `pnpm run build`                                                                                        |
 | Deploy command    | `pnpm exec wrangler deploy`                                                                             |
 | Build watch paths | `web/*`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.node-version`, `tsconfig.base.json` |
 
-With `web` as the root directory, Workers Builds doesn't see the workspace's
-lockfile and would install with npm, so the build variable
-`SKIP_DEPENDENCY_INSTALL=1` turns that off and the build command installs
-with pnpm instead (Corepack picks the version in the root `package.json`'s
-`packageManager`; pnpm finds the workspace root by itself). `wrangler deploy` reads the config
-the Vite build wrote (`.wrangler/deploy/config.json` points it at
-`dist/hymnboard/wrangler.json`), so it deploys exactly what was built.
+Workers Builds installs the dependencies itself (`pnpm install --frozen-lockfile`
+for the whole workspace, from the root lockfile, with the pnpm from the root
+`package.json`'s `packageManager` and Node from `.node-version`).
+`wrangler deploy` reads the config the Vite build wrote
+(`.wrangler/deploy/config.json` points it at `dist/hymnboard/wrangler.json`),
+so it deploys exactly what was built.
 
 Basic auth comes from the Worker's secrets, `BASIC_AUTH_USERNAME` and
 `BASIC_AUTH_PASSWORD` (Settings > Variables and Secrets, or
