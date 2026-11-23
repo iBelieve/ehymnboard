@@ -12,7 +12,7 @@ export type Specs = Map<string, string>;
 // left out: they're deliberately wide ranges, not what we install.
 const MANIFEST_SECTIONS = ["dependencies", "devDependencies", "optionalDependencies"] as const;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

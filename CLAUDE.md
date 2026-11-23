@@ -57,7 +57,8 @@ All checks below must pass; run them locally before committing.
 - New dependencies: `pnpm run check-new-deps` fails if a dependency the
   branch adds, or whose version it changes (in any `package.json` or the
   catalog), isn't the newest release that `minimumReleaseAge` allows. It
-  compares with where the branch left `origin/master` (CI passes `HEAD^`) and
+  compares with where the branch left `origin/master` (CI runs it on pull
+  requests, against their base) and
   asks npm-check-updates about only those dependencies, so add a dependency
   at its latest version. To hold one back on purpose, add it to `reject` in
   `.ncurc.cjs` with a comment saying why. CI skips Dependabot's PRs

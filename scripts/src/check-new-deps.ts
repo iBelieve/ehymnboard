@@ -6,28 +6,43 @@
 // .ncurc.cjs with a comment saying why.
 //
 // Usage: pnpm run check-new-deps [base revision]
-// The base defaults to where HEAD branched from origin/master; CI passes
-// HEAD^ (a pull request's merge commit, or the previous master commit).
+// The base defaults to where HEAD branched from origin/master. CI runs it on
+// pull requests with HEAD^, the first parent of the PR's merge commit.
 
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { catalogSpecs, changedNames, manifestSpecs, workspacePackages } from "./new-deps.ts";
+import { join, posix } from "node:path";
+import {
+  catalogSpecs,
+  changedNames,
+  isRecord,
+  manifestSpecs,
+  workspacePackages,
+  type Specs,
+} from "./new-deps.ts";
 
 const WORKSPACE_FILE = "pnpm-workspace.yaml";
 
 function git(root: string, args: string[]): string {
-  // Capture stderr too: a missing file is an expected failure of `git show`.
-  return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: "pipe" });
+  return execFileSync("git", args, { cwd: root, encoding: "utf8" });
 }
 
-/** A file's contents at `revision`, or undefined if it didn't exist there. */
-function atRevision(root: string, revision: string, path: string): string | undefined {
-  try {
-    return git(root, ["show", `${revision}:${path}`]);
-  } catch {
-    return undefined;
+/** Resolves `revision` to a commit, or fails: an unknown base must not make every dependency look new. */
+function resolveCommit(root: string, revision: string): string {
+  const result = spawnSync("git", ["rev-parse", "--verify", "--quiet", `${revision}^{commit}`], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    throw new Error(`Unknown base revision ${revision} (in a shallow clone, fetch it first)`);
   }
+  return result.stdout.trim();
+}
+
+/** A file's contents at `commit`, or undefined if it didn't exist there. */
+function atRevision(root: string, commit: string, path: string): string | undefined {
+  const exists = spawnSync("git", ["cat-file", "-e", `${commit}:${path}`], { cwd: root });
+  return exists.status === 0 ? git(root, ["show", `${commit}:${path}`]) : undefined;
 }
 
 function inWorkingTree(root: string, path: string): string | undefined {
@@ -35,19 +50,26 @@ function inWorkingTree(root: string, path: string): string | undefined {
   return existsSync(file) ? readFileSync(file, "utf8") : undefined;
 }
 
-/** Runs npm-check-updates; true if every named dependency is current. */
-function ncu(root: string, target: string[], names: string[]): boolean {
-  const args = [
-    ...target,
-    "--configFilePath",
-    root,
-    "--filter",
-    names.join(","),
-    "--errorLevel",
-    "2",
-  ];
-  // Run the binary itself, not through `pnpm exec`, which may install first.
-  const result = spawnSync(join(root, "node_modules", ".bin", "ncu"), args, {
+/** Parses a manifest, naming the file and revision if it isn't valid. */
+function specsOf(
+  parse: (text: string | undefined) => Specs,
+  text: string | undefined,
+  where: string,
+): Specs {
+  try {
+    return parse(text);
+  } catch (error) {
+    throw new Error(`Can't parse ${where}`, { cause: error });
+  }
+}
+
+// Run the binary itself, not through `pnpm exec`, which may install first.
+const ncuBinary = (root: string): string => join(root, "node_modules", ".bin", "ncu");
+
+/** Runs npm-check-updates on one package.json; true if every named dependency is current. */
+function checkManifest(root: string, manifest: string, names: string[]): boolean {
+  const args = ["--packageFile", manifest, "--configFilePath", root, "--filter", names.join(",")];
+  const result = spawnSync(ncuBinary(root), [...args, "--errorLevel", "2"], {
     cwd: root,
     stdio: "inherit",
   });
@@ -55,34 +77,65 @@ function ncu(root: string, target: string[], names: string[]): boolean {
   return result.status === 0;
 }
 
+/**
+ * Checks catalog entries; true if every named one is current.
+ * npm-check-updates reaches the catalogs only through --workspaces, which also
+ * checks each package.json for these names, so only its results for
+ * pnpm-workspace.yaml count: a package's own pin of the same name is
+ * unchanged here.
+ */
+function checkCatalog(root: string, names: string[], current: Specs): boolean {
+  const args = ["--workspaces", "--configFilePath", root, "--filter", names.join(",")];
+  const result = spawnSync(ncuBinary(root), [...args, "--jsonUpgraded"], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`npm-check-updates failed: ${result.stdout}`);
+  const upgrades: unknown = JSON.parse(result.stdout);
+  const catalog = isRecord(upgrades) ? upgrades[WORKSPACE_FILE] : undefined;
+  const outdated = isRecord(catalog) ? Object.entries(catalog) : [];
+  console.log(`Checking ${WORKSPACE_FILE} catalog entries: ${names.join(", ")}`);
+  for (const [name, latest] of outdated) {
+    console.log(` ${name}  ${current.get(name) ?? ""}  →  ${String(latest)}`);
+  }
+  return outdated.length === 0;
+}
+
 function main(): void {
   const root = git(process.cwd(), ["rev-parse", "--show-toplevel"]).trim();
-  const base = process.argv[2] ?? git(root, ["merge-base", "origin/master", "HEAD"]).trim();
-  console.log(`Checking dependencies added or changed since ${base}`);
+  const requested = process.argv[2] ?? git(root, ["merge-base", "origin/master", "HEAD"]).trim();
+  const base = resolveCommit(root, requested);
+  console.log(`Checking dependencies added or changed since ${requested} (${base})`);
 
   const workspace = inWorkingTree(root, WORKSPACE_FILE);
   let ok = true;
   let checked = 0;
   for (const dir of [".", ...workspacePackages(workspace)]) {
-    const manifest = join(dir, "package.json");
+    // A git path, so always with forward slashes.
+    const manifest = posix.join(dir, "package.json");
     const names = changedNames(
-      manifestSpecs(atRevision(root, base, manifest)),
-      manifestSpecs(inWorkingTree(root, manifest)),
+      specsOf(manifestSpecs, atRevision(root, base, manifest), `${manifest} at ${requested}`),
+      specsOf(manifestSpecs, inWorkingTree(root, manifest), manifest),
     );
     if (names.length === 0) continue;
     checked += names.length;
-    ok = ncu(root, ["--packageFile", manifest], names) && ok;
+    ok = checkManifest(root, manifest, names) && ok;
   }
 
+  const catalog = specsOf(catalogSpecs, workspace, WORKSPACE_FILE);
   const catalogNames = changedNames(
-    catalogSpecs(atRevision(root, base, WORKSPACE_FILE)),
-    catalogSpecs(workspace),
+    specsOf(
+      catalogSpecs,
+      atRevision(root, base, WORKSPACE_FILE),
+      `${WORKSPACE_FILE} at ${requested}`,
+    ),
+    catalog,
   );
   if (catalogNames.length > 0) {
     checked += catalogNames.length;
-    // --workspaces is how npm-check-updates reaches the catalogs. The
-    // packages depend on catalog entries as "catalog:", which it skips.
-    ok = ncu(root, ["--workspaces"], catalogNames) && ok;
+    ok = checkCatalog(root, catalogNames, catalog) && ok;
   }
 
   if (checked === 0) {
@@ -95,4 +148,9 @@ function main(): void {
   }
 }
 
-main();
+try {
+  main();
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+}
