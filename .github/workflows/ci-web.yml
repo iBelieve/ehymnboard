@@ -14,6 +14,7 @@ on:
       - "tsconfig.base.json"
       - ".prettierignore"
       - ".dockerignore"
+      - ".jscpd.json"
       - ".github/workflows/ci-web.yml"
   pull_request:
     paths:
@@ -27,6 +28,7 @@ on:
       - "tsconfig.base.json"
       - ".prettierignore"
       - ".dockerignore"
+      - ".jscpd.json"
       - ".github/workflows/ci-web.yml"
 
 concurrency:

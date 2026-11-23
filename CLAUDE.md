@@ -106,8 +106,10 @@ server internals). CI runs them against the server's Docker image
 (`SERVER_DIR`/`SERVER_PORT` in `ci-e2e.yml`). Same TypeScript conventions as
 the emulator.
 
-- Needs the firmware build (the tests import the emulator, a workspace
-  dependency)
+- Needs the firmware build. The tests import the emulator's source by
+  relative path; `ehymnboard-emulator` is a `workspace:*` dependency so a
+  filtered install (`pnpm install --filter ehymnboard-e2e...`) brings its
+  packages too
 - `pnpm install`, `pnpm exec playwright install chromium`, then with a server
   running: `E2E_BASE_URL=http://localhost:8000 E2E_USERNAME=… E2E_PASSWORD=… pnpm test`
 - `pnpm run typecheck`, `pnpm run lint`, `pnpm run format:check`
