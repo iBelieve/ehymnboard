@@ -126,8 +126,8 @@ test("rolls back an update that can't make requests, though its socket is live",
   const { emu, at } = bootAndInstallNext();
 
   // Before committing, the new firmware checks it can make an https request
-  // besides its socket. Here every version check fails.
-  emu.server.override = (req) => (req.path === "/firmware/latest" ? { status: 500 } : undefined);
+  // besides its socket. Here every version check is cut off unanswered.
+  emu.server.override = (req) => (req.path === "/firmware/latest" ? { reset: true } : undefined);
   let since = emu.waitForSerial("WS: live", 60_000, at);
   since = emu.waitForSerial(
     "OTA: new firmware can't make requests, rebooting to roll it back",
@@ -138,6 +138,17 @@ test("rolls back an update that can't make requests, though its socket is live",
   emu.server.override = null;
   since = emu.waitForSerial("[BOOTLOADER] Rolling back to the previous firmware...", 60_000, since);
   emu.waitForSerial(`OTA: update to ${NEXT} failed and was rolled back`, 30_000, since);
+});
+
+test("commits an update whose version check gets an error status: the server answered", () => {
+  const { emu, at } = bootAndInstallNext();
+  emu.server.override = (req) => (req.path === "/firmware/latest" ? { status: 503 } : undefined);
+  emu.waitForSerial(
+    "OTA: firmware is healthy, committing",
+    60_000,
+    emu.waitForSerial("WS: live", 60_000, at),
+  );
+  assert.equal(count(emu, "can't make requests"), 0);
 });
 
 test("a power cut during the download keeps the old firmware, then installs on the next try", () => {

@@ -267,6 +267,9 @@ int main()
     printf("eHymnboard starting...\n");
     printf("Pico SDK version: %s\n", PICO_SDK_VERSION_STRING);
     printf("Device ID: %s\n", unique_board_id.c_str());
+#ifdef EHYMNBOARD_TEST_ROOT_CA
+    printf("WARNING: test build, trusts the emulator's test CA: don't run it on a board\n");
+#endif
 
     if (!flash_saved_state->is_valid())
     {

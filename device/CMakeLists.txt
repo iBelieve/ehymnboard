@@ -98,6 +98,9 @@ function(ehymnboard_use_tls target)
     add_dependencies(${target} ehymnboard_tls_roots)
     target_compile_definitions(${target} PRIVATE EHYMNBOARD_SERVER_HOST="${EHYMNBOARD_SERVER_HOST}")
     target_link_libraries(${target} pico_lwip_mbedtls pico_mbedtls)
+    if (EHYMNBOARD_TEST_ROOT_CA)
+        target_compile_definitions(${target} PRIVATE EHYMNBOARD_TEST_ROOT_CA=1)
+    endif()
 endfunction()
 
 # Add executable. Default name is the project name, version 0.1

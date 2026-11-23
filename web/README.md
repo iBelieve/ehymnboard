@@ -257,7 +257,7 @@ and drop `HEALTHCHECKS` from `src/worker/env.d.ts`, since the generated types
 then declare it. Then point
 `hymnboard.sonrise.io` at the Worker as a custom domain, and keep the zone's
 **WebSockets** setting on for the boards' sockets. Boards still on firmware
-from before TLS (see "Boards on TLS" below) speak plain HTTP to
+from before TLS (see "Boards on TLS" above) speak plain HTTP to
 `api.hymnboard.sonrise.io` on port 80: until none are left, point that name
 at the Worker too, with **Always Use HTTPS** and HSTS off for it. On Cloudflare the
 boards' sockets hibernate, so the Durable Object only runs for a change, a

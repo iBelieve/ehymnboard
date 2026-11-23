@@ -157,8 +157,10 @@ decrypt any of it.
 The [emulator](emulator/README.md) ends TLS at its virtual router with
 certificates from a test CA (`certs/test/`, made by `make-test-certs.sh`).
 Firmware trusts that CA only when built with `-DEHYMNBOARD_TEST_ROOT_CA=ON`,
-which CI uses; the build refuses it unless `PFB_AES_KEY` is the example key, so
-a test build can never install on a real board.
+which CI uses. The build refuses it unless `PFB_AES_KEY` is the example key, so
+real boards refuse a test build's OTA images; but don't flash one over USB
+either (CI's `ehymnboard.uf2` artifacts are test builds): the test CA's key is
+in the repository. A test build says so on its serial output at boot.
 
 ```sh
 cmake -G Ninja -B build -DEHYMNBOARD_TEST_ROOT_CA=ON   # for the emulator only

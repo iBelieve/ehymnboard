@@ -521,9 +521,11 @@ static bool awaiting_commit()
 }
 
 // Whether newly installed firmware can make an https:// request (a version
-// check), tried every half minute while the socket is live. If it keeps
-// failing even so, the firmware is broken in a way the socket doesn't show,
-// so reboot: the bootloader then rolls it back.
+// check), tried every half minute while the socket is live. Any answer from
+// the server will do, even an error status: that's the server's trouble, not
+// the firmware's. If the board keeps getting none, even with its socket up,
+// the firmware is broken in a way the socket doesn't show, so reboot: the
+// bootloader then rolls it back.
 static bool commit_check_passed()
 {
     constexpr int64_t RETRY_US = 30LL * 1000 * 1000;
@@ -535,7 +537,14 @@ static bool commit_check_passed()
     {
         return false;
     }
-    if (fetch_target_version())
+    next_try = delayed_by_us(get_absolute_time(), RETRY_US);
+    // An hourly check still running says nothing either way
+    if (!version_check.complete)
+    {
+        return false;
+    }
+    fetch_target_version();
+    if (version_check.complete && version_check.status_code != 0)
     {
         return true;
     }
@@ -544,7 +553,6 @@ static bool commit_check_passed()
         printf("OTA: new firmware can't make requests, rebooting to roll it back\n");
         reset_pico();
     }
-    next_try = delayed_by_us(get_absolute_time(), RETRY_US);
     return false;
 }
 

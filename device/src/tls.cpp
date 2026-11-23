@@ -53,6 +53,9 @@ struct alignas(8) AllocationHeader
 
 } // namespace
 
+// Allocations at least this big sample the heap's use (see ehymnboard_tls_calloc)
+static constexpr std::size_t HEAP_SAMPLE_BYTES = 1024;
+
 static std::size_t tls_bytes_now = 0;
 static std::size_t tls_bytes_peak = 0;
 static std::size_t heap_bytes_peak = 0;
@@ -88,8 +91,14 @@ extern "C" void *ehymnboard_tls_calloc(std::size_t count, std::size_t size)
     }
     header->size = bytes;
     tls_bytes_now += bytes;
+    // mallinfo walks the free lists with interrupts off (malloc_lock.cpp), so
+    // only look at the heap when mbedTLS reaches a new peak or takes a big
+    // block, not for each of a handshake's thousands of small ones
+    if (tls_bytes_now > tls_bytes_peak || bytes >= HEAP_SAMPLE_BYTES)
+    {
+        heap_bytes_peak = std::max(heap_bytes_peak, heap_in_use());
+    }
     tls_bytes_peak = std::max(tls_bytes_peak, tls_bytes_now);
-    heap_bytes_peak = std::max(heap_bytes_peak, heap_in_use());
     return header + 1;
 }
 
@@ -133,6 +142,51 @@ extern "C" mbedtls_ms_time_t mbedtls_ms_time()
 
 // --- Certificates ----------------------------------------------------------------
 
+// Whether two strings in names are the same, as mbedTLS compares them when
+// it matches a certificate to its issuer (x509_string_cmp): byte for byte, or
+// ignoring ASCII case between UTF8String and PrintableString encodings
+static bool same_name_string(const mbedtls_x509_buf &a, const mbedtls_x509_buf &b)
+{
+    if (a.len != b.len)
+    {
+        return false;
+    }
+    if (a.tag == b.tag && std::memcmp(a.p, b.p, a.len) == 0)
+    {
+        return true;
+    }
+    const auto is_text = [](int tag) {
+        return tag == MBEDTLS_ASN1_UTF8_STRING || tag == MBEDTLS_ASN1_PRINTABLE_STRING;
+    };
+    if (!is_text(a.tag) || !is_text(b.tag))
+    {
+        return false;
+    }
+    for (std::size_t i = 0; i < a.len; i++)
+    {
+        const auto lower = [](unsigned char c) { return c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c; };
+        if (lower(a.p[i]) != lower(b.p[i]))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Whether two names are the same, as mbedTLS compares them (x509_name_cmp)
+static bool same_name(const mbedtls_x509_name *a, const mbedtls_x509_name *b)
+{
+    for (; a != nullptr && b != nullptr; a = a->next, b = b->next)
+    {
+        if (a->oid.tag != b->oid.tag || a->oid.len != b->oid.len || std::memcmp(a->oid.p, b->oid.p, a->oid.len) != 0 ||
+            !same_name_string(a->val, b->val) || a->next_merged != b->next_merged)
+        {
+            return false;
+        }
+    }
+    return a == nullptr && b == nullptr;
+}
+
 // mbedTLS asks for the trusted roots that could have issued `child` (the
 // last certificate of the chain the server sent). Only roots whose name
 // matches are parsed, straight from flash (no copy), so the roots cost no RAM
@@ -150,8 +204,7 @@ static int find_trusted_roots([[maybe_unused]] void *context, const mbedtls_x509
         }
         mbedtls_x509_crt_init(crt);
         const bool matches = mbedtls_x509_crt_parse_der_nocopy(crt, root.der, root.length) == 0 &&
-                             crt->subject_raw.len == child->issuer_raw.len &&
-                             std::memcmp(crt->subject_raw.p, child->issuer_raw.p, child->issuer_raw.len) == 0;
+                             same_name(&crt->subject, &child->issuer);
         if (!matches)
         {
             mbedtls_x509_crt_free(crt);
