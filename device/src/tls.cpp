@@ -326,3 +326,13 @@ void tls_remember_session(struct altcp_pcb *conn)
     session = latest;
     have_session = true;
 }
+
+err_t tls_remember_httpc_session(httpc_state_t *connection, [[maybe_unused]] void *arg,
+                                 [[maybe_unused]] struct pbuf *hdr, [[maybe_unused]] u16_t hdr_len,
+                                 [[maybe_unused]] u32_t content_len)
+{
+    // lwIP's httpc_state_t is opaque, but begins with its connection
+    // (http_client.c), and httpc has no call for it
+    tls_remember_session(*reinterpret_cast<struct altcp_pcb **>(connection));
+    return ERR_OK;
+}

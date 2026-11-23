@@ -82,12 +82,15 @@ extern "C"
 // The server's certificates are freed once the handshake has checked them
 // (MBEDTLS_SSL_KEEP_PEER_CERTIFICATE is off)
 
-// ECDHE key exchange, ECDSA or RSA certificates, AEAD ciphers only
+// ECDHE key exchange, ECDSA or RSA certificates, AEAD ciphers only.
+// ChaCha20-Poly1305 comes first: without AES instructions, the M0+ decrypts it
+// several times faster than AES-GCM, and Cloudflare (like OpenSSL) takes the
+// client's preference between the two.
 #define MBEDTLS_KEY_EXCHANGE_ECDHE_ECDSA_ENABLED
 #define MBEDTLS_KEY_EXCHANGE_ECDHE_RSA_ENABLED
 #define MBEDTLS_SSL_CIPHERSUITES                                                                                       \
-    MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, MBEDTLS_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,                    \
-        MBEDTLS_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, MBEDTLS_TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256
+    MBEDTLS_TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256, MBEDTLS_TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,        \
+        MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, MBEDTLS_TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
 #define MBEDTLS_GCM_C
 #define MBEDTLS_CHACHA20_C
 #define MBEDTLS_POLY1305_C
@@ -103,6 +106,9 @@ extern "C"
 #define MBEDTLS_ECP_DP_SECP256R1_ENABLED
 #define MBEDTLS_ECP_DP_SECP384R1_ENABLED
 #define MBEDTLS_ECP_NIST_OPTIM
+// mbedTLS's Thumb-1 assembly for bignum multiply-accumulate, instead of a
+// call to the 64-bit multiply helper for every word
+#define MBEDTLS_HAVE_ASM
 #define MBEDTLS_RSA_C
 #define MBEDTLS_PKCS1_V15
 #define MBEDTLS_PKCS1_V21

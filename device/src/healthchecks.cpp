@@ -58,7 +58,6 @@ static err_t on_healthcheck_data_received([[maybe_unused]] void *arg, struct alt
                                           [[maybe_unused]] err_t err)
 {
     assert(arg);
-    tls_remember_session(conn);
 
     altcp_recved(conn, p->tot_len);
     pbuf_free(p);
@@ -76,6 +75,8 @@ static void send_healthcheck_request(const std::string &path, const std::string 
 
     httpc_connection_t settings = {};
     settings.result_fn = on_healthcheck_request_completed;
+    // The answer is a 204, with no body for on_healthcheck_data_received
+    settings.headers_done_fn = tls_remember_httpc_session;
     settings.altcp_allocator = server_tls_allocator();
 
     cyw43_arch_lwip_begin();

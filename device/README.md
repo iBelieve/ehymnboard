@@ -126,7 +126,7 @@ Notes:
 - The image is AES encrypted: it contains the WiFi passphrases, and firmware from before TLS downloads it over plain HTTP. The SHA-256 is inside the encrypted image, so a corrupted or tampered image fails the check.
 - Don't change the flash layout (`PFB_RESERVED_FILESYSTEM_SIZE_KB` in `CMakeLists.txt`) or the bootloader without reflashing every board over USB.
 - Losing power during the ~30 second slot swap can leave a board unbootable until it is reflashed over USB.
-- The emulator's `ota.test.ts` (see [emulator/README.md](emulator/README.md)) runs the whole flow on an emulated board, bootloader included: download, swap, commit, rollback, a power cut mid-download, and bad, cut off or stalled images.
+- The emulator's `ota.test.ts` and `ota-rejects.test.ts` (see [emulator/README.md](emulator/README.md)) run the whole flow on an emulated board, bootloader included: download, swap, commit, rollback, a power cut mid-download, and bad, cut off or stalled images.
 
 ### TLS
 

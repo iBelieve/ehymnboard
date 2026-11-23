@@ -28,6 +28,7 @@
 #include <cstddef>
 
 #include "lwip/altcp.h"
+#include "lwip/apps/http_client.h"
 
 // An altcp allocator function: a TLS connection that only completes its
 // handshake with a server that proves it is `host` (a const char *, which
@@ -43,6 +44,12 @@ altcp_allocator_t *server_tls_allocator();
 // can resume it, skipping the certificate checks and key exchange. Call once
 // the connection is up (its first data, or WsClient's on_open).
 void tls_remember_session(struct altcp_pcb *conn);
+
+// An httpc_connection_t::headers_done_fn that remembers the connection's
+// session, for a request whose answer may have no body (a 204), which never
+// reaches the data callback
+err_t tls_remember_httpc_session(httpc_state_t *connection, void *arg, struct pbuf *hdr, u16_t hdr_len,
+                                 u32_t content_len);
 
 struct TlsMemory
 {
