@@ -30,7 +30,7 @@ pnpm install
 pnpm dev          # Vite + the Worker in workerd, with hot reload, on :8000
 pnpm test         # rasterizer + Worker tests
 pnpm typecheck && pnpm lint   # tsc 7, oxlint (type-aware via tsrs); Prettier runs from the root
-pnpm build        # dist/client (admin) and dist/ehymnboard (Worker)
+pnpm build        # dist/client (admin) and dist/hymnboard (Worker)
 ```
 
 Basic auth is off unless `BASIC_AUTH_USERNAME` and `BASIC_AUTH_PASSWORD` are
@@ -136,9 +136,66 @@ git push dokku@dev.sonrise.io:hymnboard 02ece7f:refs/heads/master   # its deploy
    destroy it later. Device status and firmware live in each app's own storage,
    so nothing needs to be copied back.
 
-## Moving to Cloudflare later
+## Cloudflare (test deploy)
 
-`pnpm build && pnpm exec wrangler deploy`, then point
-`api.hymnboard.sonrise.io` at the Worker. The boards speak plain HTTP on port
-80, so turn off **Always Use HTTPS** and HSTS for that hostname. Keep the ETag
-unquoted: the firmware stores the header value as is.
+The same Worker also runs on Cloudflare as `hymnboard`, at
+<https://hymnboard.sonrise.workers.dev>, in the Sonrise Software account. It's
+for testing, and may become production later; the boards don't use it, and it
+has its own Durable Object, so its lines, device status and firmware are
+separate from the dokku app's. It never pings healthchecks.io: only the
+self-hosted image sets `HEALTHCHECKS=on` (in `selfhost/generate-config.mjs`),
+so test traffic can't touch the boards' real checks.
+
+[Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/)
+deploys every push to `master` that changes the web app. Its settings (Worker
+**hymnboard** > Settings > Build):
+
+| Setting           | Value                                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------------- |
+| Branch            | `master`                                                                                                |
+| Root directory    | `web`                                                                                                   |
+| Build command     | `pnpm install --frozen-lockfile --filter ehymnboard-web && pnpm run build`                              |
+| Deploy command    | `pnpm exec wrangler deploy`                                                                             |
+| Build watch paths | `web/*`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.node-version`, `tsconfig.base.json` |
+
+The build variable `SKIP_DEPENDENCY_INSTALL=1` turns off Workers Builds' own
+install, which would install the whole workspace; the build command installs
+only `web/`'s dependencies instead, as `Dockerfile` does. Workers Builds takes
+pnpm from the root `package.json`'s `packageManager` and Node from
+`.node-version`. `wrangler deploy` reads the config the Vite build wrote
+(`.wrangler/deploy/config.json` points it at `dist/hymnboard/wrangler.json`),
+so it deploys exactly what was built.
+
+Basic auth comes from the Worker's secrets, `BASIC_AUTH_USERNAME` and
+`BASIC_AUTH_PASSWORD` (Settings > Variables and Secrets, or
+`pnpm exec wrangler secret put BASIC_AUTH_PASSWORD`). Without them the admin
+is open to anyone, so keep them set, and set them before the first deploy of
+any new Worker.
+
+### Previews
+
+Every push to another branch that changes the web app gets its own
+[Worker Preview](https://developers.cloudflare.com/workers/previews/): a URL
+of its own, shown in a comment on the pull request, with its own empty Durable
+Object, so a branch never touches the main deploy's data or another branch's.
+Previews don't inherit bindings or vars, so `wrangler.jsonc`'s `previews`
+block repeats the Durable Object binding; it has no `HEALTHCHECKS`,
+so previews never ping healthchecks.io. Workers Builds runs the same build
+command and variable for previews, with `pnpm exec wrangler preview` as the
+preview command.
+
+Preview URLs are public, so the basic-auth secrets are set in the Previews
+base config too (`pnpm exec wrangler preview base-config secret put
+BASIC_AUTH_PASSWORD`, and the same for the username); new previews start
+with them.
+
+### Making it production
+
+Add `"vars": { "HEALTHCHECKS": "on" }` to `wrangler.jsonc` (and stop the dokku
+app's pings, or the boards' checks get both). Run `pnpm exec wrangler types`
+and drop `HEALTHCHECKS` from `src/worker/env.d.ts`, since the generated types
+then declare it. Then point
+`api.hymnboard.sonrise.io` and `hymnboard.sonrise.io` at the Worker as custom
+domains. The boards speak plain HTTP on port 80, so turn off **Always Use
+HTTPS** and HSTS for the api hostname. Keep the ETag unquoted: the firmware
+stores the header value as is.

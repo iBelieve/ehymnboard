@@ -58,8 +58,14 @@ function parseInteger(value: string | undefined): number | undefined {
   return value !== undefined && /^\s*[+-]?\d+\s*$/.test(value) ? Number(value) : undefined;
 }
 
-/** Runs a healthchecks.io ping after the response is sent. */
+/**
+ * Runs a healthchecks.io ping after the response is sent, when this server is
+ * the one the boards' checks belong to (HEALTHCHECKS=on).
+ */
 function ping(c: AppContext, ...args: Parameters<typeof pingHealthcheck>) {
+  if (c.env.HEALTHCHECKS !== "on") {
+    return;
+  }
   c.executionCtx.waitUntil(pingHealthcheck(...args));
 }
 

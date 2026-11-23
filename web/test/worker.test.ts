@@ -1,9 +1,11 @@
-import { exports } from "cloudflare:workers";
+import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
+import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { BoardState } from "../src/shared/api";
 import { getFont } from "../src/shared/font";
 import { renderScreen } from "../src/shared/render";
 import { SCREEN_BYTES } from "../src/shared/screen";
+import worker from "../src/worker/index";
 
 const LEFT = "E6614103E71F8D26";
 const AUTH = { Authorization: `Basic ${btoa("admin:secret")}` };
@@ -124,6 +126,22 @@ describe("device status", () => {
     expect(left.last_updated_at).toBeTruthy();
     expect(state.devices[1]!.booted_at).toBeNull();
   });
+
+  // A Cloudflare deploy has no HEALTHCHECKS var, unlike the self-hosted image.
+  test.each([undefined, "", "off", "true"])(
+    "pings nothing when HEALTHCHECKS is %j",
+    async (healthchecks) => {
+      const ctx = createExecutionContext();
+      const res = await worker.fetch(
+        new Request(`http://api.hymnboard.sonrise.io/device_booted?device_id=${LEFT}`),
+        { ...env, HEALTHCHECKS: healthchecks },
+        ctx,
+      );
+      await waitOnExecutionContext(ctx);
+      expect(res.status).toBe(204);
+      expect(pings).toEqual([]);
+    },
+  );
 
   test("ignores a saved_state_writes that isn't an integer", async () => {
     await get(`/device_healthy?device_id=${LEFT}&saved_state_writes=9`);

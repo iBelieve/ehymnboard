@@ -3,9 +3,20 @@
 // wrangler.json, so they can't drift from what Cloudflare would run.
 
 import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const dist = new URL("../dist/", import.meta.url);
-const wrangler = JSON.parse(readFileSync(new URL("ehymnboard/wrangler.json", dist), "utf8"));
+// The Vite plugin writes the Worker to dist/<name from wrangler.jsonc>/ and
+// points .wrangler/deploy/config.json at its wrangler.json; follow that rather
+// than hard-coding the name.
+const deployConfig = new URL("../.wrangler/deploy/config.json", import.meta.url);
+const wranglerJson = new URL(
+  JSON.parse(readFileSync(deployConfig, "utf8")).configPath,
+  deployConfig,
+);
+const worker = path.basename(path.dirname(fileURLToPath(wranglerJson)));
+const wrangler = JSON.parse(readFileSync(wranglerJson, "utf8"));
 
 const flags = wrangler.compatibility_flags.map((flag) => JSON.stringify(flag)).join(", ");
 const classes = wrangler.durable_objects.bindings.map((binding) => binding.class_name);
@@ -27,7 +38,7 @@ const config :Workerd.Config = (
 );
 
 const main :Workerd.Worker = (
-  modules = [(name = "index.js", esModule = embed "ehymnboard/index.js")],
+  modules = [(name = "index.js", esModule = embed "${worker}/index.js")],
   compatibilityDate = ${JSON.stringify(wrangler.compatibility_date)},
   compatibilityFlags = [${flags}],
   bindings = [
@@ -40,6 +51,9 @@ ${wrangler.durable_objects.bindings
   .join("\n")}
     (name = "BASIC_AUTH_USERNAME", fromEnvironment = "BASIC_AUTH_USERNAME"),
     (name = "BASIC_AUTH_PASSWORD", fromEnvironment = "BASIC_AUTH_PASSWORD"),
+    # The self-hosted image is production, so it pings healthchecks.io; a
+    # Cloudflare deploy doesn't unless its config sets this.
+    (name = "HEALTHCHECKS", text = "on"),
   ],
   durableObjectNamespaces = [
 ${classes.map((name) => `    (className = ${JSON.stringify(name)}, uniqueKey = "ehymnboard-${name}", enableSql = true),`).join("\n")}
