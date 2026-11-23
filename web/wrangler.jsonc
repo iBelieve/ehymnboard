@@ -38,6 +38,8 @@
   // keep traces and Issues whatever the dashboard's Previews base says. Their basic-auth secrets are set
   // with `wrangler preview base-config secret put` (see README.md).
   "previews": {
+    // Lets the e2e tests' emulated board connect to a preview's /ws
+    "vars": { "EXTRA_DEVICE_IDS": "0000000000000000" },
     "durable_objects": {
       "bindings": [{ "name": "HYMN_BOARD", "class_name": "HymnBoard" }],
     },

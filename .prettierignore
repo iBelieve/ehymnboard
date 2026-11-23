@@ -11,6 +11,7 @@ web/worker-configuration.d.ts
 web/test/fixtures
 e2e/test-results/
 e2e/playwright-report/
+device/emulator/autobahn/reports/
 *.tsbuildinfo
 
 # Third-party code and files other tools write: the bootloader submodule, the

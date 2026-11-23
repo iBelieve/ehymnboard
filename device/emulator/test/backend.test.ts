@@ -22,8 +22,70 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import net from "node:net";
 import { test } from "node:test";
-import { type Emulator, IMAGE_BYTES, SERVER_HOST, testImage } from "../src/emulator.ts";
+import { type Emulator, IMAGE_BYTES, testImage } from "../src/emulator.ts";
+import { tunnelTo } from "../src/backend.ts";
+import { MockSocket } from "../src/mock-ws.ts";
+import type { VirtualSocket } from "../src/virtual-net.ts";
 import { boot } from "./helpers.ts";
+
+/** Upgraded sockets, which outlive server.close() and would keep the tests running. */
+const upgraded = new Set<net.Socket>();
+
+/** Closes a test server and every connection to it. */
+function shutDown(server: http.Server) {
+  for (const socket of upgraded) {
+    socket.destroy();
+  }
+  upgraded.clear();
+  server.closeAllConnections();
+  server.close();
+}
+
+/** A real TCP socket as the VirtualSocket a MockSocket drives. */
+function adapt(socket: net.Socket): VirtualSocket {
+  const adapted: VirtualSocket = {
+    write: (data) => void socket.write(data),
+    end: () => void socket.end(),
+    destroy: () => void socket.destroy(),
+    onData: null,
+    onEnd: null,
+    onClose: null,
+    holdMs: 0,
+    get closed() {
+      return socket.destroyed;
+    },
+  };
+  socket.on("data", (data: Buffer) => adapted.onData?.(new Uint8Array(data)));
+  socket.on("end", () => adapted.onEnd?.());
+  socket.on("close", () => adapted.onClose?.());
+  socket.on("error", () => undefined);
+  return adapted;
+}
+
+/**
+ * Serves the board's WebSocket on `server`: sends `state()` when it opens
+ * and answers pings. Returns the open sockets, to push more states.
+ */
+function acceptSockets(server: http.Server, state: () => string, hosts?: Set<string | undefined>) {
+  const sockets: MockSocket[] = [];
+  server.on("upgrade", (req: http.IncomingMessage, socket: net.Socket) => {
+    upgraded.add(socket);
+    hosts?.add(req.headers.host);
+    const lines = [`${req.method} ${req.url} HTTP/1.1`];
+    for (let i = 0; i < req.rawHeaders.length; i += 2) {
+      lines.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`);
+    }
+    const raw = adapt(socket);
+    const mock = new MockSocket(raw, {
+      upgrade: () => 101,
+      open: (opened) => opened.sendText(state()),
+      message: (from, text) => text === "ping" && from.sendText("pong"),
+    });
+    sockets.push(mock);
+    raw.onData?.(new TextEncoder().encode(`${lines.join("\r\n")}\r\n\r\n`));
+  });
+  return sockets;
+}
 
 async function serve(handler: http.RequestListener) {
   const server = http.createServer(handler);
@@ -35,15 +97,25 @@ async function serve(handler: http.RequestListener) {
   return { server, url: `http://127.0.0.1:${address.port}` };
 }
 
-/** Runs the rest of the first loop and the second, which sends the ETags back and gets 304s. */
-async function assertSecondLoopGets304s(emu: Emulator, at: number) {
-  const asleep = await emu.untilSerial("Sleeping for 15 seconds", 30_000, at);
-  await emu.untilSerial("Sleeping for 15 seconds", 30_000, asleep);
+/**
+ * Pushes a state that names a new image for screen 1 the server doesn't
+ * have yet: the board asks with its ETag, gets a 304 and redraws nothing.
+ */
+async function assertPushedStateGets304(emu: Emulator, sockets: MockSocket[], others: string) {
+  const at = emu.serial.length;
+  sockets.at(-1)?.sendText(`state 1 newer-1 ${others} -`);
+  await emu.untilSerial("No change for screen 1", 10_000, at);
   const images = emu.net.requests.filter((r) => r.path.startsWith("/images/"));
   assert.deepEqual(
-    images.map((r) => r.status),
-    [200, 200, 200, 304, 304, 304],
+    images.map((r) => [r.path, r.status]),
+    [
+      ["/images/1", 200],
+      ["/images/2", 200],
+      ["/images/3", 200],
+      ["/images/1", 304],
+    ],
   );
+  assert.equal(emu.displays.length, 3);
 }
 
 test("forwards requests to a real server and shows what it sends back", async () => {
@@ -68,8 +140,13 @@ test("forwards requests to a real server and shows what it sends back", async ()
     );
   });
   try {
+    const sockets = acceptSockets(server, () => "state 1 real-1 real-2 real-3 -", hosts);
     const emu = boot({ backend: url });
-    const at = await emu.untilSerial("State saved to flash", 30_000);
+    await emu.untilSerial(
+      "State saved to flash",
+      60_000,
+      await emu.untilSerial("WS: live", 30_000),
+    );
     assert.deepEqual(
       emu.displays.map((d) => d.screen),
       [1, 2, 3],
@@ -78,10 +155,20 @@ test("forwards requests to a real server and shows what it sends back", async ()
       assert.equal(d.frame.length, IMAGE_BYTES);
       assert.deepEqual(d.frame, testImage(d.screen, 7));
     }
-    await assertSecondLoopGets304s(emu, at);
-    assert.deepEqual([...hosts], [SERVER_HOST], "the Host header is passed on unchanged");
+    await emu.until(
+      "the shown message",
+      () => sockets[0]?.received.includes("shown real-1 real-2 real-3") ?? false,
+      1_000,
+    );
+    await assertPushedStateGets304(emu, sockets, "real-2 real-3");
+    // A minute of pings over the real socket keeps it up
+    await emu.runFor(60_000);
+    assert.equal(sockets.filter((s) => s.open).length, 1);
+    assert.ok(sockets[0].received.filter((m) => m === "ping").length >= 2);
+    // As a shared front end (a Cloudflare preview) needs, not the board's SERVER_HOST
+    assert.deepEqual([...hosts], [new URL(url).host], "the Host header names the server");
   } finally {
-    server.close();
+    shutDown(server);
   }
 });
 
@@ -95,12 +182,13 @@ test("passes the server's framing through: lwIP's client doesn't decode chunked 
     }
     res.writeHead(200, { Etag: "chunked" }).end(testImage(1, 1));
   });
+  acceptSockets(server, () => "state 1 chunked chunked chunked -");
   try {
     const emu = boot({ backend: url });
     await emu.untilSerial(`Image is the wrong size: ${IMAGE_BYTES + 14} bytes received`, 30_000);
     assert.equal(emu.displays.length, 0);
   } finally {
-    server.close();
+    shutDown(server);
   }
 });
 
@@ -125,19 +213,27 @@ test("frames answers by Content-Length and status when the server keeps the conn
       // ...and never closes, ignoring Connection: Close.
     });
   });
+  // The socket comes from a separate http server: this one is raw TCP
+  const ws = await serve((_req, res) => res.writeHead(404).end());
+  const boardSockets = acceptSockets(ws.server, () => "state 1 kept-open kept-open kept-open -");
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   assert.ok(address && typeof address !== "string");
   try {
-    const emu = boot({ backend: `http://127.0.0.1:${address.port}` });
-    const at = await emu.untilSerial("State saved to flash", 30_000);
+    const emu = boot({ backend: `http://127.0.0.1:${address.port}`, tunnel: tunnelTo(ws.url) });
+    await emu.untilSerial(
+      "State saved to flash",
+      60_000,
+      await emu.untilSerial("WS: live", 30_000),
+    );
     assert.deepEqual(emu.displays[0].frame, body);
-    await assertSecondLoopGets304s(emu, at);
+    await assertPushedStateGets304(emu, boardSockets, "kept-open kept-open");
   } finally {
     for (const socket of sockets) {
       socket.destroy();
     }
     await new Promise((resolve) => server.close(resolve));
+    shutDown(ws.server);
   }
 });
 
@@ -145,7 +241,7 @@ test("a server that refuses the connection looks like a reset to the board", asy
   const { server, url } = await serve(() => undefined);
   await new Promise((resolve) => server.close(resolve));
   const emu = boot({ backend: url });
-  await emu.untilSerial(/Fetch image HTTP request completed with result: [1-9]/, 30_000);
+  await emu.untilSerial("WS: socket closed, retrying in", 30_000);
   assert.equal(emu.displays.length, 0);
 });
 
@@ -158,6 +254,6 @@ test("the synchronous run methods refuse to wait for a real server", async () =>
     assert.throws(() => emu.waitForSerial("never printed", 30_000), /use the async run methods/);
     await emu.net.settled();
   } finally {
-    server.close();
+    shutDown(server);
   }
 });

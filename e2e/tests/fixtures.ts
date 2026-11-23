@@ -29,6 +29,7 @@ import {
   type Response as PlaywrightResponse,
   type TestInfo,
 } from "@playwright/test";
+import { tunnelTo } from "../../device/emulator/src/backend.ts";
 import { Emulator } from "../../device/emulator/src/emulator.ts";
 import { toPng } from "./frames.ts";
 
@@ -189,20 +190,40 @@ export class AdminPage {
   }
 }
 
-/** One pass of the firmware's main loop: what it fetched and what it redrew. */
+/** What the board fetched and redrew over a stretch of time. */
 export interface Loop {
   images: { screen: number; status: number | undefined }[];
   displays: { screen: number; frame: Uint8Array }[];
 }
 
-/** A board running the firmware under test against the server at `backend`. */
+/**
+ * A board running the firmware under test against the server at `backend`:
+ * its WebSocket and image downloads go to the server's real HTTP port.
+ */
 export class Board {
   readonly emu: Emulator;
   #at = 0;
+  #requests = 0;
+  #displays = 0;
+  #offline = false;
 
   constructor(backend: string) {
     const verbose = !!process.env.EMULATOR_VERBOSE;
-    this.emu = new Emulator({ firmware: FIRMWARE, backend, quiet: !verbose, echo: verbose });
+    // A server far away (a Cloudflare preview) takes a few hundred ms to
+    // answer, which the default hold of the board's clock doesn't cover
+    const local = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(backend).hostname);
+    const toServer = tunnelTo(backend, local ? {} : { holdMs: 3_000 });
+    this.emu = new Emulator({
+      firmware: FIRMWARE,
+      backend,
+      quiet: !verbose,
+      echo: verbose,
+      // While offline, the network refuses the board's sockets
+      tunnel: (req) => {
+        const handler = toServer(req);
+        return handler && this.#offline ? (socket) => socket.destroy() : handler;
+      },
+    });
   }
 
   /** The id the board reports itself as. */
@@ -214,19 +235,48 @@ export class Board {
     return id;
   }
 
-  /** Runs until the board next finishes refreshing its screens and goes to sleep. */
-  async nextLoop(): Promise<Loop> {
-    const requests = this.emu.net.requests.length;
-    const displays = this.emu.displays.length;
-    this.#at = await this.emu.untilSerial(/Refreshing screens \(loop=\d+/, 120_000, this.#at);
-    this.#at = await this.emu.untilSerial("Sleeping for 15 seconds", 120_000, this.#at);
-    return {
-      images: this.emu.net.requests.slice(requests).flatMap((r) => {
+  /**
+   * Runs until the board next redraws what the server pushed and saves it.
+   * Returns what it fetched and drew since the last call (or `quiet`).
+   */
+  async nextUpdate(ms = 120_000): Promise<Loop> {
+    this.#at = await this.emu.untilSerial("State saved to flash", ms, this.#at);
+    return this.#since();
+  }
+
+  /** Runs for `ms` of simulated time; returns what the board fetched and drew meanwhile. */
+  async quiet(ms = 60_000): Promise<Loop> {
+    this.#since();
+    await this.emu.runFor(ms);
+    this.#at = this.emu.serial.length;
+    return this.#since();
+  }
+
+  #since(): Loop {
+    const loop = {
+      images: this.emu.net.requests.slice(this.#requests).flatMap((r) => {
         const screen = /^\/images\/(\d)$/.exec(r.path)?.[1];
         return screen ? [{ screen: Number(screen), status: r.status }] : [];
       }),
-      displays: this.emu.displays.slice(displays).map(({ screen, frame }) => ({ screen, frame })),
+      displays: this.emu.displays
+        .slice(this.#displays)
+        .map(({ screen, frame }) => ({ screen, frame })),
     };
+    this.#requests = this.emu.net.requests.length;
+    this.#displays = this.emu.displays.length;
+    return loop;
+  }
+
+  /**
+   * Cuts the board off from the server (its socket drops and reconnects are
+   * refused), or lets it back on.
+   */
+  setOffline(offline: boolean) {
+    this.#offline = offline;
+    if (offline) {
+      // Forgets every connection, as a router restart would
+      this.emu.net.reset();
+    }
   }
 
   /** Runs until the firmware prints `text`, from where the last wait stopped. */
@@ -236,6 +286,11 @@ export class Board {
 
   powerCycle() {
     this.emu.powerCycle();
+  }
+
+  /** Unplugs the board for good: its connections to the server drop. */
+  unplug() {
+    this.emu.net.reset();
   }
 
   /** Attaches the serial output, the board's requests and every frame shown. */
@@ -263,9 +318,12 @@ export class Board {
  */
 export const test = base.extend<{ admin: AdminPage; backend: string; board: Board }>({
   admin: async ({ page, backend }, use) => {
-    // Stay hermetic: the pages load web fonts and scripts from CDNs.
+    // Stay hermetic: the pages load web fonts and scripts from CDNs. The
+    // browser may upgrade the server to https itself (*.workers.dev is on
+    // the HSTS preload list).
+    const origins = new Set([backend, backend.replace(/^http:/, "https:")]);
     await page.route("**/*", (route) =>
-      new URL(route.request().url()).origin === backend ? route.continue() : route.abort(),
+      origins.has(new URL(route.request().url()).origin) ? route.continue() : route.abort(),
     );
     await use(new AdminPage(page));
   },
@@ -280,6 +338,8 @@ export const test = base.extend<{ admin: AdminPage; backend: string; board: Boar
     await publishRelease(request, release.version, release.image);
     const board = new Board(backend);
     await use(board);
+    // Gone, as a board that lost power is: the next test's board is new
+    board.unplug();
     await board.attachTo(testInfo);
     // Leave the server offering the build under test, not a release a test
     // published, for whatever checks in next.

@@ -119,14 +119,14 @@ void on_version_check_completed(void *arg, httpc_result_t httpc_result, [[maybe_
     req->complete = true;
 }
 
-// Returns the version the server wants this board to run, or an empty string
-// if the board is up to date (or the check failed)
-std::string fetch_target_version()
+// Returns the version the server wants this board to run, an empty string if
+// the board is up to date, or nothing if the check failed
+std::optional<std::string> fetch_target_version()
 {
     if (!version_check.complete)
     {
         printf("OTA: previous version check still running, skipping\n");
-        return "";
+        return std::nullopt;
     }
 
     version_check.complete = false;
@@ -148,31 +148,31 @@ std::string fetch_target_version()
     {
         printf("OTA: error starting version check: %d\n", ret);
         version_check.complete = true;
-        return "";
+        return std::nullopt;
     }
 
     if (!wait_for_completion(version_check.complete, VERSION_CHECK_TIMEOUT_US))
     {
         printf("OTA: version check timed out\n");
-        return "";
+        return std::nullopt;
     }
 
     if (version_check.result != HTTPC_RESULT_OK)
     {
         printf("OTA: version check failed: %d\n", version_check.result);
-        return "";
+        return std::nullopt;
     }
 
     if (version_check.status_code == 204)
     {
         printf("OTA: firmware is up to date (%s)\n", FIRMWARE_VERSION);
-        return "";
+        return std::string();
     }
 
     if (version_check.status_code != 200)
     {
         printf("OTA: version check failed with status %lu\n", (unsigned long)version_check.status_code);
-        return "";
+        return std::nullopt;
     }
 
     std::string version(version_check.body.data(), version_check.body_len);
@@ -184,7 +184,7 @@ std::string fetch_target_version()
     if (version.empty() || version.length() >= OTA_VERSION_SIZE)
     {
         printf("OTA: server sent an invalid version (%u bytes)\n", (unsigned)version.length());
-        return "";
+        return std::nullopt;
     }
 
     return version;
@@ -478,18 +478,18 @@ void ota_handle_boot()
     }
 }
 
+static bool firmware_committed = false;
+
 // Tells the bootloader this firmware works, so it won't be rolled back. Only
 // writes to flash on the first call after an update.
 static void ota_commit_firmware()
 {
-    static bool committed = false;
-
-    if (committed)
+    if (firmware_committed)
     {
         return;
     }
 
-    committed = true;
+    firmware_committed = true;
 
     if (!pfb_is_after_firmware_update())
     {
@@ -506,27 +506,41 @@ static void ota_commit_firmware()
     }
 }
 
-// Asks the server for a firmware update and installs it if there is one
-static void ota_check_for_update()
+// Newly installed firmware that hasn't proven itself yet: it mustn't install
+// another update over itself, since then a broken build could never be rolled
+// back
+static bool awaiting_commit()
+{
+    return !firmware_committed && pfb_is_after_firmware_update();
+}
+
+// Asks the server for a firmware update and installs it if there is one.
+// Returns false if that failed part way (worth trying again soon).
+static bool ota_check_for_update()
 {
     long_watchdog_update();
 
-    const auto version = fetch_target_version();
+    const auto target = fetch_target_version();
+    if (!target)
+    {
+        return false;
+    }
+    const auto &version = *target;
 
     if (version.empty())
     {
-        return;
+        return true;
     }
 
     if (version == FIRMWARE_VERSION)
     {
-        return;
+        return true;
     }
 
     if (version == flash_saved_state->rejected_version())
     {
         printf("OTA: server offers %s, which was rolled back before, skipping\n", version.c_str());
-        return;
+        return true;
     }
 
     printf("OTA: updating from %s to %s\n", FIRMWARE_VERSION, version.c_str());
@@ -541,13 +555,13 @@ static void ota_check_for_update()
     if (init_ret != 0)
     {
         printf("OTA: error initializing download slot: %d\n", init_ret);
-        return;
+        return false;
     }
 
     const auto size = download_image(version);
     if (size == 0)
     {
-        return;
+        return false;
     }
 
     long_watchdog_update();
@@ -555,7 +569,7 @@ static void ota_check_for_update()
     if (pfb_firmware_sha256_check(size) != 0)
     {
         printf("OTA: SHA-256 check failed, discarding image\n");
-        return;
+        return false;
     }
 
     printf("OTA: downloaded and verified %u bytes, installing %s\n", (unsigned)size, version.c_str());
@@ -565,28 +579,41 @@ static void ota_check_for_update()
 
     // Reboots into the bootloader, which swaps in the new firmware
     pfb_perform_update();
+    return true;
 }
 
-void ota_loop(bool any_success)
+void ota_loop(bool live, const std::string &offered_version)
 {
-    constexpr int64_t CHECK_INTERVAL_US = 10LL * 60 * 1000 * 1000;
-    static std::optional<absolute_time_t> last_check;
+    constexpr int64_t CHECK_INTERVAL_US = 60LL * 60 * 1000 * 1000;
+    // After a check that failed part way (the server or WiFi was down)
+    constexpr int64_t RETRY_INTERVAL_US = 5LL * 60 * 1000 * 1000;
+    static std::optional<absolute_time_t> next_check;
+    // The last version a state message offered, so each offer is checked once
+    static std::string last_offer;
 
-    if (!any_success)
+    if (live)
+    {
+        // A live socket proves a newly installed firmware works; until it's
+        // committed, any reboot rolls it back
+        ota_commit_firmware();
+    }
+
+    if (awaiting_commit())
     {
         return;
     }
 
-    // Reaching the server proves a newly installed firmware works; until it's
-    // committed, any reboot rolls it back
-    ota_commit_firmware();
-
-    // Checks on the first loop that reaches the server, and from then on
-    // whenever one does after the interval
-    const auto now = get_absolute_time();
-    if (!last_check || absolute_time_diff_us(*last_check, now) >= CHECK_INTERVAL_US)
+    const bool new_offer = live && !offered_version.empty() && offered_version != FIRMWARE_VERSION &&
+                           offered_version != last_offer && offered_version != flash_saved_state->rejected_version();
+    if (new_offer)
     {
-        last_check = now;
-        ota_check_for_update();
+        last_offer = offered_version;
+    }
+
+    const auto now = get_absolute_time();
+    if (new_offer || !next_check || absolute_time_diff_us(*next_check, now) >= 0)
+    {
+        const bool done = ota_check_for_update();
+        next_check = delayed_by_us(get_absolute_time(), done ? CHECK_INTERVAL_US : RETRY_INTERVAL_US);
     }
 }

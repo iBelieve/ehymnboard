@@ -18,14 +18,14 @@
 
 // Firmware updates over the air, through pico_fota_bootloader: the firmware
 // downloads the image into the download slot, the bootloader swaps it in on
-// reboot, and the new firmware commits once it reaches the server, or is
+// reboot, and the new firmware commits once its WebSocket is live, or is
 // rolled back if it reboots before then.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Emulator } from "../src/emulator.ts";
 import { OtaBuild, sealImage } from "../src/ota-image.ts";
 import type { HttpResponse } from "../src/virtual-net.ts";
-import { boot, count, FIRMWARE } from "./helpers.ts";
+import { boot, count, FIRMWARE, waitForFirstImages } from "./helpers.ts";
 
 const build = new OtaBuild(FIRMWARE);
 const NEXT = build.nextVersion("ota2");
@@ -47,9 +47,16 @@ function bootAndInstallNext() {
   return { emu, at };
 }
 
-test("installs the update the server offers and commits it once it reaches the server", () => {
+test("installs the update the server offers and commits it once its socket is live", () => {
   const { emu, at } = bootAndInstallNext();
-  emu.waitForSerial("OTA: firmware is healthy, committing", 60_000, at);
+  // Commits on the first loop after the socket goes live, once that loop has
+  // drawn what the state asked for
+  const live = emu.waitForSerial("WS: live", 60_000, at);
+  emu.waitForSerial(
+    "OTA: firmware is healthy, committing",
+    5_000,
+    emu.waitForSerial("State saved to flash", 60_000, live),
+  );
   emu.waitForSerial(`OTA: firmware is up to date (${NEXT})`, 30_000, at);
 
   assert.equal(requests(emu, "/firmware/image").length, 1);
@@ -58,7 +65,8 @@ test("installs the update the server offers and commits it once it reaches the s
   assert.equal(booted.query.firmware_version, NEXT);
   assert.equal(booted.query.ota_status, "updated");
   assert.equal(booted.query.ota_version, NEXT);
-  // The ETags saved before the update survive it: nothing is redrawn.
+  // Each screen is drawn once in all (the old firmware installed the update
+  // at boot, before drawing anything).
   assert.equal(emu.displays.length, 3);
 
   // Committed, it stays installed through a power cut.
@@ -73,18 +81,15 @@ test("installs the update the server offers and commits it once it reaches the s
   assert.equal(rebooted.query.ota_status, undefined, "a plain boot isn't reported as an update");
 });
 
-test("rolls back an update that never reaches the server, and doesn't retry it", () => {
+test("rolls back an update whose socket never goes live, and doesn't retry it", () => {
   const { emu, at } = bootAndInstallNext();
 
-  // The new firmware can't fetch anything, so it never commits; after 3
+  // The new firmware's socket never gets going, so it never commits; after 3
   // minutes it reboots and the bootloader puts the old firmware back.
-  emu.server.override = (req) => (req.path.startsWith("/images/") ? { status: 500 } : undefined);
-  let since = emu.waitForSerial(
-    "All fetches have failed for >3 minutes, rebooting to recover",
-    300_000,
-    at,
-  );
-  emu.server.override = null;
+  emu.server.upgradeStatus = 500;
+  let since = emu.waitForSerial("No live socket for >3 minutes, rebooting to recover", 300_000, at);
+  assert.ok(!emu.serial.slice(at).includes("OTA: firmware is healthy"), "never committed");
+  emu.server.upgradeStatus = 101;
   since = emu.waitForSerial("[BOOTLOADER] Rolling back to the previous firmware...", 60_000, since);
   since = emu.waitForSerial(`Firmware version: ${build.version}`, 30_000, since);
   since = emu.waitForSerial(`OTA: update to ${NEXT} failed and was rolled back`, 5_000, since);
@@ -93,6 +98,10 @@ test("rolls back an update that never reaches the server, and doesn't retry it",
     60_000,
     since,
   );
+  // Live again on the old firmware, the state message still offers NEXT:
+  // that doesn't bring the rejected version back either.
+  emu.waitForSerial("WS: live", 60_000, since);
+  emu.run(10_000);
 
   assert.equal(count(emu, "OTA: firmware is healthy, committing"), 0);
   assert.equal(
@@ -129,15 +138,49 @@ test("a power cut during the download keeps the old firmware, then installs on t
   assert.equal(requests(emu, "/firmware/image").length, 2);
 });
 
-test("checks for an update on the first loop that reaches the server", () => {
+test("installs firmware the server pushes on the socket at once", () => {
   const emu = boot();
-  emu.server.firmware = { version: NEXT, image: build.imageFor(NEXT) };
-  emu.server.override = (req) => (req.path.startsWith("/images/") ? { status: 500 } : undefined);
-  const at = emu.waitForSerial("Refreshing screens (loop=2", 60_000);
-  assert.equal(requests(emu, "/firmware/latest").length, 0, "no check after a failed loop");
+  const at = waitForFirstImages(emu);
+  assert.equal(requests(emu, "/firmware/latest").length, 1, "one check at boot");
 
-  emu.server.override = null;
-  emu.waitForSerial(`OTA: updating from ${build.version} to ${NEXT}`, 60_000, at);
+  emu.server.setFirmware({ version: NEXT, image: build.imageFor(NEXT) });
+  const pushedAt = emu.simMs;
+  emu.waitForSerial(`OTA: updating from ${build.version} to ${NEXT}`, 1_000, at);
+  assert.ok(emu.simMs - pushedAt < 500, "checks as soon as the state offers it");
+  emu.waitForSerial(`Firmware version: ${NEXT}`, 180_000, at);
+  emu.waitForSerial("OTA: firmware is healthy, committing", 60_000, at);
+});
+
+test("an offer whose check fails is checked again within 5 minutes, not an hour", () => {
+  const emu = boot();
+  const at = waitForFirstImages(emu);
+  let refused = 0;
+  emu.server.override = (req) =>
+    req.path === "/firmware/latest" && refused++ === 0 ? { status: 503 } : undefined;
+  emu.server.setFirmware({ version: NEXT, image: build.imageFor(NEXT) });
+  const failed = emu.waitForSerial("OTA: version check failed with status 503", 5_000, at);
+  const failedAt = emu.simMs;
+  emu.waitForSerial(`OTA: updating from ${build.version} to ${NEXT}`, 6 * 60_000, failed);
+  const after = emu.simMs - failedAt;
+  assert.ok(
+    after >= 4 * 60_000 && after <= 6 * 60_000,
+    `retried ${(after / 1000).toFixed(0)} s later`,
+  );
+  emu.waitForSerial(`Firmware version: ${NEXT}`, 180_000, failed);
+});
+
+test("still checks over HTTP hourly, and at boot even without a socket", () => {
+  // A server whose socket is broken can still ship a fixed firmware
+  const emu = boot();
+  emu.server.upgradeStatus = 500;
+  emu.waitForSerial("OTA: firmware is up to date", 60_000);
+  assert.equal(requests(emu, "/firmware/latest").length, 1);
+
+  emu.server.upgradeStatus = 101;
+  waitForFirstImages(emu, 120_000);
+  emu.run(61 * 60_000);
+  assert.equal(requests(emu, "/firmware/latest").length, 2, "one more check an hour later");
+  assert.equal(emu.reboots, 0);
 });
 
 /**
@@ -153,13 +196,15 @@ function offer(image: Uint8Array | HttpResponse, failure: string) {
     emu.server.override = (req) => (req.path === "/firmware/image" ? image : undefined);
   }
   const at = emu.waitForSerial(`OTA: updating from ${build.version} to ${NEXT}`, 60_000);
-  emu.waitForSerial("Sleeping for 15 seconds", 120_000, emu.waitForSerial(failure, 120_000, at));
+  emu.waitForSerial(failure, 120_000, at);
   return emu;
 }
 
 /** Checks the board stayed on its firmware and kept working. */
 function assertStillRunning(emu: Emulator) {
-  emu.waitForSerial("Refreshing screens (loop=2", 30_000, emu.serial.length);
+  waitForFirstImages(emu, 120_000);
+  emu.run(60_000);
+  assert.equal(emu.server.openSockets.length, 1, "live on its socket");
   assert.equal(emu.reboots, 0);
   assert.equal(count(emu, "[BOOTLOADER] Nothing to swap"), 1, "only the first boot");
   assert.equal(count(emu, "Firmware version:"), 1);

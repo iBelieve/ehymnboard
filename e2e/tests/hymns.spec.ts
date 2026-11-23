@@ -17,29 +17,23 @@
  */
 
 // An usher changes the hymns on the admin page, and the board shows them:
-// each change is downloaded and drawn once, on the screens it touches, and
-// after that the board gets 304s instead of downloading again.
+// the server pushes the change over the board's WebSocket, and the board
+// downloads and draws only the screens it touches, within a second or two.
+// In between, it sends nothing but pings.
 import { BOTTOM, inkIn, rows, TOP, WIDTH } from "./frames.ts";
 import { type Board, expect, type Loop, test } from "./fixtures.ts";
 
 const HYMNS = ["Hymn", "123", "Psalm", "23", "Offertory", "456"];
 
-/** The screens redrawn in a loop, in order. */
+/** The screens redrawn, in order. */
 const redrawn = (loop: Loop) => loop.displays.map((d) => d.screen);
 const statuses = (loop: Loop) => loop.images.map((i) => [i.screen, i.status]);
-const ALL_304 = [
-  [1, 304],
-  [2, 304],
-  [3, 304],
-];
 
-/** The board's next few loops all get 304s and redraw nothing. */
-async function expectSettled(board: Board, loops = 3) {
-  for (let i = 0; i < loops; i++) {
-    const loop = await board.nextLoop();
-    expect(statuses(loop), "no download once the board has the current image").toEqual(ALL_304);
-    expect(redrawn(loop)).toEqual([]);
-  }
+/** A minute goes by with no downloads and no redraws: the board isn't polling. */
+async function expectSettled(board: Board) {
+  const quiet = await board.quiet(60_000);
+  expect(statuses(quiet), "no downloads while nothing changes").toEqual([]);
+  expect(redrawn(quiet)).toEqual([]);
 }
 
 /** Text in a band of a screen: some ink, centered across the screen. */
@@ -50,11 +44,14 @@ function expectText(frame: Uint8Array, band: typeof TOP) {
   return ink;
 }
 
-test("hymns typed on the admin page reach the board once, then 304s", async ({ admin, board }) => {
+test("hymns typed on the admin page are pushed to the board and drawn once", async ({
+  admin,
+  board,
+}) => {
   await admin.clear();
 
   // A new board downloads all three (blank) screens, then settles.
-  const first = await board.nextLoop();
+  const first = await board.nextUpdate();
   expect(statuses(first)).toEqual([
     [1, 200],
     [2, 200],
@@ -66,12 +63,19 @@ test("hymns typed on the admin page reach the board once, then 304s", async ({ a
   }
   await expectSettled(board);
 
-  // The board shows up on the admin page.
-  await expect(await admin.boardStatus(board.id)).toContainText("last seen just now");
+  // The board shows up on the admin page, live on its socket.
+  const status = await admin.boardStatus(board.id);
+  await expect(status).toContainText("last seen just now");
+  await expect(status).toContainText("Live");
 
   // New hymns: each screen is redrawn once with its two lines.
   await admin.apply(HYMNS);
-  const posted = await board.nextLoop();
+  const posted = await board.nextUpdate(30_000);
+  expect(statuses(posted)).toEqual([
+    [1, 200],
+    [2, 200],
+    [3, 200],
+  ]);
   expect(redrawn(posted)).toEqual([1, 2, 3]);
   for (const { frame } of posted.displays) {
     expectText(frame, TOP);
@@ -90,14 +94,10 @@ test("hymns typed on the admin page reach the board once, then 304s", async ({ a
   }
   await expectSettled(board);
 
-  // Changing line 4 changes only the bottom of screen 2.
+  // Changing line 4 changes only the bottom of screen 2: only it is fetched.
   await admin.apply(HYMNS.with(3, "100"));
-  const changed = await board.nextLoop();
-  expect(statuses(changed)).toEqual([
-    [1, 304],
-    [2, 200],
-    [3, 304],
-  ]);
+  const changed = await board.nextUpdate(30_000);
+  expect(statuses(changed)).toEqual([[2, 200]]);
   expect(redrawn(changed)).toEqual([2]);
   const [before, after] = [posted.displays[1].frame, changed.displays[0].frame];
   expect(Buffer.from(rows(after, TOP)).equals(Buffer.from(rows(before, TOP)))).toBe(true);
@@ -107,12 +107,30 @@ test("hymns typed on the admin page reach the board once, then 304s", async ({ a
 
   // Clear blanks every screen, once.
   await admin.clear();
-  const cleared = await board.nextLoop();
+  const cleared = await board.nextUpdate(30_000);
   expect(redrawn(cleared)).toEqual([1, 2, 3]);
   for (const { frame } of cleared.displays) {
     expect(inkIn(frame, { from: 0, to: 680 }).count).toBe(0);
   }
-  await expectSettled(board, 1);
+  await expectSettled(board);
+});
+
+test("a change reaches the board within seconds of Apply", async ({ admin, board }) => {
+  await admin.apply(HYMNS);
+  await board.nextUpdate();
+  await board.quiet(5_000);
+
+  // The simulated clock only runs while the test runs the board, so time the
+  // push in simulated time: from Apply to the board asking for the image.
+  await admin.apply(HYMNS.with(0, "Psalm"));
+  const pushedAt = board.emu.simMs;
+  await board.untilSerial("Refreshing screen 1", 5_000);
+  const latency = board.emu.simMs - pushedAt;
+  expect(latency, `asked for the new image ${latency.toFixed(0)} ms after Apply`).toBeLessThan(
+    1_000,
+  );
+  const changed = await board.nextUpdate(30_000);
+  expect(redrawn(changed)).toEqual([1]);
 });
 
 test("a board that loses power keeps its screens and doesn't download them again", async ({
@@ -120,17 +138,48 @@ test("a board that loses power keeps its screens and doesn't download them again
   board,
 }) => {
   await admin.apply(HYMNS);
-  const first = await board.nextLoop();
+  const first = await board.nextUpdate();
   expect(redrawn(first)).toEqual([1, 2, 3]);
 
   board.powerCycle();
-  // Back on, it reports the boot and sends the ETags it saved in flash.
-  await expectSettled(board, 2);
+  // Back on, it reports the boot and its saved ETags match what the server
+  // pushes, so nothing is downloaded.
+  await board.untilSerial("WS: live");
+  await expectSettled(board);
   await expect(await admin.boardStatus(board.id)).toContainText("booted just now");
 
   // E-paper keeps its image without power, so nothing needed redrawing, and
   // the next change still arrives.
   await admin.apply(HYMNS.with(0, "Hymns"));
-  const changed = await board.nextLoop();
+  const changed = await board.nextUpdate(30_000);
   expect(redrawn(changed)).toEqual([1]);
+});
+
+test("a board cut off from the server catches up on a change made meanwhile", async ({
+  admin,
+  board,
+}) => {
+  await admin.apply(HYMNS);
+  await board.nextUpdate();
+  await expect(await admin.boardStatus(board.id)).toContainText("Live");
+
+  // The network drops the board. Its next ping fails and it starts retrying.
+  board.setOffline(true);
+  await board.untilSerial("WS: socket closed, retrying in", 60_000);
+  await expect(await admin.boardStatus(board.id)).toContainText("Offline");
+
+  // The hymns change while it's away: nothing reaches it.
+  await admin.apply(HYMNS.with(5, "789"));
+  const away = await board.quiet(20_000);
+  expect(redrawn(away)).toEqual([]);
+
+  // Back on the network, it reconnects, gets the current state and redraws
+  // only the screen that changed.
+  board.setOffline(false);
+  await board.untilSerial("WS: live", 120_000);
+  const caughtUp = await board.nextUpdate(30_000);
+  expect(statuses(caughtUp)).toEqual([[3, 200]]);
+  expect(redrawn(caughtUp)).toEqual([3]);
+  expect(board.emu.reboots).toBe(0);
+  await expect(await admin.boardStatus(board.id)).toContainText("Live");
 });

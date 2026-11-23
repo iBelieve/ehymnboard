@@ -100,6 +100,11 @@ All checks below must pass; run them locally before committing.
   `../build/ehymnboard.uf2` (or `$FIRMWARE_UF2`) in rp2040js and runs the
   scenario tests. Only erasable TypeScript syntax (no enums or parameter
   properties); import with `.ts` extensions
+- Autobahn: the `ehymnboard_autobahn` build (an echo client on the same
+  WebSocket code) runs the Autobahn fuzzingserver's sections 1-7 in the
+  emulator: start the container as `ci-device.yml` does, then
+  `node autobahn/run.ts` in `device/emulator` (see `autobahn/README.md`).
+  Every case must come back OK, NON-STRICT or INFORMATIONAL
 
 ### web/
 
@@ -109,7 +114,8 @@ All checks below must pass; run them locally before committing.
 - After changing `wrangler.jsonc`, regenerate `worker-configuration.d.ts`
   with `pnpm exec wrangler types`
 - Don't change the device endpoints' paths, query parameters or response
-  bytes: the firmware hard-codes them. The rasterizer is compared against
+  bytes, or the `/ws` messages (`state`, `ping`/`pong`, `shown`, close
+  codes): the firmware hard-codes them. The rasterizer is compared against
   the old Flask server's output in `test/render.test.ts`
 - Docker: the image builds from the repository root, for the workspace's
   lockfile: `docker build -f web/Dockerfile .` (`.dockerignore` at the root
@@ -129,7 +135,9 @@ the emulator.
   filtered install (`pnpm install --filter ehymnboard-e2e...`) brings its
   packages too
 - `pnpm install`, `pnpm exec playwright install chromium`, then with a server
-  running: `E2E_BASE_URL=http://localhost:8000 E2E_USERNAME=… E2E_PASSWORD=… pnpm test`
+  running: `E2E_BASE_URL=http://localhost:8000 E2E_USERNAME=… E2E_PASSWORD=… pnpm test`.
+  The server must run with `EXTRA_DEVICE_IDS=0000000000000000` (the emulated
+  board's ID), or `/ws` refuses the board
 - `pnpm run typecheck`, `pnpm run lint`
 - The selectors are what a person sees, so a rewritten admin page passes
   unchanged if it keeps the six text boxes, Apply/Clear buttons,

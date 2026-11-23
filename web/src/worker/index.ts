@@ -2,7 +2,13 @@ import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { basicAuth } from "hono/basic-auth";
 import type { BoardState, DeviceStatusParams } from "../shared/api";
 import { EMPTY_LINES, isLines, SCREEN_COUNT, trimLines } from "../shared/screen";
-import { deviceSortIndex, getDeviceName, pingHealthcheck } from "./devices";
+import {
+  DEVICE_NAMES,
+  deviceSortIndex,
+  getDeviceName,
+  healthchecksOn,
+  pingHealthcheck,
+} from "./devices";
 
 import { STUCK_ETAG_DOWNLOADS } from "./hymn-board";
 
@@ -63,7 +69,7 @@ function parseInteger(value: string | undefined): number | undefined {
  * the one the boards' checks belong to (HEALTHCHECKS=on).
  */
 function ping(c: AppContext, ...args: Parameters<typeof pingHealthcheck>) {
-  if (c.env.HEALTHCHECKS !== "on") {
+  if (!healthchecksOn(c.env)) {
     return;
   }
   c.executionCtx.waitUntil(pingHealthcheck(...args));
@@ -75,6 +81,23 @@ function ping(c: AppContext, ...args: Parameters<typeof pingHealthcheck>) {
 // ---------------------------------------------------------------------------
 
 app.get("/ok", (c) => c.body(null, 204));
+
+// The board's WebSocket: the server pushes its state (screen etags and
+// firmware version) here, so it no longer polls. Images still come from
+// /images/N. Only the known boards may connect.
+app.get("/ws", async (c) => {
+  if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") {
+    return c.text("Expected a WebSocket upgrade\n", 426);
+  }
+  const deviceId = c.req.query("device_id");
+  const extra = (c.env.EXTRA_DEVICE_IDS ?? "").split(",").map((id) => id.trim());
+  const known = deviceId && (Object.hasOwn(DEVICE_NAMES, deviceId) || extra.includes(deviceId));
+  if (!known) {
+    console.log(`Refusing a socket from unknown device ${deviceId}`);
+    return c.text("Unknown device\n", 403);
+  }
+  return board(c.env).fetch(c.req.raw);
+});
 
 app.get("/images/:id{[0-9]+}", async (c) => {
   const id = Number(c.req.param("id"));
@@ -284,7 +307,8 @@ app.post("/firmware", requireAuth, async (c) => {
   const version = typeof form.version === "string" ? form.version.trim() : "";
   const image = form.image;
 
-  if (!FIRMWARE_VERSION_PATTERN.test(version)) {
+  // "-" means "no firmware" in the board's state message
+  if (!FIRMWARE_VERSION_PATTERN.test(version) || version === "-") {
     return c.text("Invalid or missing version\n", 400);
   }
   if (!(image instanceof File)) {

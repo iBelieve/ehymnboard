@@ -29,6 +29,15 @@ export function deviceSortIndex(deviceId: string): number {
 // Like the Flask server: don't let a slow healthchecks.io hold a request open.
 const HEALTHCHECK_TIMEOUT_MS = 10_000;
 
+/**
+ * Whether this server is the one the boards' healthchecks.io checks belong
+ * to. Only the self-hosted image sets HEALTHCHECKS=on, so a Cloudflare deploy
+ * or preview never pings them.
+ */
+export function healthchecksOn(env: { HEALTHCHECKS?: string }): boolean {
+  return env.HEALTHCHECKS === "on";
+}
+
 export async function pingHealthcheck(
   deviceId: string | undefined,
   path: "" | "/log" | "/failure",

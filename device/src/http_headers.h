@@ -22,6 +22,7 @@
 // they're unit tested on the host (see test/).
 
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -38,3 +39,20 @@ inline constexpr std::size_t MAX_ETAG_LENGTH = 40;
 // etag to flash and sends it back in a URL, and anything else wouldn't fit or
 // would need escaping. The board then just re-downloads the image each time.
 std::string find_etag(std::string_view headers);
+
+// Whether `word` is 1 to `max_length` letters, digits, '.', '_' or '-': safe
+// to save to flash and to send back in a URL or a message without escaping.
+bool is_safe_word(std::string_view word, std::size_t max_length);
+
+// Whether an etag is one the board keeps: a safe word of at most
+// MAX_ETAG_LENGTH.
+bool is_safe_etag(std::string_view etag);
+
+// The value of the first header called `name` (matched case-insensitively) in
+// a raw header block like find_etag's, without surrounding whitespace. Empty
+// if there's no such header, or if the block ends before that line does.
+std::optional<std::string_view> find_header(std::string_view headers, std::string_view name);
+
+// Whether a comma-separated header value (such as Connection's) holds `token`,
+// matched case-insensitively.
+bool header_has_token(std::string_view value, std::string_view token);

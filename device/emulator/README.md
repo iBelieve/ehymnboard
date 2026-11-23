@@ -40,17 +40,18 @@ job in `.github/workflows/ci-device.yml`). The whole suite takes a few seconds:
 sleeps jump straight to the next timer alarm, so simulated time runs far
 faster than real time.
 
-| Test file               | Covers                                                                                                                                                    |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `happy-path.test.ts`    | Join, healthcheck, all three screens drawn intact, saved ETags give 304s, a changed image redraws only its screen                                         |
-| `pio-bus.test.ts`       | The same first loop over the real PIO/DMA gSPI driver instead of the fast path                                                                            |
-| `wifi.test.ts`          | Unknown networks skipped, wrong password retried, no known network                                                                                        |
-| `server-errors.test.ts` | A 500, a connection closed mid-image, a wrong-size image, a reset connection, an unknown host                                                             |
-| `panels.test.ts`        | Each screen gets exactly Waveshare's documented full-update sequence with no controller faults; a panel stuck busy makes the firmware time out and reboot |
-| `epaper.test.ts`        | The panel model on its own: RAM window and address counters, gate lines, BUSY, deep sleep and fault detection                                             |
-| `recovery.test.ts`      | WiFi lost for good, the 3 minute watchdog reboot, rejoin with ETags kept in flash                                                                         |
-| `backend.test.ts`       | Requests forwarded to a real HTTP server: its answers shown, 304s, Host kept, framing passed through as sent, a refused connection                        |
-| `ota.test.ts`           | OTA updates through the bootloader: installed, committed, kept through a power cut; rolled back and skipped; power cut mid-download; bad images           |
+| Test file               | Covers                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `happy-path.test.ts`    | Join, healthcheck, the WebSocket goes live, all three screens drawn intact, five quiet minutes of pings and no polling, a pushed image redraws only its screen within half a second                                                                                                                                                                                                                 |
+| `socket.test.ts`        | The WebSocket: reconnecting after a close (catching up on a change), backoff and jitter, a dead socket (no pong, no state), a replaced socket, a reset, a refused board rebooting after 3 minutes, a failed image retried while the socket stays up, downloads failing for 3 minutes rebooting, an image without an ETag drawn once, pings between slow downloads, two long state messages in a row |
+| `pio-bus.test.ts`       | The same first loop over the real PIO/DMA gSPI driver instead of the fast path                                                                                                                                                                                                                                                                                                                      |
+| `wifi.test.ts`          | Unknown networks skipped, wrong password retried, no known network                                                                                                                                                                                                                                                                                                                                  |
+| `server-errors.test.ts` | A connection closed mid-image, a wrong-size image, a reset connection, an unknown host                                                                                                                                                                                                                                                                                                              |
+| `panels.test.ts`        | Each screen gets exactly Waveshare's documented full-update sequence with no controller faults; a panel stuck busy makes the firmware time out and reboot                                                                                                                                                                                                                                           |
+| `epaper.test.ts`        | The panel model on its own: RAM window and address counters, gate lines, BUSY, deep sleep and fault detection                                                                                                                                                                                                                                                                                       |
+| `recovery.test.ts`      | WiFi lost for good, the 3 minute reboot without a socket, rejoin with ETags kept in flash                                                                                                                                                                                                                                                                                                           |
+| `backend.test.ts`       | Requests and the WebSocket forwarded to a real server: its answers shown, 304s, Host kept, framing passed through as sent, a refused connection                                                                                                                                                                                                                                                     |
+| `ota.test.ts`           | OTA updates through the bootloader: installed, committed once live, kept through a power cut; rolled back and skipped; pushed over the socket; a failed check retried within 5 minutes; hourly checks; power cut mid-download; bad images                                                                                                                                                           |
 
 ## Run the firmware interactively
 
@@ -68,8 +69,12 @@ node src/run.ts ../build/ehymnboard.uf2 --seconds 60   # simulated seconds
 - `waitForSerial(text, ms, fromIndex)` runs until the firmware prints `text`
   (a string or RegExp) and returns the index after it; `waitFor(what, cond, ms)`
   runs until a condition holds. Both throw with the serial tail on timeout.
-- `server` is the `MockServer`: `setImage(screen, version)` changes an image,
-  and `override = (req) => response` answers a request yourself. A response
+- `server` is the `MockServer`: `setImage(screen, version)` changes an image
+  (and pushes the new state to the board's socket), and
+  `override = (req) => response` answers a request yourself. `sockets` lists
+  the board's WebSockets (`received` messages, `close(code)`, `drop()`);
+  `upgradeStatus`, `answerPings` and `sendStateOnOpen` break the socket in
+  different ways. A response
   is `{ status, headers, body }`, plus `stall`, `reset` or `truncateAt` to
   break the connection.
 - `net.requests` lists every HTTP request with its status, `displays` every
@@ -78,7 +83,7 @@ node src/run.ts ../build/ehymnboard.uf2 --seconds 60   # simulated seconds
   its data, and power and reset events), `faults` (rules from the panel manual
   the firmware broke), and `stuckBusy` to make one hang.
 - `server.firmware = { version, image }` offers an OTA update, as the real
-  server does after an upload. `OtaBuild` (`src/ota-image.ts`) decrypts the
+  server does after an upload (`server.setFirmware()` also pushes it). `OtaBuild` (`src/ota-image.ts`) decrypts the
   build's `ehymnboard_fota_image_encrypted.bin` with the key from
   `device/secrets.cmake` (or `$PFB_AES_KEY`, or the example key) and makes
   images of the same build under another version: `imageFor(nextVersion("ota2"))`.

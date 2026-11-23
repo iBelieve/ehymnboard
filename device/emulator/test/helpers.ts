@@ -30,6 +30,14 @@ export function boot(opts: Partial<EmulatorOptions> = {}) {
   return new Emulator({ firmware: FIRMWARE, quiet: !verbose, echo: verbose, ...opts });
 }
 
+/**
+ * Boots far enough that the socket is live and the first images are on the
+ * panels; returns the serial index after that.
+ */
+export function waitForFirstImages(emu: Emulator, ms = 40_000) {
+  return emu.waitForSerial("State saved to flash", ms, emu.waitForSerial("WS: live", ms));
+}
+
 /** Counts how many times text occurs in the serial output. */
 export function count(emu: Emulator, text: string) {
   return emu.serial.split(text).length - 1;

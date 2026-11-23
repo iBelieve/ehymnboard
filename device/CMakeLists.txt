@@ -63,10 +63,13 @@ add_subdirectory(lib/pico_fota_bootloader)
 
 add_executable(ehymnboard
         src/main.cpp
+        src/board_link.cpp
+        src/board_messages.cpp
         src/fetch_image.cpp
         src/healthchecks.cpp
         src/http_headers.cpp
         src/long_watchdog.cpp
+        src/malloc_lock.cpp
         src/ota.cpp
         src/request_path.cpp
         src/saved_state.cpp
@@ -74,6 +77,10 @@ add_executable(ehymnboard
         src/utils.cpp
         src/waveshare.cpp
         src/wifi.cpp
+        src/ws_client.cpp
+        src/ws_connection.cpp
+        src/ws_frame.cpp
+        src/ws_handshake.cpp
 )
 
 pico_set_program_name(ehymnboard "ehymnboard")
@@ -134,3 +141,43 @@ pfb_compile_with_bootloader(ehymnboard)
 # replacing it
 target_link_options(ehymnboard PRIVATE ${CMAKE_CURRENT_LIST_DIR}/cmake/app_extra.ld)
 pico_add_extra_outputs(ehymnboard)
+
+# The WebSocket client as the Autobahn test suite's echo client, for the
+# emulator to run against the suite's fuzzingserver (see
+# emulator/autobahn/README.md). Not for real boards.
+add_executable(ehymnboard_autobahn
+        src/autobahn_main.cpp
+        src/http_headers.cpp
+        src/long_watchdog.cpp
+        src/malloc_lock.cpp
+        src/request_path.cpp
+        src/saved_state.cpp
+        src/state.cpp
+        src/utils.cpp
+        src/wifi.cpp
+        src/ws_client.cpp
+        src/ws_frame.cpp
+        src/ws_handshake.cpp
+)
+add_dependencies(ehymnboard_autobahn ehymnboard_firmware_version)
+pico_enable_stdio_uart(ehymnboard_autobahn 0)
+pico_enable_stdio_usb(ehymnboard_autobahn 1)
+target_compile_options(ehymnboard_autobahn PRIVATE -Wall -Wextra)
+if (WERROR)
+    target_compile_options(ehymnboard_autobahn PRIVATE -Werror)
+endif()
+target_include_directories(ehymnboard_autobahn PRIVATE
+        ${CMAKE_CURRENT_LIST_DIR}/src
+        ${CMAKE_CURRENT_BINARY_DIR}/generated
+)
+target_link_libraries(ehymnboard_autobahn
+        pico_stdlib
+        pico_cyw43_arch_lwip_threadsafe_background
+        pico_lwip_http
+        pico_unique_id
+        pico_fota_bootloader_lib
+        )
+# Linked like the real firmware, so the emulator boots it the same way
+pfb_compile_with_bootloader(ehymnboard_autobahn)
+target_link_options(ehymnboard_autobahn PRIVATE ${CMAKE_CURRENT_LIST_DIR}/cmake/app_extra.ld)
+pico_add_extra_outputs(ehymnboard_autobahn)

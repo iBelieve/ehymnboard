@@ -51,6 +51,7 @@ ${wrangler.durable_objects.bindings
   .join("\n")}
     (name = "BASIC_AUTH_USERNAME", fromEnvironment = "BASIC_AUTH_USERNAME"),
     (name = "BASIC_AUTH_PASSWORD", fromEnvironment = "BASIC_AUTH_PASSWORD"),
+    (name = "EXTRA_DEVICE_IDS", fromEnvironment = "EXTRA_DEVICE_IDS"),
     # The self-hosted image is production, so it pings healthchecks.io; a
     # Cloudflare deploy doesn't unless its config sets this.
     (name = "HEALTHCHECKS", text = "on"),

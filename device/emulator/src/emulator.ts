@@ -20,15 +20,24 @@
 // the hymn board server, plus helpers for tests to drive and observe them.
 import fs from "node:fs";
 import path from "node:path";
-import { forwardTo } from "./backend.ts";
+import { forwardTo, isUpgrade, tunnelTo } from "./backend.ts";
 import { Board, type BoardEvents } from "./board.ts";
 import type { AccessPoint } from "./fake-cyw43.ts";
-import { type HttpRequest, type HttpResponse, VirtualNetwork } from "./virtual-net.ts";
+import { MockSocket } from "./mock-ws.ts";
+import {
+  type HttpRequest,
+  type HttpResponse,
+  type NetworkOptions,
+  VirtualNetwork,
+  type VirtualSocket,
+} from "./virtual-net.ts";
 
 export const SERVER_HOST = "api.hymnboard.sonrise.io";
 export const IMAGE_BYTES = 81600;
 
 const BOOTROM = new URL("./bootrom-b1.bin", import.meta.url);
+/** How much simulated time runs between event-loop turns while a socket is open. */
+const STREAM_SLICE_MS = 50;
 
 /**
  * pico_fota_bootloader's UF2 from the same build: an OTA build's firmware
@@ -60,10 +69,14 @@ export interface FirmwareUpdate {
   image: Uint8Array;
 }
 
+/** Close code for a socket that another one from the same board replaced. */
+export const CLOSE_REPLACED = 4000;
+
 /**
- * The hymn board server as the firmware sees it: /images/N with Etag/304,
- * the two healthchecks and, once `firmware` is set, an OTA update.
- * `override` lets a test answer a request itself.
+ * The hymn board server as the firmware sees it: the WebSocket at /ws that
+ * pushes each board's state, /images/N with Etag/304, the boot healthcheck
+ * and, once `firmware` is set, an OTA update. `override` lets a test answer
+ * a request itself.
  */
 export class MockServer {
   images = new Map(
@@ -74,9 +87,73 @@ export class MockServer {
   );
   override: ((req: HttpRequest) => HttpResponse | undefined) | null = null;
   firmware: FirmwareUpdate | null = null;
+  /** Every board WebSocket, oldest first, closed ones included. */
+  readonly sockets: MockSocket[] = [];
+  /** The status /ws answers upgrades with: anything but 101 refuses them. */
+  upgradeStatus = 101;
+  /** Answer the board's "ping" messages (off: a server that stopped answering). */
+  answerPings = true;
+  /** Send the state when a socket opens (off: a socket that never goes live). */
+  sendStateOnOpen = true;
 
   setImage(screen: number, version: number) {
     this.images.set(screen, { etag: `v${version}-${screen}`, body: testImage(screen, version) });
+    this.pushState();
+  }
+
+  /** Offers firmware (or none) and tells the boards at once. */
+  setFirmware(firmware: FirmwareUpdate | null) {
+    this.firmware = firmware;
+    this.pushState();
+  }
+
+  /** The state message the server sends a board. */
+  stateMessage() {
+    const etags = [1, 2, 3].map((s) => this.images.get(s)?.etag ?? "-");
+    return `state 1 ${etags.join(" ")} ${this.firmware?.version ?? "-"}`;
+  }
+
+  /** The open sockets. */
+  get openSockets() {
+    return this.sockets.filter((s) => s.open);
+  }
+
+  /** Sends the current state on every open socket. */
+  pushState() {
+    for (const socket of this.openSockets) {
+      socket.sendText(this.stateMessage());
+    }
+  }
+
+  /** The `tunnel` for a VirtualNetwork: /ws upgrades become MockSockets. */
+  tunnel(req: HttpRequest) {
+    if (!isUpgrade(req) || req.host !== SERVER_HOST || this.override?.(req)) {
+      return undefined;
+    }
+    return (raw: VirtualSocket) => {
+      const socket = new MockSocket(raw, {
+        upgrade: (up) => (up.path !== "/ws" ? 404 : up.query.device_id ? this.upgradeStatus : 400),
+        open: (opened) => this.#opened(opened),
+        message: (from, text) => {
+          if (text === "ping" && this.answerPings) {
+            from.sendText("pong");
+          }
+        },
+      });
+      this.sockets.push(socket);
+    };
+  }
+
+  #opened(socket: MockSocket) {
+    const board = socket.request?.query.device_id;
+    for (const other of this.openSockets) {
+      if (other !== socket && other.request?.query.device_id === board) {
+        other.close(CLOSE_REPLACED, "replaced");
+      }
+    }
+    if (this.sendStateOnOpen) {
+      socket.sendText(this.stateMessage());
+    }
   }
 
   handle(req: HttpRequest): HttpResponse {
@@ -98,7 +175,7 @@ export class MockServer {
       }
       return { status: 200, headers: { Etag: image.etag }, body: image.body };
     }
-    if (req.path === "/device_booted" || req.path === "/device_healthy") {
+    if (req.path === "/device_booted") {
       return { status: 204 };
     }
     if (req.path.startsWith("/firmware/")) {
@@ -142,6 +219,14 @@ export interface EmulatorOptions {
    * the server answers.
    */
   backend?: string;
+  /**
+   * Hands long-lived connections (WebSocket upgrades) to something other
+   * than `backend` or the mock server's /ws, such as the Autobahn suite.
+   * Use the async run methods if it talks to a real server.
+   */
+  tunnel?: NetworkOptions["tunnel"];
+  /** Host names the LAN resolves, besides the hymn board server. */
+  hosts?: string[];
   /**
    * pico_fota_bootloader's UF2, flashed first. Defaults to the one in the
    * firmware's build directory, if there is one.
@@ -189,8 +274,10 @@ export class Emulator {
     this.net = new VirtualNetwork({
       after: (ms, fn) => this.board.after(ms, fn),
       send: (frame) => this.board.chip.sendEthernet(frame),
-      dns: { [SERVER_HOST]: true },
+      dns: Object.fromEntries([SERVER_HOST, ...(opts.hosts ?? [])].map((h) => [h, true])),
       http: opts.backend ? forwardTo(opts.backend) : (req) => this.server.handle(req),
+      tunnel:
+        opts.tunnel ?? (opts.backend ? tunnelTo(opts.backend) : (req) => this.server.tunnel(req)),
       log: (msg) => log(`[net   ${stamp()}ms] ${msg}`),
     });
     this.board.chip.onEthernetFromHost = (frame) => this.net.receive(frame);
@@ -287,7 +374,9 @@ export class Emulator {
   /**
    * Runs for up to `ms` of simulated time until `stop()`, pausing the clock
    * whenever a request is waiting for the backend, so a slow server never
-   * looks slow to the firmware.
+   * looks slow to the firmware. While a long-lived connection is open it
+   * runs in short slices, letting the event loop deliver what the server
+   * sends meanwhile.
    */
   async #runAsync(ms: number, stop: () => boolean) {
     const end = this.simMs + ms;
@@ -300,9 +389,14 @@ export class Emulator {
       if (left <= 0) {
         return stop();
       }
-      this.board.run(left, () => this.net.pending > 0 || stop());
-      if (this.net.pending === 0) {
+      const slice = this.net.tunnels > 0 ? Math.min(left, STREAM_SLICE_MS) : left;
+      this.board.run(slice, () => this.net.pending > 0 || stop());
+      if (this.net.pending === 0 && this.net.tunnels === 0 && slice === left) {
         return stop();
+      }
+      if (this.net.pending === 0) {
+        // Let socket events in
+        await new Promise((resolve) => setImmediate(resolve));
       }
     }
   }

@@ -87,3 +87,18 @@ test("leaves a newer database alone", async () => {
     expect(migrate(storage)).toBe(LATEST + 1);
   });
 });
+
+test("step 2 adds the socket columns to a version 1 database, keeping its boards", async () => {
+  await withEmptyStorage((storage) => {
+    expect(migrate(storage, MIGRATIONS.slice(0, 1))).toBe(1);
+    storage.sql.exec("INSERT INTO devices (id, last_seen) VALUES ('LEFT', '2026-11-22')");
+
+    expect(migrate(storage)).toBe(LATEST);
+    expect(columns(storage.sql, "devices")).toEqual(
+      expect.arrayContaining(["connected_at", "disconnected_at", "shown_etags"]),
+    );
+    expect(storage.sql.exec("SELECT * FROM devices").toArray()).toEqual([
+      expect.objectContaining({ id: "LEFT", last_seen: "2026-11-22", connected_at: null }),
+    ]);
+  });
+});

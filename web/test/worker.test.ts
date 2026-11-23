@@ -5,6 +5,7 @@ import type { BoardState } from "../src/shared/api";
 import { getFont } from "../src/shared/font";
 import { renderScreen } from "../src/shared/render";
 import { SCREEN_BYTES } from "../src/shared/screen";
+import { type Ping, recordPings } from "./healthchecks";
 import worker from "../src/worker/index";
 
 const LEFT = "E6614103E71F8D26";
@@ -24,16 +25,10 @@ function putLines(lines: string[], headers: Record<string, string> = AUTH) {
   );
 }
 
-let pings: { url: string; body: string }[];
+let pings: Ping[];
 
 beforeEach(() => {
-  pings = [];
-  // Healthcheck pings are the only outbound requests.
-  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-    const url = input instanceof Request ? input.url : input.toString();
-    pings.push({ url, body: typeof init?.body === "string" ? init.body : "" });
-    return Promise.resolve(new Response(null, { status: 200 }));
-  });
+  pings = recordPings();
 });
 
 afterEach(() => {
