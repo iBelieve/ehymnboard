@@ -23,9 +23,10 @@
   // healthchecks.io, so the Cloudflare deploy can't touch the boards' checks.
   // Set "vars": { "HEALTHCHECKS": "on" } when Cloudflare becomes prod.
   "workers_dev": true,
-  // The older version preview URLs don't work with Durable Objects; Worker
-  // Previews (below) replace them.
-  "preview_urls": false,
+  // Gives each Worker Preview (below) a URL,
+  // https://<branch>-hymnboard.sonrise.workers.dev. (Durable Object Workers
+  // get no version preview URLs, so this enables nothing else.)
+  "preview_urls": true,
   // Worker Previews: Workers Builds deploys each non-master branch to its own
   // URL with its own, empty Durable Object. Previews inherit nothing from the
   // settings above, so the binding is repeated here, and with no HEALTHCHECKS
