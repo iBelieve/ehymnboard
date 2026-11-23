@@ -49,7 +49,8 @@ jobs:
       # Installs the pnpm from the root package.json's packageManager and
       # Node.js from .node-version, then only the root's own dev
       # dependencies (Prettier, jscpd, npm-check-updates, and oxlint for the
-      # schema that .oxlintrc.base.json points at), not the packages.
+      # schema that .oxlintrc.base.json points at) and scripts/, which
+      # check-new-deps runs, not the other packages.
       - uses: pnpm/setup@v3
         with:
           install: false
@@ -167,7 +168,8 @@ jobs:
         with:
           name: server-image
           path: ${{ runner.temp }}/server-image.tar
-          retention-days: 1
+          # Long enough to re-run a failed e2e job alone after a weekend.
+          retention-days: 7
           if-no-files-found: error
 
   # --- device/ --------------------------------------------------------------
@@ -476,9 +478,10 @@ jobs:
             e2e/test-results
 
   # The one required status check: passes only if every job above passed.
-  # always() makes it report even when a job failed, or was skipped because a
-  # job it needs failed; a required check that never reports would leave the
-  # pull request waiting instead of failing. Every other job must be listed
+  # !cancelled() makes it report even when a job failed, or was skipped
+  # because a job it needs failed (a required check that never reports would
+  # leave the pull request waiting instead of failing), but not on a run
+  # cancelled because a newer push superseded it. Every other job must be listed
   # under needs; the first step fails if one isn't.
   all-green:
     name: All green
@@ -496,7 +499,7 @@ jobs:
       - device-quality
       - python
       - e2e
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
