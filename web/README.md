@@ -154,14 +154,15 @@ deploys every push to `master` that changes the web app. Its settings (Worker
 | ----------------- | ------------------------------------------------------------------------------------------------------- |
 | Branch            | `master`                                                                                                |
 | Root directory    | `web`                                                                                                   |
-| Build command     | `pnpm run build`                                                                                        |
+| Build command     | `pnpm install --frozen-lockfile --filter ehymnboard-web && pnpm run build`                              |
 | Deploy command    | `pnpm exec wrangler deploy`                                                                             |
 | Build watch paths | `web/*`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.node-version`, `tsconfig.base.json` |
 
-Workers Builds installs the dependencies itself (`pnpm install --frozen-lockfile`
-for the whole workspace, from the root lockfile, with the pnpm from the root
-`package.json`'s `packageManager` and Node from `.node-version`).
-`wrangler deploy` reads the config the Vite build wrote
+The build variable `SKIP_DEPENDENCY_INSTALL=1` turns off Workers Builds' own
+install, which would install the whole workspace; the build command installs
+only `web/`'s dependencies instead, as `Dockerfile` does. Workers Builds takes
+pnpm from the root `package.json`'s `packageManager` and Node from
+`.node-version`. `wrangler deploy` reads the config the Vite build wrote
 (`.wrangler/deploy/config.json` points it at `dist/hymnboard/wrangler.json`),
 so it deploys exactly what was built.
 
