@@ -26,9 +26,20 @@ function screenToDataUrl(buffer: Uint8Array): string {
   return canvas.toDataURL("image/png");
 }
 
-// Where each screen sits on the board, in the drawing's units.
-const SCREEN_Y = [304, 728, 1152];
-const DIVIDER_Y = [500, 924, 1348];
+// Where each screen and divider sits on the board, in the drawing's units.
+// The fractions are the old admin's drawing, kept so the edges anti-alias the
+// same way.
+const SCREENS = [
+  { x: 32.0146, y: 304 },
+  { x: 31.9999, y: 728 },
+  { x: 32.0146, y: 1152 },
+];
+const DIVIDERS = [
+  { x: 16, y: 500.023 },
+  { x: 16.015, y: 924.023 },
+  { x: 16, y: 1348 },
+];
+const DIVIDER_HEIGHT = 15.955;
 
 /** The wooden hymn board with its three screens showing these buffers. */
 export function BoardPreview({ screens }: { screens: (Uint8Array | undefined)[] }) {
@@ -36,8 +47,12 @@ export function BoardPreview({ screens }: { screens: (Uint8Array | undefined)[] 
 
   return (
     <svg
+      // Fills its grid cell and centres the drawing in it, as the old admin's
+      // board did (without a size the SVG hugs the cell's left edge).
+      width="100%"
+      height="100%"
       viewBox="0 0 640 1592"
-      className="z-10 max-h-full py-16 max-lg:px-16"
+      className="z-10 py-16 max-lg:px-16"
       role="img"
       aria-label="Preview of the hymn board"
     >
@@ -46,12 +61,12 @@ export function BoardPreview({ screens }: { screens: (Uint8Array | undefined)[] 
         fill="#855e42"
       />
       <path d={CROSS_PATH} fill="#e8b85f" />
-      {SCREEN_Y.map((y, i) =>
+      {SCREENS.map(({ x, y }, i) =>
         urls[i] ? (
           <image
             key={y}
             href={urls[i]}
-            x={32}
+            x={x}
             y={y}
             width={SCREEN_WIDTH * 0.6}
             height={SCREEN_HEIGHT * 0.6}
@@ -59,7 +74,7 @@ export function BoardPreview({ screens }: { screens: (Uint8Array | undefined)[] 
         ) : (
           <rect
             key={y}
-            x={32}
+            x={x}
             y={y}
             width={SCREEN_WIDTH * 0.6}
             height={SCREEN_HEIGHT * 0.6}
@@ -67,8 +82,8 @@ export function BoardPreview({ screens }: { screens: (Uint8Array | undefined)[] 
           />
         ),
       )}
-      {DIVIDER_Y.map((y) => (
-        <rect key={y} x={16} y={y} width={608} height={16} fill="#855e42" />
+      {DIVIDERS.map(({ x, y }) => (
+        <rect key={y} x={x} y={y} width={608} height={DIVIDER_HEIGHT} fill="#855e42" />
       ))}
     </svg>
   );
