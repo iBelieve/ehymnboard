@@ -50,6 +50,13 @@ export const MIGRATIONS: readonly string[] = [
     image BLOB NOT NULL
   );
   `,
+  // 2: boards on a WebSocket. When the board's socket last opened and closed,
+  // and what its panels show (a JSON array of three etags, from "shown").
+  `
+  ALTER TABLE devices ADD COLUMN connected_at TEXT;
+  ALTER TABLE devices ADD COLUMN disconnected_at TEXT;
+  ALTER TABLE devices ADD COLUMN shown_etags TEXT;
+  `,
 ];
 
 /**

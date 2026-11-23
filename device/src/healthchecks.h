@@ -19,5 +19,3 @@
 #pragma once
 
 void report_device_booted();
-
-void report_device_healthy();

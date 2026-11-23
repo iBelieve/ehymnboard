@@ -128,8 +128,3 @@ void report_device_booted()
 
     send_healthcheck_request("/device_booted", extra_query);
 }
-
-void report_device_healthy()
-{
-    send_healthcheck_request("/device_healthy");
-}

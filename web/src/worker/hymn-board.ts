@@ -3,6 +3,7 @@ import { getFont } from "../shared/font";
 import { renderScreen } from "../shared/render";
 import { EMPTY_LINES, isLines, linesForScreen, SCREEN_COUNT, type Lines } from "../shared/screen";
 import type { Device, DeviceStatusParams, FirmwareInfo } from "../shared/api";
+import { getDeviceName, pingHealthcheck } from "./devices";
 import { migrate } from "./migrations";
 
 // Column names are interpolated into SQL, so only these are accepted.
@@ -15,7 +16,34 @@ const DEVICE_FIELDS = new Set([
   "ota_status",
   "ota_version",
   "ota_at",
+  "connected_at",
+  "shown_etags",
 ]);
+
+// The board protocol over the WebSocket (see device/src/board_messages.h):
+// the server sends "state 1 <etag1> <etag2> <etag3> <firmware or ->" when the
+// socket opens and whenever any of it changes; the board sends "ping" every
+// 30 s (answered with "pong" by the runtime, without waking this object) and
+// "shown <etag1> <etag2> <etag3>" once its panels match a state.
+const STATE_VERSION = 1;
+const PING = "ping";
+const PONG = "pong";
+const NO_FIRMWARE = "-";
+/** Close code for a socket that a newer one from the same board replaced. */
+export const CLOSE_REPLACED = 4000;
+/** Close code for a socket that stopped pinging. */
+export const CLOSE_SILENT = 4001;
+
+/**
+ * A board pings every 30 s, so a socket silent this long is dead (the board
+ * gives up on it after 40 s without a pong). Up to here, it counts as live.
+ */
+export const SOCKET_SILENT_MS = 90_000;
+/** How often the alarm pings healthchecks.io for each live board. */
+export const HEALTH_INTERVAL_MS = 10 * 60_000;
+
+/** What each socket remembers through hibernation. */
+type SocketAttachment = { deviceId: string; connectedAt: number };
 
 // A board that keeps downloading the same image never kept its ETag (say, a
 // header it can't parse), so it redraws every poll. Flag it after this many
@@ -49,6 +77,8 @@ export class HymnBoard extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    // Answered by the runtime, so a board's pings never wake this object.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(PING, PONG));
     // Each instance migrates itself before it handles its first request.
     void ctx.blockConcurrencyWhile(() => {
       try {
@@ -88,6 +118,7 @@ export class HymnBoard extends DurableObject<Env> {
         JSON.stringify(lines),
       );
     });
+    await this.broadcastState();
   }
 
   async getScreen(id: number): Promise<StoredScreen> {
@@ -219,8 +250,31 @@ export class HymnBoard extends DurableObject<Env> {
     }
   }
 
-  getDevices(): Device[] {
-    return this.sql.exec<Device>("SELECT * FROM devices").toArray();
+  /**
+   * Every board the server has heard from, with whether its socket is live.
+   * A live board's last ping counts as seeing it.
+   */
+  getDevices(): (Device & { live: boolean })[] {
+    const seen = new Map<string, number>();
+    for (const ws of this.openSockets()) {
+      const attachment = attachmentOf(ws);
+      const at = this.lastHeardFrom(ws);
+      if (attachment && at !== undefined && Date.now() - at < SOCKET_SILENT_MS) {
+        seen.set(attachment.deviceId, Math.max(at, seen.get(attachment.deviceId) ?? 0));
+      }
+    }
+    return this.sql
+      .exec<Device>("SELECT * FROM devices")
+      .toArray()
+      .map((device) => {
+        const pinged = seen.get(device.id);
+        const stored = device.last_seen ? Date.parse(device.last_seen) : 0;
+        const lastSeen =
+          pinged !== undefined && pinged > stored
+            ? new Date(pinged).toISOString()
+            : device.last_seen;
+        return { ...device, last_seen: lastSeen, live: pinged !== undefined };
+      });
   }
 
   getFirmwareInfo(): FirmwareInfo | null {
@@ -252,7 +306,166 @@ export class HymnBoard extends DurableObject<Env> {
       info.uploaded_at,
       image,
     );
+    await this.broadcastState();
     return info;
+  }
+
+  // -------------------------------------------------------------------------
+  // Board WebSockets (the Hibernation API: the object can be evicted between
+  // messages while the sockets stay open)
+  // -------------------------------------------------------------------------
+
+  /**
+   * A board's upgrade request, already checked by the Worker (a known
+   * device_id and an Upgrade header). Accepts the socket, closes any older
+   * one from the same board, and sends the board its state.
+   */
+  override async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const deviceId = url.searchParams.get("device_id") ?? "";
+    const firmwareVersion = url.searchParams.get("firmware_version") ?? undefined;
+    const writes = url.searchParams.get("saved_state_writes");
+    const now = Date.now();
+
+    for (const old of this.openSockets(deviceId)) {
+      closeQuietly(old, CLOSE_REPLACED, "replaced by a newer socket");
+    }
+
+    const { 0: client, 1: server } = new WebSocketPair();
+    this.ctx.acceptWebSocket(server, [deviceId]);
+    server.serializeAttachment({ deviceId, connectedAt: now } satisfies SocketAttachment);
+
+    const at = new Date(now).toISOString();
+    this.updateDevice(deviceId, {
+      last_seen: at,
+      connected_at: at,
+      firmware_version: firmwareVersion,
+      saved_state_writes: writes !== null && /^\d+$/.test(writes) ? Number(writes) : undefined,
+    });
+    console.log(`Device socket connected: ${getDeviceName(deviceId)} (${deviceId})`);
+    this.ctx.waitUntil(pingHealthcheck(deviceId, "", "Socket connected"));
+
+    server.send(await this.stateMessage());
+    if ((await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(now + HEALTH_INTERVAL_MS);
+    }
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /** The state message every board gets: its screens and the firmware to run. */
+  async stateMessage(): Promise<string> {
+    const screens = await Promise.all(
+      Array.from({ length: SCREEN_COUNT }, (_, i) => this.getScreen(i + 1)),
+    );
+    const firmware = this.getFirmwareInfo()?.version ?? NO_FIRMWARE;
+    return ["state", STATE_VERSION, ...screens.map((screen) => screen.etag), firmware].join(" ");
+  }
+
+  /** Sends the current state to every board's socket. */
+  async broadcastState(): Promise<void> {
+    const sockets = this.openSockets();
+    if (sockets.length === 0) {
+      return;
+    }
+    const message = await this.stateMessage();
+    for (const ws of sockets) {
+      try {
+        ws.send(message);
+      } catch {
+        // Closing; the board gets the state when it reconnects
+      }
+    }
+  }
+
+  override webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
+    const attachment = attachmentOf(ws);
+    if (!attachment || typeof message !== "string") {
+      return;
+    }
+    const at = new Date().toISOString();
+    // Normally answered by the auto-response; here only if it raced the setup
+    if (message === PING) {
+      ws.send(PONG);
+      this.updateDevice(attachment.deviceId, { last_seen: at });
+      return;
+    }
+    const shown = /^shown ([0-9A-Za-z-]+) ([0-9A-Za-z-]+) ([0-9A-Za-z-]+)$/.exec(message);
+    if (shown) {
+      this.updateDevice(attachment.deviceId, {
+        last_seen: at,
+        shown_etags: JSON.stringify(shown.slice(1, 4)),
+      });
+      return;
+    }
+    console.log(`Ignoring message from ${attachment.deviceId}: ${message.slice(0, 80)}`);
+  }
+
+  override webSocketClose(ws: WebSocket, code: number, reason: string): void {
+    // Complete the closing handshake (a no-op if the runtime already did)
+    closeQuietly(ws, code, reason);
+    this.socketGone(ws, `code ${code}${reason ? `, ${reason}` : ""}`);
+  }
+
+  override webSocketError(ws: WebSocket, error: unknown): void {
+    this.socketGone(ws, `error ${String(error)}`);
+  }
+
+  /**
+   * Every 10 minutes while any board is connected: pings healthchecks.io for
+   * each live board (the board itself no longer does), and closes sockets
+   * that stopped pinging.
+   */
+  override async alarm(): Promise<void> {
+    const live = new Set<string>();
+    for (const ws of this.openSockets()) {
+      const attachment = attachmentOf(ws);
+      const at = this.lastHeardFrom(ws);
+      if (!attachment || at === undefined || Date.now() - at >= SOCKET_SILENT_MS) {
+        closeQuietly(ws, CLOSE_SILENT, "no ping");
+        continue;
+      }
+      live.add(attachment.deviceId);
+    }
+    const at = new Date().toISOString();
+    for (const deviceId of live) {
+      this.updateDevice(deviceId, { last_seen: at });
+    }
+    await Promise.all([...live].map((id) => pingHealthcheck(id, "", "Socket live")));
+    if (this.openSockets().length > 0) {
+      await this.ctx.storage.setAlarm(Date.now() + HEALTH_INTERVAL_MS);
+    }
+  }
+
+  /**
+   * The sockets still open. One the server closed (replaced, or silent)
+   * stays listed until its board answers the close, which a board that's
+   * gone never does, so it doesn't count.
+   */
+  private openSockets(tag?: string): WebSocket[] {
+    return this.ctx.getWebSockets(tag).filter((ws) => ws.readyState === WebSocket.OPEN);
+  }
+
+  /** When the board on this socket was last heard from (ms since the epoch). */
+  private lastHeardFrom(ws: WebSocket): number | undefined {
+    const attachment = attachmentOf(ws);
+    if (!attachment) {
+      return undefined;
+    }
+    const pinged = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? 0;
+    return Math.max(pinged, attachment.connectedAt);
+  }
+
+  private socketGone(ws: WebSocket, why: string): void {
+    const attachment = attachmentOf(ws);
+    if (!attachment) {
+      return;
+    }
+    const { deviceId } = attachment;
+    const at = new Date().toISOString();
+    this.sql.exec("UPDATE devices SET disconnected_at = ? WHERE id = ?", at, deviceId);
+    const name = getDeviceName(deviceId);
+    console.log(`Device socket closed (${why}): ${name} (${deviceId})`);
+    this.ctx.waitUntil(pingHealthcheck(deviceId, "/log", `Socket closed (${why})`));
   }
 
   private writeScreen(id: number, { etag, buffer }: StoredScreen): void {
@@ -262,6 +475,35 @@ export class HymnBoard extends DurableObject<Env> {
       etag,
       buffer,
     );
+  }
+}
+
+function attachmentOf(ws: WebSocket): SocketAttachment | undefined {
+  const attachment: unknown = ws.deserializeAttachment();
+  if (
+    typeof attachment === "object" &&
+    attachment !== null &&
+    "deviceId" in attachment &&
+    "connectedAt" in attachment &&
+    typeof attachment.deviceId === "string" &&
+    typeof attachment.connectedAt === "number"
+  ) {
+    return { deviceId: attachment.deviceId, connectedAt: attachment.connectedAt };
+  }
+  return undefined;
+}
+
+/** Closes a socket, ignoring one that's already closed or a code it can't send. */
+function closeQuietly(ws: WebSocket, code: number, reason: string): void {
+  const sendable = code >= 1000 && code < 5000 && ![1004, 1005, 1006, 1015].includes(code);
+  try {
+    if (sendable) {
+      ws.close(code, reason);
+    } else {
+      ws.close();
+    }
+  } catch {
+    // Already closed
   }
 }
 

@@ -20,6 +20,7 @@
 
 #include <cctype>
 #include <cstddef>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -60,13 +61,13 @@ static std::string_view unquote(std::string_view s)
     return s;
 }
 
-static bool is_safe_etag(std::string_view etag)
+bool is_safe_word(std::string_view word, std::size_t max_length)
 {
-    if (etag.empty() || etag.size() > MAX_ETAG_LENGTH)
+    if (word.empty() || word.size() > max_length)
     {
         return false;
     }
-    for (const char c : etag)
+    for (const char c : word)
     {
         if (std::isalnum(static_cast<unsigned char>(c)) == 0 && c != '.' && c != '_' && c != '-')
         {
@@ -76,7 +77,12 @@ static bool is_safe_etag(std::string_view etag)
     return true;
 }
 
-std::string find_etag(std::string_view headers)
+bool is_safe_etag(std::string_view etag)
+{
+    return is_safe_word(etag, MAX_ETAG_LENGTH);
+}
+
+std::optional<std::string_view> find_header(std::string_view headers, std::string_view name)
 {
     constexpr std::string_view crlf = "\r\n";
 
@@ -96,14 +102,42 @@ std::string find_etag(std::string_view headers)
 
         const auto line = headers.substr(line_start, line_end - line_start);
         const auto colon = line.find(':');
-        if (colon != std::string_view::npos && iequals(line.substr(0, colon), "etag"))
+        if (colon != std::string_view::npos && iequals(line.substr(0, colon), name))
         {
-            const auto etag = unquote(trim(line.substr(colon + 1)));
-            return is_safe_etag(etag) ? std::string(etag) : std::string();
+            return trim(line.substr(colon + 1));
         }
 
         line_start = line_end;
     }
 
-    return {};
+    return std::nullopt;
+}
+
+bool header_has_token(std::string_view value, std::string_view token)
+{
+    while (!value.empty())
+    {
+        const auto comma = value.find(',');
+        if (iequals(trim(value.substr(0, comma)), token))
+        {
+            return true;
+        }
+        if (comma == std::string_view::npos)
+        {
+            break;
+        }
+        value.remove_prefix(comma + 1);
+    }
+    return false;
+}
+
+std::string find_etag(std::string_view headers)
+{
+    const auto value = find_header(headers, "etag");
+    if (!value)
+    {
+        return {};
+    }
+    const auto etag = unquote(*value);
+    return is_safe_etag(etag) ? std::string(etag) : std::string();
 }

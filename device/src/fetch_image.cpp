@@ -149,6 +149,14 @@ FetchImageResult fetch_image(int image, std::string &etag)
         }
     }
 
+    // A 304 never has a body, but lwIP's client reports one that carries the
+    // entity's Content-Length (allowed, RFC 9110 section 8.6) as
+    // HTTPC_RESULT_ERR_CONTENT_LEN. It still means "not modified".
+    if (req.status_code == 304 && req.result == HTTPC_RESULT_ERR_CONTENT_LEN)
+    {
+        return FetchImageResult::NO_CHANGE;
+    }
+
     if (req.result != HTTPC_RESULT_OK)
     {
         printf("Fetch image HTTP request failed with error: %d\n", req.result);

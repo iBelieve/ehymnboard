@@ -15,9 +15,15 @@ export type Device = {
   ota_at: string | null;
   /** When the board was flagged for re-downloading a screen it already has. */
   etag_stuck_at: string | null;
+  /** When the board's WebSocket last opened, and last closed. */
+  connected_at: string | null;
+  disconnected_at: string | null;
+  /** What the board said its panels show: a JSON array of three etags. */
+  shown_etags: string | null;
 };
 
-export type DeviceWithName = Device & { name: string };
+/** What the admin shows for a board: its row, plus whether its socket is up now. */
+export type DeviceWithName = Device & { name: string; live: boolean };
 
 /** Query parameters every device request carries. */
 export type DeviceStatusParams = {

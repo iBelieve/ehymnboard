@@ -16,11 +16,18 @@ export default defineConfig({
           cloudflareTest({
             wrangler: { configPath: "./wrangler.jsonc" },
             miniflare: {
-              bindings: { BASIC_AUTH_USERNAME: "admin", BASIC_AUTH_PASSWORD: "secret" },
+              bindings: {
+                BASIC_AUTH_USERNAME: "admin",
+                BASIC_AUTH_PASSWORD: "secret",
+                EXTRA_DEVICE_IDS: "0000000000000000, 1111111111111111",
+              },
             },
           }),
         ],
-        test: { name: "worker", include: ["test/worker.test.ts", "test/migrations.test.ts"] },
+        test: {
+          name: "worker",
+          include: ["test/worker.test.ts", "test/migrations.test.ts", "test/websocket.test.ts"],
+        },
       },
     ],
   },

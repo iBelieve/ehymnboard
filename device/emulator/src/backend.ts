@@ -21,10 +21,17 @@
 // answer back byte for byte, so the firmware parses exactly what that
 // server sends: its status line, header casing, framing and body.
 import net from "node:net";
-import type { HttpRequest, HttpResponse } from "./virtual-net.ts";
+import type { HttpRequest, HttpResponse, VirtualSocket } from "./virtual-net.ts";
 
 /** How long, in real time, a server gets to answer before the board sees a reset. */
 const ANSWER_TIMEOUT_MS = 30_000;
+/**
+ * How long, in real time, the simulated clock waits for a server to answer
+ * what the board sent on a long-lived connection. Most of what a board sends
+ * gets an answer at once (the upgrade, a ping); a message that gets none
+ * holds the clock this long.
+ */
+const STREAM_HOLD_MS = 200;
 
 /**
  * Forwards each request, unchanged (Host header and all), to the server at
@@ -33,13 +40,45 @@ const ANSWER_TIMEOUT_MS = 30_000;
  * it closes, or up to its Content-Length if it keeps the connection open.
  */
 export function forwardTo(baseUrl: string) {
+  const { host, port } = hostAndPort(baseUrl);
+  return (req: HttpRequest) => exchange(host, port, req.raw);
+}
+
+function hostAndPort(baseUrl: string) {
   const url = new URL(baseUrl);
   if (url.protocol !== "http:") {
     throw new Error(`${baseUrl}: the board only speaks plain HTTP`);
   }
-  const host = url.hostname;
-  const port = Number(url.port || 80);
-  return (req: HttpRequest) => exchange(host, port, req.raw);
+  return { host: url.hostname, port: Number(url.port || 80) };
+}
+
+/** Whether a request asks to switch protocols (a WebSocket upgrade). */
+export function isUpgrade(req: HttpRequest) {
+  return /^upgrade:/im.test(req.raw);
+}
+
+/**
+ * For a VirtualNetwork's `tunnel`: pipes each upgrade request's connection,
+ * byte for byte both ways, to the server at `baseUrl` (http only), for as
+ * long as either side keeps it open.
+ */
+export function tunnelTo(baseUrl: string, holdMs = STREAM_HOLD_MS) {
+  const { host, port } = hostAndPort(baseUrl);
+  return (req: HttpRequest) =>
+    isUpgrade(req) ? (board: VirtualSocket) => pipe(board, host, port, holdMs) : undefined;
+}
+
+function pipe(board: VirtualSocket, host: string, port: number, holdMs: number) {
+  board.holdMs = holdMs;
+  const server = net.connect({ host, port });
+  server.setNoDelay(true);
+  board.onData = (data) => server.write(data);
+  board.onEnd = () => server.end();
+  board.onClose = () => server.destroy();
+  server.on("data", (chunk: Buffer) => board.write(new Uint8Array(chunk)));
+  server.on("end", () => board.end());
+  server.on("error", () => board.destroy());
+  server.on("close", (hadError) => (hadError ? board.destroy() : board.end()));
 }
 
 /**

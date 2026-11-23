@@ -11,6 +11,7 @@
     "src/worker",
     "src/shared",
     "test/worker.test.ts",
-    "test/migrations.test.ts"
+    "test/migrations.test.ts",
+    "test/websocket.test.ts"
   ]
 }

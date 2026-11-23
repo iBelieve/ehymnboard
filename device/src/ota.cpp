@@ -478,18 +478,18 @@ void ota_handle_boot()
     }
 }
 
+static bool firmware_committed = false;
+
 // Tells the bootloader this firmware works, so it won't be rolled back. Only
 // writes to flash on the first call after an update.
 static void ota_commit_firmware()
 {
-    static bool committed = false;
-
-    if (committed)
+    if (firmware_committed)
     {
         return;
     }
 
-    committed = true;
+    firmware_committed = true;
 
     if (!pfb_is_after_firmware_update())
     {
@@ -504,6 +504,14 @@ static void ota_commit_firmware()
     {
         save_ota_state("", rejected == FIRMWARE_VERSION ? "" : rejected);
     }
+}
+
+// Newly installed firmware that hasn't proven itself yet: it mustn't install
+// another update over itself, since then a broken build could never be rolled
+// back
+static bool awaiting_commit()
+{
+    return !firmware_committed && pfb_is_after_firmware_update();
 }
 
 // Asks the server for a firmware update and installs it if there is one
@@ -567,24 +575,34 @@ static void ota_check_for_update()
     pfb_perform_update();
 }
 
-void ota_loop(bool any_success)
+void ota_loop(bool live, const std::string &offered_version)
 {
-    constexpr int64_t CHECK_INTERVAL_US = 10LL * 60 * 1000 * 1000;
+    constexpr int64_t CHECK_INTERVAL_US = 60LL * 60 * 1000 * 1000;
     static std::optional<absolute_time_t> last_check;
+    // The last version a state message offered, so each offer is checked once
+    static std::string last_offer;
 
-    if (!any_success)
+    if (live)
+    {
+        // A live socket proves a newly installed firmware works; until it's
+        // committed, any reboot rolls it back
+        ota_commit_firmware();
+    }
+
+    if (awaiting_commit())
     {
         return;
     }
 
-    // Reaching the server proves a newly installed firmware works; until it's
-    // committed, any reboot rolls it back
-    ota_commit_firmware();
+    const bool new_offer = live && !offered_version.empty() && offered_version != FIRMWARE_VERSION &&
+                           offered_version != last_offer && offered_version != flash_saved_state->rejected_version();
+    if (new_offer)
+    {
+        last_offer = offered_version;
+    }
 
-    // Checks on the first loop that reaches the server, and from then on
-    // whenever one does after the interval
     const auto now = get_absolute_time();
-    if (!last_check || absolute_time_diff_us(*last_check, now) >= CHECK_INTERVAL_US)
+    if (new_offer || !last_check || absolute_time_diff_us(*last_check, now) >= CHECK_INTERVAL_US)
     {
         last_check = now;
         ota_check_for_update();

@@ -16,6 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include "board_link.h"
+#include "board_messages.h"
 #include "fetch_image.h"
 #include "firmware_version.h"
 #include "healthchecks.h"
@@ -25,17 +27,27 @@
 #include "pico/cyw43_arch.h"
 #include "pico/stdlib.h"
 #include "pico/unique_id.h"
+#include "request_path.h"
 #include "state.h"
 #include "utils.h"
 #include "waveshare.h"
 #include "wifi.h"
+#include "ws_connection.h"
 #include <array>
-#include <iostream>
 #include <stdio.h>
 
-// Refresh a single screen. On transient HTTP failures we just log and bail out
-// for this iteration — the next loop will retry. The main loop tracks a "no
-// success in too long" timeout to reset us if the network stays broken.
+// How long to wait before retrying screens whose download failed
+static constexpr uint64_t FETCH_RETRY_MS = 15'000;
+// How often the main loop runs
+static constexpr uint32_t LOOP_MS = 100;
+
+static uint64_t now_ms()
+{
+    return to_ms_since_boot(get_absolute_time());
+}
+
+// Downloads one screen's image and draws it if it changed. On transient HTTP
+// failures we just log and bail out; the caller retries later.
 static FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag)
 {
     long_watchdog_update();
@@ -56,10 +68,109 @@ static FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std:
     }
     else
     {
-        printf("Refreshing screen %d failed (ret=%d), will retry on next loop\n", screen_id, (int)ret);
+        printf("Refreshing screen %d failed (ret=%d), will retry\n", screen_id, (int)ret);
     }
 
     return ret;
+}
+
+namespace
+{
+
+// The three panels, what they show, and what the server wants them to show
+struct Screens
+{
+    std::array<Waveshare13K *, SCREEN_COUNT> panels{};
+    // The etag of the image on each panel (saved in flash)
+    ScreenEtags shown;
+    // The etag the server's last state message asked for
+    ScreenEtags wanted;
+    // When to retry after a failed download
+    uint64_t retry_at_ms = 0;
+};
+
+} // namespace
+
+// Downloads and draws every screen that doesn't show what the server wants.
+// Returns true if any panel changed.
+static bool update_screens(Screens &screens)
+{
+    bool any_updated = false;
+    bool any_failed = false;
+
+    for (std::size_t i = 0; i < SCREEN_COUNT; i++)
+    {
+        if (screens.shown.at(i) == screens.wanted.at(i))
+        {
+            continue;
+        }
+        const auto ret = refresh_screen(static_cast<int>(i + 1), *screens.panels.at(i), screens.shown.at(i));
+        if (ret == FetchImageResult::NEW_IMAGE)
+        {
+            any_updated = true;
+        }
+        else if (ret == FetchImageResult::NO_CHANGE)
+        {
+            // Already current: the state message was older than the image
+            screens.wanted.at(i) = screens.shown.at(i);
+        }
+        else
+        {
+            any_failed = true;
+        }
+    }
+
+    if (any_failed)
+    {
+        screens.retry_at_ms = now_ms() + FETCH_RETRY_MS;
+    }
+
+    if (any_updated)
+    {
+        printf("One or more screens updated, saving state...\n");
+        printf("- Screen 1 Etag: %s\n", screens.shown[0].c_str());
+        printf("- Screen 2 Etag: %s\n", screens.shown[1].c_str());
+        printf("- Screen 3 Etag: %s\n", screens.shown[2].c_str());
+
+        SavedState new_state(flash_saved_state, screens.shown[0], screens.shown[1], screens.shown[2]);
+        new_state.save();
+
+        printf("State saved to flash, %d total writes.\n", new_state.write_count);
+    }
+
+    return any_updated;
+}
+
+// Carries out what the connection policy asks for
+static void act(ConnectionPolicy &policy, BoardLink &link, uint64_t now)
+{
+    switch (policy.poll(now))
+    {
+    case ConnectionPolicy::Action::CONNECT: {
+        printf("WS: connecting...\n");
+        const auto path = build_request_path("/ws", current_device_status()) + "&proto=1";
+        if (!link.client().connect(SERVER_HOST, SERVER_PORT, path))
+        {
+            policy.on_closed(now);
+        }
+        break;
+    }
+    case ConnectionPolicy::Action::SEND_PING:
+        link.client().send_text(PING_MESSAGE);
+        break;
+    case ConnectionPolicy::Action::ABORT:
+        printf("WS: socket is dead, dropping it\n");
+        link.client().abort();
+        policy.on_closed(now);
+        printf("WS: retrying in %llums\n", policy.retry_at() - now);
+        break;
+    case ConnectionPolicy::Action::REBOOT:
+        printf("No live socket for >3 minutes, rebooting to recover\n");
+        reset_pico();
+        break;
+    case ConnectionPolicy::Action::NONE:
+        break;
+    }
 }
 
 // Shown by `picotool info`
@@ -120,7 +231,6 @@ int main()
                          7, // Reset pin
                          8  // Busy pin
     );
-    std::string etag1 = flash_saved_state->etag1;
 
     Waveshare13K screen2(spi,
                          2,  // Screen ID
@@ -130,7 +240,6 @@ int main()
                          12, // Reset pin
                          13  // Busy pin
     );
-    std::string etag2 = flash_saved_state->etag2;
 
     Waveshare13K screen3(spi,
                          3,  // Screen ID
@@ -140,70 +249,65 @@ int main()
                          21, // Reset pin
                          22  // Busy pin
     );
-    std::string etag3 = flash_saved_state->etag3;
 
-    printf("Screen 1 Etag: %s\n", etag1.c_str());
-    printf("Screen 2 Etag: %s\n", etag2.c_str());
-    printf("Screen 3 Etag: %s\n", etag3.c_str());
+    Screens screens;
+    screens.panels = {&screen1, &screen2, &screen3};
+    screens.shown = {flash_saved_state->etag1, flash_saved_state->etag2, flash_saved_state->etag3};
+    screens.wanted = screens.shown;
 
-    // If every screen fetch fails for this long, give up and reboot to start
-    // fresh. Picks up cleanly from a borked WiFi/DNS state without rebooting
-    // on transient blips.
-    constexpr int64_t NO_SUCCESS_REBOOT_TIMEOUT_US = 3LL * 60 * 1000 * 1000;
+    printf("Screen 1 Etag: %s\n", screens.shown[0].c_str());
+    printf("Screen 2 Etag: %s\n", screens.shown[1].c_str());
+    printf("Screen 3 Etag: %s\n", screens.shown[2].c_str());
 
-    uint32_t loop_count = 0;
-    const auto start_time = get_absolute_time();
-    auto last_success_time = start_time;
+    // The server pushes the board's state over a WebSocket; images still come
+    // over plain HTTP (fetch_image), only when one changes
+    BoardLink link;
+    ConnectionPolicy policy(jitter_seed_for(unique_board_id), now_ms());
+    std::string offered_version;
 
     while (true)
     {
-        loop_count++;
-        const auto uptime_s = absolute_time_diff_us(start_time, get_absolute_time()) / 1000000;
-        printf("Refreshing screens (loop=%lu, uptime=%llds)...\n", (unsigned long)loop_count, uptime_s);
+        long_watchdog_update();
+        const auto now = now_ms();
 
-        const auto r1 = refresh_screen(1, screen1, etag1);
-        const auto r2 = refresh_screen(2, screen2, etag2);
-        const auto r3 = refresh_screen(3, screen3, etag3);
-
-        const bool any_updated = (r1 == FetchImageResult::NEW_IMAGE) || (r2 == FetchImageResult::NEW_IMAGE) ||
-                                 (r3 == FetchImageResult::NEW_IMAGE);
-        const bool any_success =
-            (r1 != FetchImageResult::ERROR) || (r2 != FetchImageResult::ERROR) || (r3 != FetchImageResult::ERROR);
-
-        if (any_updated)
+        const auto events = link.take_events();
+        if (events.state)
         {
-            printf("One or more screens updated, saving state...\n");
-            printf("- Screen 1 Etag: %s\n", etag1.c_str());
-            printf("- Screen 2 Etag: %s\n", etag2.c_str());
-            printf("- Screen 3 Etag: %s\n", etag3.c_str());
-
-            SavedState new_state(flash_saved_state, etag1, etag2, etag3);
-            new_state.save();
-
-            printf("State saved to flash, %d total writes.\n", new_state.write_count);
-        }
-
-        if (any_success)
-        {
-            last_success_time = get_absolute_time();
-        }
-        else
-        {
-            const auto since_success_s = absolute_time_diff_us(last_success_time, get_absolute_time()) / 1000000;
-            printf("WARNING: no successful fetch for %llds\n", since_success_s);
-
-            if (absolute_time_diff_us(last_success_time, get_absolute_time()) > NO_SUCCESS_REBOOT_TIMEOUT_US)
+            if (policy.state() == ConnectionPolicy::State::CONNECTING)
             {
-                printf("All fetches have failed for >3 minutes, rebooting to recover\n");
-                reset_pico();
+                printf("WS: live\n");
+                policy.on_live(now);
+            }
+            screens.wanted = events.state->etags;
+            screens.retry_at_ms = now;
+            offered_version = events.state->firmware_version;
+
+            // Let the server know what the panels show, if they're current
+            if (screens.wanted == screens.shown)
+            {
+                link.client().send_text(format_shown_message(screens.shown));
             }
         }
+        if (events.pong)
+        {
+            policy.on_pong();
+        }
+        if (events.closed)
+        {
+            policy.on_closed(now);
+            printf("WS: socket closed, retrying in %llums\n", policy.retry_at() - now);
+        }
 
-        report_device_healthy();
+        act(policy, link, now);
 
-        ota_loop(any_success);
+        const bool live = policy.state() == ConnectionPolicy::State::LIVE;
+        if (live && screens.wanted != screens.shown && now >= screens.retry_at_ms && update_screens(screens))
+        {
+            link.client().send_text(format_shown_message(screens.shown));
+        }
 
-        printf("Sleeping for 15 seconds...\n");
-        sleep_ms(15000);
+        ota_loop(live, offered_version);
+
+        sleep_ms(LOOP_MS);
     }
 }

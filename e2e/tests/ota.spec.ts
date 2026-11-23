@@ -18,7 +18,8 @@
 
 // A release goes out over the air: it's uploaded to the server the way a
 // release is published (POST /firmware, as in device/README.md), a board
-// running the previous release sees it, downloads it, installs it through
+// running the previous release is told about it over its WebSocket, downloads
+// it, installs it through
 // the bootloader, reboots into it and commits it, and the admin page shows
 // the board on the new version.
 import { OtaBuild } from "../../device/emulator/src/ota-image.ts";
@@ -38,7 +39,7 @@ test("a published release is installed over the air and reported", async ({
 
   // On the current release, the board stays put and shows the hymns.
   await board.untilSerial(`OTA: firmware is up to date (${build.version})`);
-  await board.nextLoop();
+  await board.nextUpdate();
   await expect(await admin.boardStatus(board.id)).toContainText(`firmware ${build.version}`);
   const shown = board.emu.displays.length;
   expect(shown).toBe(3);
@@ -48,27 +49,26 @@ test("a published release is installed over the air and reported", async ({
   await admin.open();
   await expect(admin.page.getByText(`Latest firmware ${NEXT}`)).toBeVisible();
 
-  // The board finds it at its next check (every 10 minutes), downloads and
+  // The server pushes the new version to the board at once; it downloads and
   // verifies it, and the bootloader swaps it in.
-  await board.untilSerial(`OTA: updating from ${build.version} to ${NEXT}`, 11 * 60_000);
+  await board.untilSerial(`OTA: updating from ${build.version} to ${NEXT}`, 30_000);
   await board.untilSerial("OTA: downloaded and verified", 180_000);
   await board.untilSerial("[BOOTLOADER] Swapping images...", 60_000);
   await board.untilSerial(`Firmware version: ${NEXT}`, 60_000);
   await board.untilSerial("OTA: running newly installed firmware", 30_000);
-  // Once it has reached the server on the new release, it commits it.
+  // Once its socket is live on the new release, it commits it.
   await board.untilSerial("OTA: firmware is healthy, committing", 120_000);
   await board.untilSerial(`OTA: firmware is up to date (${NEXT})`, 120_000);
   expect(board.emu.reboots, "one reboot, into the new release").toBe(1);
 
   // The admin shows the board on the new release...
   await expect(await admin.boardStatus(board.id)).toContainText(`firmware ${NEXT}`);
-  // ...and the update kept its saved screens: 304s, nothing redrawn.
-  const after = await board.nextLoop();
-  expect(after.images.map((i) => i.status)).toEqual([304, 304, 304]);
+  // ...and the update kept its saved screens: nothing downloaded or redrawn.
+  const after = await board.quiet(60_000);
+  expect(after.images).toEqual([]);
   expect(board.emu.displays.length).toBe(shown);
 
   // It stays on the new release: no second download.
-  await board.nextLoop();
   const downloads = board.emu.net.requests.filter((r) => r.path === "/firmware/image");
   expect(downloads.map((r) => [r.query.target_version, r.status])).toEqual([[NEXT, 200]]);
 });

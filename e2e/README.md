@@ -10,10 +10,10 @@ held to the same tests as the server it replaces: if it behaves the same,
 the tests pass unchanged. CI (`.github/workflows/ci-e2e.yml`) runs them
 against the server's Docker image.
 
-| Test file       | Covers                                                                                                                                                                                                                                                   |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hymns.spec.ts` | Lines typed on the admin page reach the right screen and band, each change is downloaded and drawn once, the next loops get 304s (no refetch loop), the admin's board picture matches the panels pixel for pixel, Clear, and a power cut keeps the ETags |
-| `ota.spec.ts`   | A release published with `POST /firmware` is found, downloaded, installed through the bootloader, committed and reported on the admin page, with the screens kept                                                                                        |
+| Test file       | Covers                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hymns.spec.ts` | Lines typed on the admin page are pushed to the board within a second and reach the right screen and band, each change is downloaded and drawn once and only for the screens it touches, no downloads in between (no polling), the admin's board picture matches the panels pixel for pixel, Clear, a power cut keeps the ETags, and a board cut off from the server catches up when it's back (Live and Offline on the admin page) |
+| `ota.spec.ts`   | A release published with `POST /firmware` is pushed to the board, downloaded, installed through the bootloader, committed and reported on the admin page, with the screens kept                                                                                                                                                                                                                                                     |
 
 ## How it fits together
 
@@ -23,9 +23,12 @@ to the real server over TCP and passes the answer back unchanged. The
 firmware parses that server's exact status line, header casing and framing
 (lwIP's HTTP client doesn't decode chunked bodies, for one, so a server must
 send a `Content-Length`).
-While the server answers, the simulated clock stops, so a slow server never
-looks slow to the firmware, and the board's 15 second sleeps and 10 minute
-update checks take no real time. Each test boots a fresh board with blank
+The board's WebSocket goes to the server the same way, as a byte stream
+both ways for as long as it stays open. While the server answers, the
+simulated clock stops, so a slow server never looks slow to the firmware,
+and the board's idle time between pings takes no real time. The emulated
+board's ID is all zeros, so the server must accept it on `/ws` with
+`EXTRA_DEVICE_IDS=0000000000000000`. Each test boots a fresh board with blank
 flash. The board's serial output, its requests and a PNG of every frame its
 panels showed are attached to the report.
 
@@ -52,7 +55,8 @@ in `web/` (both listen on port 8000):
 
 ```sh
 docker build -t hymnboard web && docker run --rm -p 8000:8000 \
-  -e BASIC_AUTH_USERNAME=e2e -e BASIC_AUTH_PASSWORD=e2e-password hymnboard
+  -e BASIC_AUTH_USERNAME=e2e -e BASIC_AUTH_PASSWORD=e2e-password \
+  -e EXTRA_DEVICE_IDS=0000000000000000 hymnboard
 ```
 
 The tests change the server's lines and published firmware, so don't point

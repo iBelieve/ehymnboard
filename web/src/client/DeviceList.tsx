@@ -37,6 +37,24 @@ export function DeviceList({
       {devices.map((device) => (
         <div key={device.id} className="flex items-center gap-2 text-lg">
           {device.name} ({describe(device, now)})
+          {device.live ? (
+            <span className="badge badge-success" title="Connected: gets new lines at once">
+              Live
+            </span>
+          ) : (
+            device.connected_at && (
+              <span
+                className="badge badge-ghost"
+                title={
+                  device.disconnected_at
+                    ? `Disconnected ${prettyDate(device.disconnected_at, now)}`
+                    : "Not connected"
+                }
+              >
+                Offline
+              </span>
+            )
+          )}
           {device.etag_stuck_at && (
             <span className="badge badge-warning">
               Re-downloading every poll since {prettyDate(device.etag_stuck_at, now)}

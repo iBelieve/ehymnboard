@@ -40,6 +40,7 @@ ${wrangler.durable_objects.bindings
   .join("\n")}
     (name = "BASIC_AUTH_USERNAME", fromEnvironment = "BASIC_AUTH_USERNAME"),
     (name = "BASIC_AUTH_PASSWORD", fromEnvironment = "BASIC_AUTH_PASSWORD"),
+    (name = "EXTRA_DEVICE_IDS", fromEnvironment = "EXTRA_DEVICE_IDS"),
   ],
   durableObjectNamespaces = [
 ${classes.map((name) => `    (className = ${JSON.stringify(name)}, uniqueKey = "ehymnboard-${name}", enableSql = true),`).join("\n")}

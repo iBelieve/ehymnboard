@@ -68,6 +68,37 @@ picotool load -x build/ehymnboard.uf2
 
 The first boot starts with fresh saved state, so the screens redraw once. After this, `picotool load -x build/ehymnboard.uf2` (in BOOTSEL mode) still works for flashing over USB.
 
+### Talking to the server
+
+The board keeps a WebSocket open to the server (`ws://api.hymnboard.sonrise.io/ws`,
+plain HTTP on port 80 like everything else it fetches) and the server pushes
+it what to show; it doesn't poll. Images still come from `GET /images/N`, only
+when one changes. The client is our own, on lwIP's raw TCP API
+(`src/ws_client.cpp`), over host-tested framing and handshake code
+(`ws_frame`, `ws_handshake`) that passes the Autobahn test suite (see
+[emulator/autobahn/README.md](emulator/autobahn/README.md)).
+
+The messages are short text (`src/board_messages.h`):
+
+| From   | Message                                     | Meaning                                                                                      |
+| ------ | ------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| server | `state 1 <etag1> <etag2> <etag3> <version>` | What each screen should show and the firmware to run (`-` for none). Sent on connect and on every change |
+| board  | `ping`                                      | Every 30 s. The server answers `pong` (on Cloudflare, without waking the Durable Object)    |
+| board  | `shown <etag1> <etag2> <etag3>`             | What the panels show now (`-` for a screen never drawn)                                      |
+
+The upgrade request carries the same query string as every other request
+(`device_id`, `saved_state_writes`, `watchdog_caused_reboot`,
+`firmware_version`) plus `proto=1`. The server only takes known board IDs
+(403 otherwise) and keeps one socket per board, closing an older one with code
+4000.
+
+When the socket fails (no `pong` within 10 s, no `state` within 30 s of
+connecting, or the server closes it), the board retries after 1 s, doubling to
+at most 60 s, each with ±50% jitter. After 3 minutes without a live socket it
+reboots, which also rolls back a new firmware that never got one (see below).
+It still checks `GET /firmware/latest` at boot and hourly, so a server whose
+socket is broken can ship a fix.
+
 #### Releasing an update
 
 Build, then upload the encrypted image and its version:
@@ -79,7 +110,7 @@ curl -u "$BASIC_AUTH_USERNAME:$BASIC_AUTH_PASSWORD" \
   https://api.hymnboard.sonrise.io/firmware
 ```
 
-Every board running a different version installs it, including boards with a newer build flashed over USB. The devices page shows each board's firmware version and any rollback.
+Every board running a different version installs it, including boards with a newer build flashed over USB: the server pushes the new version to each connected board at once. A new firmware commits itself on the first `state` message it gets over its socket; one that reboots before that is rolled back. The devices page shows each board's firmware version and any rollback.
 
 Notes:
 
@@ -91,8 +122,9 @@ Notes:
 ### Tests
 
 The hardware-independent parts of the firmware (HTTP header parsing, request
-paths, saved state) are unit and property tested on your computer, no Pico
-needed. Builds with the host compiler under AddressSanitizer and
+paths, saved state, WebSocket framing and handshake, the board messages and
+the connection's retry and ping policy) are unit and property tested on your
+computer, no Pico needed. Builds with the host compiler under AddressSanitizer and
 UndefinedBehaviorSanitizer:
 
 ```sh

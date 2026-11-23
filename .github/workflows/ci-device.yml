@@ -55,10 +55,12 @@ jobs:
         with:
           name: firmware
           # The OTA image, its version and the bootloader are for the
-          # emulator's OTA tests.
+          # emulator's OTA tests; ehymnboard_autobahn for the Autobahn job.
           path: |
             device/build/ehymnboard.uf2
             device/build/ehymnboard.elf
+            device/build/ehymnboard_autobahn.uf2
+            device/build/ehymnboard_autobahn.elf
             device/build/ehymnboard_fota_image_encrypted.bin
             device/build/firmware_version.txt
             device/build/lib/pico_fota_bootloader/pico_fota_bootloader.uf2
@@ -109,7 +111,8 @@ jobs:
       - name: Check CRAP scores
         run: >
           uv run python ../tools/crap.py --coverage build-test/coverage.xml
-          src/http_headers.cpp src/request_path.cpp src/saved_state.cpp
+          src/board_messages.cpp src/http_headers.cpp src/request_path.cpp
+          src/saved_state.cpp src/ws_connection.cpp src/ws_frame.cpp src/ws_handshake.cpp
 
   # Boots the built firmware in rp2040js with a fake WiFi chip, access point,
   # LAN and server (device/emulator), and runs the scenario tests against it.
@@ -152,6 +155,57 @@ jobs:
       - name: Run scenario tests
         if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm test
+
+  # The firmware's WebSocket client against the Autobahn test suite's
+  # fuzzingserver (sections 1-7), running in the emulator as the
+  # ehymnboard_autobahn build. See device/emulator/autobahn/README.md.
+  autobahn:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: device/emulator
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: firmware
+          path: device/build
+
+      - id: setup
+        uses: pnpm/setup@v3
+        with:
+          working-directory: device/emulator
+          cache: true
+          require-lockfile: true
+
+      - name: Start the fuzzingserver
+        run: |
+          mkdir -p autobahn/reports
+          docker run -d --name autobahn -p 9001:80 \
+            -v "$PWD/autobahn/fuzzingserver.json:/config/fuzzingserver.json:ro" \
+            -v "$PWD/autobahn/reports:/reports" \
+            crossbario/autobahn-testsuite@sha256:519915fb568b04c9383f70a1c405ae3ff44ab9e35835b085239c258b6fac3074 \
+            wstest -m fuzzingserver -s /config/fuzzingserver.json
+          # It answers 400 unless the Host header names the port it listens on
+          for _ in $(seq 60); do
+            curl -fsS -o /dev/null -H "Host: 127.0.0.1:80" http://127.0.0.1:9001/ && exit 0
+            sleep 1
+          done
+          docker logs autobahn
+          exit 1
+
+      - name: Run the suite
+        run: node autobahn/run.ts
+
+      - name: Upload report
+        if: success() || failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: autobahn-report
+          path: device/emulator/autobahn/reports
 
   # Complexity and copy-paste limits across the firmware.
   quality:

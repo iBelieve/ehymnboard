@@ -20,7 +20,9 @@
 // that answers ARP, hands out 10.0.0.2 over DHCP, resolves DNS names and
 // serves HTTP on port 80 from a JavaScript handler. Its TCP is just enough for
 // lwIP as a client over a lossless link, with a go-back-N resend in case lwIP
-// drops a segment for lack of buffers.
+// drops a segment for lack of buffers. A connection can also be handed over
+// whole, as a byte stream both ways, to a tunnel handler: that's how
+// WebSockets (and anything else that outlives one request) are served.
 
 const ETH_ARP = 0x0806;
 const ETH_IPV4 = 0x0800;
@@ -115,7 +117,39 @@ export interface NetworkOptions {
    * wait for a real server.
    */
   http: (req: HttpRequest) => HttpResponse | Promise<HttpResponse> | undefined;
+  /**
+   * Takes over a connection once its request head is in, if it returns a
+   * handler: the handler gets a socket that first receives every byte the
+   * board sent (the head included), and answers with raw bytes. `http` then
+   * never sees the request.
+   */
+  tunnel?: (req: HttpRequest) => ((socket: VirtualSocket) => void) | undefined;
   log?: (msg: string) => void;
+}
+
+/**
+ * The router's end of a tunnelled connection. Bytes written go to the board in
+ * order; nothing is sent after `end`.
+ */
+export interface VirtualSocket {
+  write(data: Uint8Array): void;
+  /** Sends a FIN once everything written so far is sent. */
+  end(): void;
+  /** Sends a reset at once. */
+  destroy(): void;
+  /** Bytes from the board, in order. */
+  onData: ((data: Uint8Array) => void) | null;
+  /** The board sent a FIN. */
+  onEnd: (() => void) | null;
+  /** The connection is gone: both sides closed, either reset, or the link dropped. */
+  onClose: (() => void) | null;
+  /**
+   * Stop the simulated clock after each delivery until this socket answers
+   * (or ends), or `holdMs` of real time passes: for a real server, so the
+   * firmware never sees it as slow.
+   */
+  holdMs: number;
+  readonly closed: boolean;
 }
 
 /** One TCP connection from the client to the router's port 80. */
@@ -128,12 +162,122 @@ interface Connection {
   sndNxt: number;
   rcvNxt: number;
   peerWnd: number;
+  /** The request so far, one character per byte. */
   request: string;
   out: Uint8Array | null; // response bytes once known
+  /** The sequence number of out[0]: acknowledged bytes are dropped from a tunnel's out. */
+  outBase: number;
   finSent: boolean;
+  peerFin: boolean;
   closed: boolean;
   stalled: boolean;
   lastProgress: number;
+  resendScheduled: boolean;
+  tunnel: Tunnel | null;
+}
+
+/** Bytes as a string of one character per byte, so lengths and offsets match. */
+const latin1 = (bytes: Bytes) => {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    out += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return out;
+};
+const fromLatin1 = (text: string) => Uint8Array.from(text, (ch) => ch.charCodeAt(0));
+
+function concat(a: Bytes, b: Bytes) {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a);
+  out.set(b, a.length);
+  return out;
+}
+
+/** The socket a tunnel handler drives, tied to its TCP connection. */
+class Tunnel implements VirtualSocket {
+  onData: ((data: Uint8Array) => void) | null = null;
+  onEnd: (() => void) | null = null;
+  onClose: (() => void) | null = null;
+  holdMs = 0;
+  ended = false;
+  closed = false;
+  readonly #net: VirtualNetwork;
+  readonly #c: Connection;
+  readonly #served: Served;
+  #release: (() => void) | null = null;
+
+  constructor(net: VirtualNetwork, c: Connection, served: Served) {
+    this.#net = net;
+    this.#c = c;
+    this.#served = served;
+  }
+
+  write(data: Uint8Array) {
+    this.#released();
+    if (this.ended || this.closed || data.length === 0) {
+      return;
+    }
+    // The status line, for `requests`
+    this.#served.status ??= statusOf(data);
+    this.#net.tunnelWrite(this.#c, data);
+  }
+
+  end() {
+    this.#released();
+    if (this.ended || this.closed) {
+      return;
+    }
+    this.ended = true;
+    this.#net.tunnelWrite(this.#c, new Uint8Array(0));
+  }
+
+  destroy() {
+    this.#released();
+    if (!this.closed) {
+      this.#net.tunnelReset(this.#c);
+    }
+  }
+
+  /** Bytes from the board. */
+  deliver(data: Bytes) {
+    if (this.closed) {
+      return;
+    }
+    this.onData?.(data);
+    this.#hold();
+  }
+
+  peerEnded() {
+    this.onEnd?.();
+  }
+
+  gone() {
+    if (this.closed) {
+      return;
+    }
+    this.closed = true;
+    this.#released();
+    this.onClose?.();
+  }
+
+  #hold() {
+    if (this.holdMs <= 0 || this.#release || this.closed) {
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const held = new Promise<void>((resolve) => {
+      this.#release = resolve;
+      timer = setTimeout(resolve, this.holdMs);
+    }).then(() => {
+      clearTimeout(timer);
+      this.#release = null;
+    });
+    this.#net.hold(held);
+  }
+
+  #released() {
+    this.#release?.();
+  }
 }
 
 export class VirtualNetwork {
@@ -147,6 +291,7 @@ export class VirtualNetwork {
   ipId = 1;
   /** Every HTTP request received, with the status it got (none if it got no answer). */
   requests: Served[] = [];
+  readonly tunnel: NetworkOptions["tunnel"];
   readonly #pending = new Set<Promise<void>>();
 
   constructor(opts: NetworkOptions) {
@@ -154,6 +299,7 @@ export class VirtualNetwork {
     this.send = opts.send;
     this.dns = opts.dns;
     this.http = opts.http;
+    this.tunnel = opts.tunnel;
     this.log = opts.log ?? ((msg) => console.log(`[net] ${msg}`));
   }
 
@@ -169,9 +315,40 @@ export class VirtualNetwork {
     }
   }
 
+  /** How many tunnelled connections are open. */
+  get tunnels() {
+    let open = 0;
+    for (const c of this.connections.values()) {
+      if (c.tunnel && !c.tunnel.closed) {
+        open++;
+      }
+    }
+    return open;
+  }
+
+  /** Counts `held` as pending until it settles. */
+  hold(held: Promise<void>) {
+    const done = held.then(() => {
+      this.#pending.delete(done);
+    });
+    this.#pending.add(done);
+  }
+
   /** Forgets all TCP connections, as a router reboot or a link drop would. */
   reset() {
+    const gone = [...this.connections.values()];
     this.connections.clear();
+    for (const c of gone) {
+      c.closed = true;
+      c.tunnel?.gone();
+    }
+  }
+
+  /** Removes a connection that both sides have finished with, or that was reset. */
+  #forget(c: Connection) {
+    this.connections.delete(c.key);
+    c.closed = true;
+    c.tunnel?.gone();
   }
 
   receive(frame: Bytes) {
@@ -415,10 +592,14 @@ export class VirtualNetwork {
         peerWnd: window,
         request: "",
         out: null, // response bytes once known
+        outBase: 1001,
         finSent: false,
+        peerFin: false,
         closed: false,
         stalled: false,
         lastProgress: 0,
+        resendScheduled: false,
+        tunnel: null,
       };
       this.connections.set(key, c);
       this.sendTcpRaw(src, 80, srcPort, c.iss, c.rcvNxt, TCP_SYN | TCP_ACK, MSS);
@@ -431,30 +612,90 @@ export class VirtualNetwork {
       return;
     }
     if (flags & TCP_RST) {
-      this.connections.delete(key);
+      this.#forget(c);
       return;
     }
     if (flags & TCP_ACK && ((ack - c.sndUna) | 0) > 0) {
       c.sndUna = ack;
       c.lastProgress++;
+      this.#trim(c);
     }
     c.peerWnd = window;
 
     if (data.length > 0 || flags & TCP_FIN) {
-      if (seq === c.rcvNxt) {
+      const inOrder = seq === c.rcvNxt;
+      if (inOrder) {
         c.rcvNxt = (c.rcvNxt + data.length + (flags & TCP_FIN ? 1 : 0)) >>> 0;
-        c.request += new TextDecoder().decode(data);
       }
       this.sendSegment(c, c.sndNxt, new Uint8Array(0), TCP_ACK);
+      if (inOrder) {
+        if (c.tunnel) {
+          if (data.length > 0) {
+            c.tunnel.deliver(data);
+          }
+        } else {
+          c.request += latin1(data);
+        }
+      }
+      if (inOrder && flags & TCP_FIN) {
+        c.peerFin = true;
+        c.tunnel?.peerEnded();
+      }
       if (flags & TCP_FIN && c.finSent) {
-        this.connections.delete(key);
+        this.#forget(c);
         return;
       }
+    }
+    if (c.peerFin && c.finSent && c.sndUna === c.sndNxt) {
+      this.#forget(c);
+      return;
     }
     if (!c.out && c.request.includes("\r\n\r\n")) {
       this.respond(c);
     }
     this.pump(c);
+  }
+
+  /** Drops a tunnel's acknowledged bytes. */
+  #trim(c: Connection) {
+    if (!c.tunnel || !c.out) {
+      return;
+    }
+    const acked = Math.min((c.sndUna - c.outBase) | 0, c.out.length);
+    if (acked > 0) {
+      c.out = c.out.subarray(acked);
+      c.outBase = (c.outBase + acked) >>> 0;
+    }
+  }
+
+  /** Hands a connection to a tunnel handler, with everything received so far. */
+  #startTunnel(c: Connection, served: Served, handler: (socket: VirtualSocket) => void) {
+    const tunnel = new Tunnel(this, c, served);
+    const received = fromLatin1(c.request);
+    c.request = "";
+    c.out = new Uint8Array(0);
+    c.tunnel = tunnel;
+    const target = served.raw.split(" ")[1] ?? served.path;
+    this.log(`HTTP ${served.method} ${target} -> tunnel`);
+    handler(tunnel);
+    tunnel.deliver(received);
+  }
+
+  /** Queues a tunnel's bytes for the board (none, to send a pending FIN). */
+  tunnelWrite(c: Connection, data: Bytes) {
+    if (c.closed || this.connections.get(c.key) !== c) {
+      return;
+    }
+    c.out = c.out ? concat(c.out, data) : data;
+    this.pump(c);
+    this.scheduleResend(c);
+  }
+
+  tunnelReset(c: Connection) {
+    if (this.connections.get(c.key) === c) {
+      this.sendSegment(c, c.sndNxt, new Uint8Array(0), TCP_RST | TCP_ACK);
+    }
+    this.#forget(c);
   }
 
   respond(c: Connection) {
@@ -467,6 +708,11 @@ export class VirtualNetwork {
     const req = { method, path, query, host: hostLine ? hostLine.slice(5).trim() : "", raw: head };
     const served: Served = { ...req, status: undefined };
     this.requests.push(served);
+    const handler = this.tunnel?.(req);
+    if (handler) {
+      this.#startTunnel(c, served, handler);
+      return;
+    }
     const res = this.http(req) ?? {};
     if (!(res instanceof Promise)) {
       this.answer(c, served, res);
@@ -503,8 +749,7 @@ export class VirtualNetwork {
 
     if (res.reset) {
       this.sendSegment(c, c.sndNxt, new Uint8Array(0), TCP_RST | TCP_ACK);
-      this.connections.delete(c.key);
-      c.closed = true;
+      this.#forget(c);
       return;
     }
     if (res.stall) {
@@ -540,7 +785,7 @@ export class VirtualNetwork {
     if (!c.out || c.closed || c.stalled) {
       return;
     }
-    const base = c.iss + 1;
+    const base = c.outBase;
     const end = base + c.out.length;
     while (((end - c.sndNxt) | 0) > 0) {
       const inFlight = (c.sndNxt - c.sndUna) | 0;
@@ -553,7 +798,7 @@ export class VirtualNetwork {
       this.sendSegment(c, c.sndNxt, c.out.subarray(offset, offset + len), TCP_ACK | TCP_PSH);
       c.sndNxt = (c.sndNxt + len) >>> 0;
     }
-    if (!c.finSent) {
+    if (!c.finSent && (!c.tunnel || c.tunnel.ended)) {
       c.finSent = true;
       this.sendSegment(c, c.sndNxt, new Uint8Array(0), TCP_FIN | TCP_ACK);
       c.sndNxt = (c.sndNxt + 1) >>> 0;
@@ -561,20 +806,27 @@ export class VirtualNetwork {
   }
 
   scheduleResend(c: Connection) {
+    if (c.resendScheduled) {
+      return;
+    }
+    c.resendScheduled = true;
     const progress = c.lastProgress;
     this.after(RESEND_MS, () => {
+      c.resendScheduled = false;
       if (c.closed || !this.connections.has(c.key) || c.stalled) {
         return;
       }
       if (c.sndUna !== c.sndNxt && c.lastProgress === progress) {
         // Nothing acknowledged since last time: go back and resend.
         c.sndNxt = c.sndUna;
-        if (((c.sndNxt - (c.iss + 1 + (c.out?.length ?? 0))) | 0) <= 0) {
+        if (((c.sndNxt - (c.outBase + (c.out?.length ?? 0))) | 0) <= 0) {
           c.finSent = false;
         }
         this.pump(c);
       }
-      if (c.sndUna !== c.sndNxt || !c.finSent) {
+      // A tunnel's FIN waits for its end()
+      const finDue = !c.finSent && (!c.tunnel || c.tunnel.ended);
+      if (c.sndUna !== c.sndNxt || finDue) {
         this.scheduleResend(c);
       }
     });

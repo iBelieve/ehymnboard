@@ -38,9 +38,12 @@ inline std::string ota_boot_version;
 // Records what the bootloader did on this boot. Call early in main().
 void ota_handle_boot();
 
-// Called at the end of each main loop iteration. Once the screens have
-// reached the server, tells the bootloader that newly installed firmware
-// works, and on the first such loop and then every 10 minutes asks the server
-// for an update. If there is one, downloads, verifies and installs it, and
-// doesn't return (the board reboots into the bootloader).
-void ota_loop(bool any_success);
+// Called on every main loop iteration. Once the board's WebSocket is live
+// (`live`), tells the bootloader that newly installed firmware works. Asks the
+// server for an update over HTTP on the first call (once the firmware is
+// committed), then hourly, and right away when the server's state message
+// offers a different version (`offered_version`). The hourly check doesn't
+// need the socket, so firmware with a broken socket can still be replaced. If
+// there's an update, downloads, verifies and installs it, and doesn't return
+// (the board reboots into the bootloader).
+void ota_loop(bool live, const std::string &offered_version);

@@ -18,10 +18,28 @@ to Cloudflare later with `wrangler deploy` and a DNS change.
 | `selfhost/`   | workerd config generator and a tiny static-assets Worker that stands in for Workers Static Assets            |
 | `test/`       | Rasterizer tests against Flask's output (`fixtures/flask/`) and endpoint tests in the Workers runtime        |
 
-The device protocol is unchanged from the Flask server: `GET /images/{1,2,3}`
-returns the raw 81,600-byte buffer with a bare SHA-1 `ETag` (or 304 for a
-matching `?etag=`), plus `/device_booted`, `/device_healthy`, `/ok`, and the
+The device protocol keeps the Flask server's endpoints byte for byte:
+`GET /images/{1,2,3}` returns the raw 81,600-byte buffer with a bare SHA-1
+`ETag` (or 304 for a matching `?etag=`), plus `/device_booted`,
+`/device_healthy` (for firmware from before the WebSocket), `/ok`, and the
 OTA endpoints `/firmware/latest` and `/firmware/image`.
+
+Boards also keep a WebSocket open at `GET /ws` (the messages are in
+[device/README.md](../device/README.md#talking-to-the-server)), so the
+server pushes each change instead of the boards polling. The `HymnBoard`
+Durable Object accepts the sockets with the Hibernation API, tagged by board,
+so on Cloudflare it can be evicted between changes while the sockets stay
+open: the runtime answers the boards' `ping` with `pong` itself
+(`setWebSocketAutoResponse`), and each socket's board ID is in its
+attachment. Applying lines or uploading firmware sends every board the new
+`state`. Only the boards in `src/worker/devices.ts` may connect (403
+otherwise), plus any in `EXTRA_DEVICE_IDS` (comma separated, for the e2e
+tests' emulated board; leave it unset in production). While any board is
+connected, an alarm every 10 minutes pings each live board's
+healthchecks.io check (the boards no longer call `/device_healthy`) and
+closes sockets that stopped pinging. A socket opening and closing is logged
+to the board's check too, and the admin shows each board as Live or
+Offline.
 
 ## Development
 
@@ -56,7 +74,10 @@ git push "dokku@dev.sonrise.io:$APP" master
 ```
 
 The image listens on `$PORT`, or 8000 when it isn't set (as with `docker run`
-and `pnpm dev`). Dokku sets `PORT` (5000 unless the app says otherwise) and
+and `pnpm dev`). Dokku's nginx passes WebSocket upgrades through, and the
+boards ping every 30 s, well inside nginx's default 60 s `proxy_read_timeout`;
+workerd keeps the sockets in memory, so a redeploy drops them and the boards
+reconnect within a few seconds. Dokku sets `PORT` (5000 unless the app says otherwise) and
 proxies port 80 to it, so there's no `ports:set` step. If
 `dokku ports:report "$APP"` shows a mapping from earlier, its container port
 must match `PORT`.
@@ -69,6 +90,17 @@ then `dokku ps:start "$APP"`.
 The boards need firmware with the case-insensitive header parsing from PR #16
 (both run it since 688965a): workerd always writes the header as `ETag`, and
 older firmware only matched `Etag: `.
+
+### Rolling out the WebSocket
+
+Deploy the server first: firmware from before the WebSocket keeps polling and
+calling `/device_healthy`, which still work. Then publish the new firmware
+(see [device/README.md](../device/README.md#releasing-an-update)); the old
+firmware finds it within 10 minutes. Each board commits it once its socket
+gets its first `state`, and shows Live on the admin page. From then on, don't
+roll the server back to a build without `/ws`: the boards would never get a
+live socket and would reboot every 3 minutes (their screens stay as they
+are) until it's back.
 
 ### Rolling out alongside the Flask app
 
@@ -121,5 +153,9 @@ git push dokku@dev.sonrise.io:hymnboard 02ece7f:refs/heads/master   # its deploy
 
 `pnpm build && pnpm exec wrangler deploy`, then point
 `api.hymnboard.sonrise.io` at the Worker. The boards speak plain HTTP on port
-80, so turn off **Always Use HTTPS** and HSTS for that hostname. Keep the ETag
+80, WebSocket included (`ws://`), so turn off **Always Use HTTPS** and HSTS
+for that hostname, and keep the zone's **WebSockets** setting on. On
+Cloudflare the boards' sockets hibernate, so the Durable Object only runs for
+a change, a `shown` message, a socket opening or closing, and the 10 minute
+alarm. Keep the ETag
 unquoted: the firmware stores the header value as is.
