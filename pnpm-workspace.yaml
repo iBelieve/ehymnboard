@@ -9,7 +9,7 @@ packages:
 catalog:
   "@types/node": ^26.6.6
   oxlint: 1.94.0
-  tsrs: 7.1.0-beta.tsrs3
+  tsrs: 7.1.0-beta.tsrs4
   typescript: 7.0.2
 
 # pnpm 12 refuses to install a dependency release younger than this many
