@@ -69,6 +69,11 @@ dokku builder:set "$APP" selected dockerfile
 dokku builder-dockerfile:set "$APP" dockerfile-path web/Dockerfile
 ```
 
+Rolling back to an image built before this (`dokku git:from-image`, or a
+commit from before the workspace) needs the old settings back first: clear
+`dockerfile-path` (`dokku builder-dockerfile:set "$APP" dockerfile-path`)
+and set `build-dir` to the directory that commit builds from.
+
 The image listens on `$PORT`, or 8000 when it isn't set (as with `docker run`
 and `pnpm dev`). Dokku sets `PORT` (5000 unless the app says otherwise) and
 proxies port 80 to it, so there's no `ports:set` step. If
