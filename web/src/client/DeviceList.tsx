@@ -38,9 +38,7 @@ export function DeviceList({
     <div className="mb-4 text-white max-lg:mb-8 lg:mt-4">
       {devices.map((device) => (
         <div key={device.id} className="flex items-center gap-2 text-lg">
-          {/* One text node, as the old admin had: separate React text nodes
-              shape and anti-alias slightly differently. */}
-          {`${device.name} (${describe(device, now)})`}
+          {device.name} ({describe(device, now)})
           {device.etag_stuck_at && (
             <span className="badge badge-warning">
               Re-downloading every poll since {prettyDate(device.etag_stuck_at, now)}
@@ -50,7 +48,7 @@ export function DeviceList({
       ))}
       {firmware && (
         <div className="mt-1 text-sm opacity-75">
-          {`Latest firmware ${firmware.version} (uploaded ${prettyDate(firmware.uploaded_at, now)})`}
+          Latest firmware {firmware.version} (uploaded {prettyDate(firmware.uploaded_at, now)})
         </div>
       )}
     </div>

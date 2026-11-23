@@ -26,20 +26,9 @@ function screenToDataUrl(buffer: Uint8Array): string {
   return canvas.toDataURL("image/png");
 }
 
-// Where each screen and divider sits on the board, in the drawing's units.
-// The fractions are the old admin's drawing, kept so the edges anti-alias the
-// same way.
-const SCREENS = [
-  { x: 32.0146, y: 304 },
-  { x: 31.9999, y: 728 },
-  { x: 32.0146, y: 1152 },
-];
-const DIVIDERS = [
-  { x: 16, y: 500.023 },
-  { x: 16.015, y: 924.023 },
-  { x: 16, y: 1348 },
-];
-const DIVIDER_HEIGHT = 15.955;
+// Where each screen sits on the board, in the drawing's units.
+const SCREEN_Y = [304, 728, 1152];
+const DIVIDER_Y = [500, 924, 1348];
 
 /** The wooden hymn board with its three screens showing these buffers. */
 export function BoardPreview({ screens }: { screens: (Uint8Array | undefined)[] }) {
@@ -61,12 +50,12 @@ export function BoardPreview({ screens }: { screens: (Uint8Array | undefined)[] 
         fill="#855e42"
       />
       <path d={CROSS_PATH} fill="#e8b85f" />
-      {SCREENS.map(({ x, y }, i) =>
+      {SCREEN_Y.map((y, i) =>
         urls[i] ? (
           <image
             key={y}
             href={urls[i]}
-            x={x}
+            x={32}
             y={y}
             width={SCREEN_WIDTH * 0.6}
             height={SCREEN_HEIGHT * 0.6}
@@ -74,7 +63,7 @@ export function BoardPreview({ screens }: { screens: (Uint8Array | undefined)[] 
         ) : (
           <rect
             key={y}
-            x={x}
+            x={32}
             y={y}
             width={SCREEN_WIDTH * 0.6}
             height={SCREEN_HEIGHT * 0.6}
@@ -82,8 +71,8 @@ export function BoardPreview({ screens }: { screens: (Uint8Array | undefined)[] 
           />
         ),
       )}
-      {DIVIDERS.map(({ x, y }) => (
-        <rect key={y} x={x} y={y} width={608} height={DIVIDER_HEIGHT} fill="#855e42" />
+      {DIVIDER_Y.map((y) => (
+        <rect key={y} x={16} y={y} width={608} height={16} fill="#855e42" />
       ))}
     </svg>
   );
