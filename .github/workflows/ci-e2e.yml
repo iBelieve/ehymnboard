@@ -3,8 +3,8 @@ name: CI (e2e)
 # Full-stack end-to-end tests (e2e/): the firmware built here runs in the
 # emulator and talks to the server's (web/) Docker image over its real HTTP,
 # while Playwright drives the server's admin page. To test a replacement
-# server, point SERVER_DIR and SERVER_PORT at it and add its directory to the
-# paths below; the tests themselves shouldn't need to change.
+# server, point SERVER_DIR, SERVER_CONTEXT and SERVER_PORT at it and add its
+# directory to the paths below; the tests themselves shouldn't need to change.
 
 on:
   push:
@@ -44,7 +44,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
+  # The server's directory (its Dockerfile is there) and its Docker build
+  # context: web/ builds from the root, where the pnpm workspace's lockfile is.
+  # A server that builds from its own directory sets both to it.
   SERVER_DIR: web
+  SERVER_CONTEXT: .
   # The image listens on $PORT. 5000 is what dokku gives it in production.
   SERVER_PORT: "5000"
 
@@ -115,8 +119,7 @@ jobs:
       - name: Build server image
         uses: docker/build-push-action@v7
         with:
-          # Built from the root, where the workspace's lockfile is.
-          context: .
+          context: ${{ env.SERVER_CONTEXT }}
           file: ${{ env.SERVER_DIR }}/Dockerfile
           push: false
           load: true

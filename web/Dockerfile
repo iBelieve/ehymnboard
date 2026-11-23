@@ -12,7 +12,8 @@ COPY --link package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY --link web/package.json web/
 
 # Install the pnpm version pinned in the root package.json's packageManager
-# field, then only web/'s dependencies.
+# field, then web/'s dependencies. pnpm also installs the root's own dev tools
+# (Prettier, jscpd, oxlint); they stay in this build stage, not the image.
 RUN npm install -g "$(node -p 'require("./package.json").packageManager')" \
     && pnpm install --frozen-lockfile --filter ehymnboard-web
 

@@ -110,7 +110,7 @@ All checks below must pass; run them locally before committing.
 Full-stack tests: the firmware in the emulator talks to a running server's
 real HTTP while Playwright drives its admin page (only through the page; no
 server internals). CI runs them against the server's Docker image
-(`SERVER_DIR`/`SERVER_PORT` in `ci-e2e.yml`). Same TypeScript conventions as
+(`SERVER_DIR`/`SERVER_CONTEXT`/`SERVER_PORT` in `ci-e2e.yml`). Same TypeScript conventions as
 the emulator.
 
 - Needs the firmware build. The tests import the emulator's source by

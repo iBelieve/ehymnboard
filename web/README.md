@@ -46,7 +46,7 @@ commands on the host, or from a machine on the tailnet as
 `ssh dokku@dev.sonrise.io dokku …`.
 
 ```sh
-APP=hymnboard   # the production app; any name for a new one
+APP=hymnboard-next   # any name for a new app; production is hymnboard
 dokku apps:create "$APP"
 # Build web/Dockerfile from the repository root, where the pnpm workspace's
 # lockfile is (the root .dockerignore sends only what web/ needs).
@@ -59,8 +59,9 @@ git push "dokku@dev.sonrise.io:$APP" master
 ```
 
 An app set up before the pnpm workspace builds from `web/` alone
-(`build-dir web`), which no longer has a lockfile. `hymnboard` is one: switch
-it over before deploying a commit with the workspace:
+(`build-dir web`), which no longer has a lockfile. The production app,
+`hymnboard`, is one: switch it over before deploying a commit with the
+workspace:
 
 ```sh
 dokku builder:set "$APP" build-dir   # clear it: build from the repository root
