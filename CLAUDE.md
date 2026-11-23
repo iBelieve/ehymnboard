@@ -18,7 +18,9 @@ server's Docker image once (`server-image`); the emulator, Autobahn and e2e
 jobs download them as artifacts. The `All green` job passes only if every
 other job did and is the one required status check, so a new job needs no
 branch protection change, only a line in its `needs` (a step there fails if a
-job is missing). `check-pico-sdk.yml` is a separate weekly job.
+job is missing). `check-pico-sdk.yml` is a separate weekly job, and
+`check-tls-roots.yml` a daily one (the live server's certificate chain
+against the roots the boards trust; it also runs when they change).
 Firmware builds in CI go through `.github/actions/build-firmware`, which pins
 the Pico SDK and Arm toolchain. **The device build treats all compiler
 warnings as errors in CI** (`-Wall -Wextra` plus `-DWERROR=ON`), so fix
