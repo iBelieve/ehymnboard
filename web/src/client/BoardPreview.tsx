@@ -36,8 +36,12 @@ export function BoardPreview({ screens }: { screens: (Uint8Array | undefined)[] 
 
   return (
     <svg
+      // Fills its grid cell and centres the drawing in it, as the old admin's
+      // board did (without a size the SVG hugs the cell's left edge).
+      width="100%"
+      height="100%"
       viewBox="0 0 640 1592"
-      className="z-10 max-h-full py-16 max-lg:px-16"
+      className="z-10 py-16 max-lg:px-16"
       role="img"
       aria-label="Preview of the hymn board"
     >

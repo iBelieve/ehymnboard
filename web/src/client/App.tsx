@@ -131,53 +131,59 @@ export function App() {
         {state && <DeviceList devices={state.devices} firmware={state.firmware} />}
 
         <div className="flex flex-grow flex-col items-center justify-center">
-          <div className="overflow-hidden rounded-2xl border-8 border-transparent bg-white/40 shadow-lg">
-            <form
-              className="mx-auto flex max-w-sm flex-col gap-4 bg-white p-4"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (draft) void save(draft);
-              }}
-            >
-              {(draft ?? EMPTY_LINES).map((line, i) => (
-                <input
-                  key={i}
-                  type="text"
-                  className="input input-xl input-bordered text-center"
-                  aria-label={`Line ${i + 1}`}
-                  value={line}
-                  disabled={!draft}
-                  maxLength={100}
-                  data-1p-ignore
-                  onChange={(e) => setDraft((prev) => prev && withLine(prev, i, e.target.value))}
-                />
-              ))}
+          {/* Relative so the unsaved-changes note can sit under the card
+              without taking up space: the layout matches the old admin's. */}
+          <div className="relative">
+            <div className="overflow-hidden rounded-2xl border-8 border-transparent bg-white/40 shadow-lg">
+              <form
+                className="mx-auto flex max-w-sm flex-col gap-4 bg-white p-4"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (draft) void save(draft);
+                }}
+              >
+                {(draft ?? EMPTY_LINES).map((line, i) => (
+                  <input
+                    key={i}
+                    type="text"
+                    className="input input-xl input-bordered text-center"
+                    aria-label={`Line ${i + 1}`}
+                    value={line}
+                    disabled={!draft}
+                    maxLength={100}
+                    data-1p-ignore
+                    onChange={(e) => setDraft((prev) => prev && withLine(prev, i, e.target.value))}
+                  />
+                ))}
 
-              {(error ?? loadError) && (
-                <div className="text-error text-sm">{error ?? loadError}</div>
-              )}
+                {(error ?? loadError) && (
+                  <div className="text-error text-sm">{error ?? loadError}</div>
+                )}
 
-              <div className="mt-4 flex gap-4">
-                <button
-                  className="btn btn-primary btn-lg flex-grow"
-                  type="submit"
-                  disabled={!draft || saving}
-                >
-                  Apply
-                </button>
-                <button
-                  className="btn btn-soft btn-error btn-lg flex-grow"
-                  type="button"
-                  disabled={!draft || saving}
-                  onClick={() => void save([...EMPTY_LINES])}
-                >
-                  Clear
-                </button>
-              </div>
-              <div className={`text-center text-sm opacity-60 ${dirty ? "" : "invisible"}`}>
+                <div className="mt-4 flex gap-4">
+                  <button
+                    className="btn btn-primary btn-lg flex-grow"
+                    type="submit"
+                    disabled={!draft || saving}
+                  >
+                    Apply
+                  </button>
+                  <button
+                    className="btn btn-soft btn-error btn-lg flex-grow"
+                    type="button"
+                    disabled={!draft || saving}
+                    onClick={() => void save([...EMPTY_LINES])}
+                  >
+                    Clear
+                  </button>
+                </div>
+              </form>
+            </div>
+            {dirty && (
+              <div className="absolute inset-x-0 top-full mt-2 text-center text-sm text-white opacity-75">
                 Previewing unsaved changes
               </div>
-            </form>
+            )}
           </div>
         </div>
       </div>

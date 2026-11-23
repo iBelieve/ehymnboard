@@ -4,7 +4,9 @@ import { prettyDate } from "./prettyDate";
 
 function describe(device: DeviceWithName, now: Date): string {
   const parts = [];
-  if (device.last_seen) parts.push(`last seen ${prettyDate(device.last_seen, now)}`);
+  // Always present, like the old admin's line (whose template failed outright
+  // on a board that had never been seen).
+  parts.push(`last seen ${device.last_seen ? prettyDate(device.last_seen, now) : "never"}`);
   if (device.last_updated_at) parts.push(`last updated ${prettyDate(device.last_updated_at, now)}`);
   if (device.booted_at) parts.push(`booted ${prettyDate(device.booted_at, now)}`);
   if (device.firmware_version) parts.push(`firmware ${device.firmware_version}`);
