@@ -87,7 +87,7 @@ the emulator.
 - Needs the firmware build and `pnpm install` in `device/emulator` (the tests
   import it)
 - `pnpm install`, `pnpm exec playwright install chromium`, then with a server
-  running: `E2E_BASE_URL=http://localhost:5000 E2E_USERNAME=… E2E_PASSWORD=… pnpm test`
+  running: `E2E_BASE_URL=http://localhost:8000 E2E_USERNAME=… E2E_PASSWORD=… pnpm test`
 - `pnpm run typecheck`, `pnpm run lint`, `pnpm run format:check`
 - The selectors are what a person sees, so a rewritten admin page passes
   unchanged if it keeps the six text boxes, Apply/Clear buttons,

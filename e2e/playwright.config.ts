@@ -35,7 +35,7 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:5000",
+    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:8000",
     httpCredentials: username && password ? { username, password, send: "always" } : undefined,
     trace: "retain-on-failure",
     launchOptions: executablePath ? { executablePath } : {},

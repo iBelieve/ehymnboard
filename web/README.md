@@ -27,7 +27,7 @@ OTA endpoints `/firmware/latest` and `/firmware/image`.
 
 ```sh
 pnpm install
-pnpm dev          # Vite + the Worker in workerd, with hot reload, on :5000
+pnpm dev          # Vite + the Worker in workerd, with hot reload, on :8000
 pnpm test         # rasterizer + Worker tests
 pnpm typecheck && pnpm lint && pnpm format:check  # tsc 7, oxlint (type-aware via tsrs), Prettier
 pnpm build        # dist/client (admin) and dist/ehymnboard (Worker)
@@ -52,9 +52,14 @@ dokku builder:set "$APP" build-dir web
 dokku storage:ensure-directory "$APP"
 dokku storage:mount "$APP" "/var/lib/dokku/data/storage/$APP:/data"
 dokku config:set "$APP" BASIC_AUTH_USERNAME=... BASIC_AUTH_PASSWORD=...
-dokku ports:set "$APP" http:80:5000
 git push "dokku@dev.sonrise.io:$APP" master
 ```
+
+The image listens on `$PORT`, or 8000 when it isn't set (as with `docker run`
+and `pnpm dev`). Dokku sets `PORT` (5000 unless the app says otherwise) and
+proxies port 80 to it, so there's no `ports:set` step. If
+`dokku ports:report "$APP"` shows a mapping from earlier, its container port
+must match `PORT`.
 
 The Durable Object's SQLite database lives in
 `/var/lib/dokku/data/storage/$APP/ehymnboard-HymnBoard/` on the host. To start
