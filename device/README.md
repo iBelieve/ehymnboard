@@ -52,7 +52,7 @@ Boards update themselves over the air using [pico_fota_bootloader](https://githu
 | Download slot | 1000 KB |
 | Reserved (last sector: `SavedState`) | 8 KB |
 
-About every 10 minutes a board asks the server (`/firmware/latest`) whether it should run a different firmware version. If so, it downloads the image into the download slot, checks its SHA-256, and reboots. The bootloader then swaps the two slots (about 30 seconds) and starts the new firmware. Once the new firmware successfully talks to the server, it commits itself; if it reboots before that (crash, watchdog, or no network for 3 minutes), the bootloader swaps the old firmware back and the board won't retry that version.
+Whenever the server pushes a new version, and hourly besides, a board asks the server (`/firmware/latest`) whether it should run a different firmware version. If so, it downloads the image into the download slot, checks its SHA-256, and reboots. The bootloader then swaps the two slots (about 30 seconds) and starts the new firmware. Once the new firmware successfully talks to the server, it commits itself; if it reboots before that (crash, watchdog, or no network for 3 minutes), the bootloader swaps the old firmware back and the board won't retry that version.
 
 The firmware version is the short commit hash (plus `-dirty` and a timestamp for uncommitted changes), so commit before building a release.
 
@@ -96,8 +96,16 @@ When the socket fails (no `pong` within 10 s, no `state` within 30 s of
 connecting, or the server closes it), the board retries after 1 s, doubling to
 at most 60 s, each with ±50% jitter. After 3 minutes without a live socket it
 reboots, which also rolls back a new firmware that never got one (see below).
-It still checks `GET /firmware/latest` at boot and hourly, so a server whose
-socket is broken can ship a fix.
+It still checks `GET /firmware/latest` at boot and hourly (5 minutes after a
+check that failed), so a server whose socket is broken can ship a fix.
+
+A failed image download is retried 15 s later; downloads that keep failing for
+3 minutes reboot the board, even with the socket up. Between screens the board
+keeps servicing its socket, so a slow update doesn't stop its pings.
+
+lwIP and its callbacks run in a low-priority interrupt, and both they and the
+main loop allocate, so `malloc_lock.cpp` turns interrupts off while newlib's
+malloc or free runs.
 
 #### Releasing an update
 
