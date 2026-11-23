@@ -12,7 +12,7 @@ rooted at the repository root (see "pnpm workspace" below).
 
 GitHub Actions runs on any change to `device/**` or `web/**`
 (`.github/workflows/ci-device.yml`, `ci-web.yml`); the device workflow also
-runs on changes to `tools/` (the CRAP checker) and `.jscpd.json`. The
+runs on changes to `tools/` (the CRAP checker). The
 full-stack e2e tests (`ci-e2e.yml`) run on any change to `device/`, `web/` or
 `e2e/`, against `web/`'s Docker image. The workspace's root files
 (`package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.node-version` and
@@ -21,6 +21,8 @@ Firmware builds in CI go through `.github/actions/build-firmware`, which pins
 the Pico SDK and Arm toolchain. **The device build treats all compiler
 warnings as errors in CI** (`-Wall -Wextra` plus `-DWERROR=ON`), so fix
 warnings before pushing even if a local build only prints them.
+`ci-repo.yml` runs on every change: Prettier and the copy-paste check, both
+repository-wide.
 
 All checks below must pass; run them locally before committing.
 
@@ -42,14 +44,15 @@ All checks below must pass; run them locally before committing.
 - From the root, `pnpm run typecheck` and `pnpm run lint` run every
   package's checks (each package lints with its own tsconfig)
 
-### Formatting
+### Repository-wide: formatting and duplicate code
 
 - Prettier runs once, from the root, over the whole repository:
-  `pnpm run format` (or `format:check`, as `ci-format.yml` runs on every
-  push). That covers Markdown, YAML (workflows, `.clang-tidy`) and JSON as
+  `pnpm run format` (or `format:check`, as `ci-repo.yml` runs). That covers Markdown, YAML (workflows, `.clang-tidy`) and JSON as
   well as the TypeScript. `.prettierignore` lists what's left out: generated
   files, the submodule, vendored code and `device/.vscode/` (the Pico
   extension writes it). C++ is clang-format's and Python ruff's (`device/`)
+- Duplicate code: `pnpm run dupes` (jscpd over `device/`, `tools/`, `web/`
+  and `e2e/`, config in `.jscpd.json`, zero tolerance)
 
 ### device/
 
@@ -74,8 +77,6 @@ All checks below must pass; run them locally before committing.
   then `uv run python ../tools/crap.py --coverage build-test/coverage.xml <host-tested src files>`
 - Complexity: `uv run lizard --CCN 15 --length 150 --arguments 7 --warnings_only src test`
   and `uv run lizard --CCN 10 --length 80 --arguments 7 --warnings_only ../tools`
-- Duplicate code: `npx jscpd@5.4.3 device tools` from the repo root (config in
-  `.jscpd.json`, zero tolerance)
 - Python: deps managed by uv (`uv add --dev`, never hand-edit pins; CI runs
   `uv lock --check`); `uv run ruff check . ../tools`,
   `uv run ruff format --check . ../tools`, `uv run vulture` and

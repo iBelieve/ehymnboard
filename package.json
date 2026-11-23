@@ -6,10 +6,13 @@
     "typecheck": "pnpm -r run typecheck",
     "lint": "pnpm -r run lint",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "dupes": "jscpd device tools web e2e"
   },
   "packageManager": "pnpm@12.21.0",
   "devDependencies": {
+    "jscpd": "5.4.3",
+    "oxlint": "catalog:",
     "prettier": "catalog:"
   }
 }

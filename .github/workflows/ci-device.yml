@@ -6,7 +6,6 @@ on:
     paths:
       - "device/**"
       - "tools/**"
-      - ".jscpd.json"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -19,7 +18,6 @@ on:
     paths:
       - "device/**"
       - "tools/**"
-      - ".jscpd.json"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
@@ -161,7 +159,8 @@ jobs:
         if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm test
 
-  # Complexity and copy-paste limits across the firmware.
+  # Complexity limits across the firmware and tools/ (copy-paste is checked
+  # repository-wide in ci-repo.yml).
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -177,15 +176,6 @@ jobs:
       - name: Check tools complexity
         if: success() || failure()
         run: uv run lizard --CCN 10 --length 80 --arguments 7 --warnings_only ../tools
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: lts/*
-
-      - name: Check for duplicate code
-        if: success() || failure()
-        working-directory: .
-        run: npx --yes jscpd@5.4.3 device tools
 
   python:
     runs-on: ubuntu-latest

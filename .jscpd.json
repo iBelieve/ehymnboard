@@ -13,7 +13,11 @@
     "**/pnpm-lock.yaml",
     "**/static/**",
     "**/*.svg",
-    "device/lib/**"
+    "device/lib/**",
+    "web/dist/**",
+    "**/.wrangler/**",
+    "web/test/fixtures/**",
+    "web/worker-configuration.d.ts"
   ],
   "absolute": false
 }
