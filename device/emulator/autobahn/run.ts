@@ -47,8 +47,10 @@ const firmware = positionals[0] ?? path.join(HERE, "..", "..", "build", "ehymnbo
 const emu = new Emulator({
   firmware,
   hosts: ["autobahn.test"],
-  // Every connection the board makes is a WebSocket to the fuzzingserver
-  tunnel: tunnelTo(values.server),
+  // Every connection the board makes is a WebSocket to the fuzzingserver.
+  // It checks the Host header's port against its own URL's (80), not the
+  // published one, so the board's own Host goes through.
+  tunnel: tunnelTo(values.server, "autobahn.test"),
   quiet: true,
 });
 let lastProgress = Date.now();
