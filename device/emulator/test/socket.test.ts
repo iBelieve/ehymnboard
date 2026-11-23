@@ -94,8 +94,10 @@ test("drops a socket whose server stopped answering pings, and reconnects", () =
 test("a socket that never gets its state is given up on after 30 s", () => {
   const emu = boot();
   emu.server.sendStateOnOpen = false;
-  const at = emu.waitForSerial("WS: connected, waiting for the board state", 30_000);
+  // The 30 s cover the whole connection, the TLS handshake included
+  const connecting = emu.waitForSerial("WS: connecting...", 30_000);
   const opened = emu.simMs;
+  const at = emu.waitForSerial("WS: connected, waiting for the board state", 10_000, connecting);
   const dead = emu.waitForSerial("WS: socket is dead, dropping it", 40_000, at);
   assert.ok(emu.simMs - opened >= 29_000, `gave up after ${(emu.simMs - opened).toFixed(0)} ms`);
 

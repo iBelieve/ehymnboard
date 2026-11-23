@@ -19,7 +19,7 @@ apply: the board's messages are short text, and it doesn't offer
 permessage-deflate.
 
 ```sh
-# from device/, after building (the ehymnboard_autobahn target is part of the build)
+# from device/, after building with -DEHYMNBOARD_TEST_ROOT_CA=ON (the ehymnboard_autobahn target is part of the build)
 docker run -d --rm --name autobahn -p 9001:80 \
   -v "$PWD/emulator/autobahn/fuzzingserver.json:/config/fuzzingserver.json:ro" \
   -v "$PWD/emulator/autobahn/reports:/reports" \
@@ -29,8 +29,13 @@ cd emulator && node autobahn/run.ts
 docker stop autobahn
 ```
 
+The board connects to `wss://autobahn.test` (port 443), like the real
+firmware: the emulator's router ends the TLS with the test certificate for
+that name, as Cloudflare would, and passes the plain bytes on, so the build
+must trust the test root CA (`-DEHYMNBOARD_TEST_ROOT_CA=ON`, as CI builds it).
 The fuzzingserver listens on port 80 inside the container because it checks
-the `Host` header's port, and the board connects to `autobahn.test` on port 80.
+the `Host` header's port: the board's `Host` names none (443 is wss's
+default), which plain `ws://` reads as 80.
 The run takes about 30 s and fails unless every case is OK, NON-STRICT or
 INFORMATIONAL (the suite's passing verdicts). The HTML report is in
 `autobahn/reports/clients/index.html`.

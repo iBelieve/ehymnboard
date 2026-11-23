@@ -66,15 +66,15 @@ test("a reset connection and an unknown host count as failures, not crashes", ()
   // DNS stops resolving the server and the socket drops: once lwIP's cached
   // answer expires (60 s TTL) every reconnect fails, but nothing reboots
   // before the 3 minute limit.
-  emu.net.dns["api.hymnboard.sonrise.io"] = false;
+  emu.net.dns["hymnboard.sonrise.io"] = false;
   emu.server.override = null;
   emu.server.upgradeStatus = 503;
   emu.server.sockets[0].drop();
-  emu.waitForSerial("WS: DNS lookup of api.hymnboard.sonrise.io failed", 120_000, at);
+  emu.waitForSerial("WS: DNS lookup of hymnboard.sonrise.io failed", 120_000, at);
   emu.run(30_000);
   assert.equal(emu.reboots, 0);
   assert.equal(count(emu, "Rebooted due to watchdog"), 0);
-  emu.net.dns["api.hymnboard.sonrise.io"] = true;
+  emu.net.dns["hymnboard.sonrise.io"] = true;
   emu.server.upgradeStatus = 101;
   emu.waitForSerial("New image for screen 1", 90_000, emu.waitForSerial("WS: live", 90_000, at));
 });

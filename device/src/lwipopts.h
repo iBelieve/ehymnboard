@@ -18,16 +18,24 @@
 // MEM_LIBC_MALLOC is incompatible with non polling versions
 #define MEM_LIBC_MALLOC 0
 #endif
-#define MEM_ALIGNMENT              4
-#define MEM_SIZE                   4000
-#define MEMP_NUM_TCP_SEG           32
-#define MEMP_NUM_ARP_QUEUE         10
-#define PBUF_POOL_SIZE             24
-#define LWIP_ARP                   1
-#define LWIP_ETHERNET              1
-#define LWIP_ICMP                  1
-#define LWIP_RAW                   1
-#define TCP_WND                    (8 * TCP_MSS)
+#define MEM_ALIGNMENT 4
+// lwIP's own heap: TCP_WRITE_FLAG_COPY copies, plus each TLS connection's
+// state (with its mbedTLS context) and the shared TLS config, which
+// altcp_tls_mbedtls takes from here rather than from malloc
+#define MEM_SIZE           12000
+#define MEMP_NUM_TCP_SEG   32
+#define MEMP_NUM_ARP_QUEUE 10
+#define PBUF_POOL_SIZE     24
+#define LWIP_ARP           1
+#define LWIP_ETHERNET      1
+#define LWIP_ICMP          1
+#define LWIP_RAW           1
+// mbedTLS can only decrypt a TLS record (up to 16 KB plus its header and tag)
+// once all of it is in, and its bytes count against the window until the
+// application has taken them, so the window must hold a whole record with
+// room to spare, or the connection stalls (see altcp_tls_mbedtls.c). The OTA
+// download's staging buffer must match it (see ota.cpp).
+#define TCP_WND                    (18 * 1024)
 #define TCP_MSS                    1460
 #define TCP_SND_BUF                (8 * TCP_MSS)
 #define TCP_SND_QUEUELEN           ((4 * (TCP_SND_BUF) + (TCP_MSS - 1)) / (TCP_MSS))
@@ -86,6 +94,15 @@
 #define PPP_DEBUG        LWIP_DBG_OFF
 #define SLIP_DEBUG       LWIP_DBG_OFF
 #define DHCP_DEBUG       LWIP_DBG_OFF
+
+// TLS (https:// and wss://) through mbedTLS; see tls.cpp
+#define LWIP_ALTCP             1
+#define LWIP_ALTCP_TLS         1
+#define LWIP_ALTCP_TLS_MBEDTLS 1
+// altcp_tls_mbedtls defaults to MBEDTLS_SSL_VERIFY_OPTIONAL, which completes
+// the handshake whatever the certificate. Refuse a server that can't prove
+// who it is.
+#define ALTCP_MBEDTLS_AUTHMODE MBEDTLS_SSL_VERIFY_REQUIRED
 
 #define HTTPC_CLIENT_AGENT "eHymnBoard/1.0 (Pico W); Michael Spencer <sonrisesoftware@gmail.com>"
 

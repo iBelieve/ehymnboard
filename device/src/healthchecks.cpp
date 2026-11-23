@@ -25,6 +25,7 @@
 #include "pico/async_context.h"
 #include "pico/cyw43_arch.h"
 #include "request_path.h"
+#include "tls.h"
 #include "utils.h"
 
 namespace
@@ -57,8 +58,7 @@ static err_t on_healthcheck_data_received([[maybe_unused]] void *arg, struct alt
                                           [[maybe_unused]] err_t err)
 {
     assert(arg);
-
-    // Nothing to do here
+    tls_remember_session(conn);
 
     altcp_recved(conn, p->tot_len);
     pbuf_free(p);
@@ -76,6 +76,7 @@ static void send_healthcheck_request(const std::string &path, const std::string 
 
     httpc_connection_t settings = {};
     settings.result_fn = on_healthcheck_request_completed;
+    settings.altcp_allocator = server_tls_allocator();
 
     cyw43_arch_lwip_begin();
     const auto ret = httpc_get_file_dns(SERVER_HOST, SERVER_PORT, full_path.c_str(), &settings,

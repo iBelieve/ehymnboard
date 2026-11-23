@@ -1,8 +1,9 @@
 name: Build firmware
 description: >
   Builds the device firmware (device/build) with the pinned Pico SDK and Arm
-  toolchain and the example secrets, warnings as errors. Expects the repository
-  checked out with submodules.
+  toolchain and the example secrets, warnings as errors, trusting the test
+  root CA (device/certs/test) so the emulator's TLS server is accepted. Never
+  a build for real boards. Expects the repository checked out with submodules.
 
 runs:
   using: composite
@@ -65,6 +66,7 @@ runs:
         cmake -S . -B build -G Ninja
         -DPICO_SDK_PATH="$GITHUB_WORKSPACE/pico-sdk"
         -DWERROR=ON
+        -DEHYMNBOARD_TEST_ROOT_CA=ON
 
     - name: Build
       shell: bash

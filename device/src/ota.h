@@ -1,6 +1,6 @@
 /*
  * eHymnBoard device firmware
- * Copyright (C) 2025  Michael Spencer <sonrisesoftware@gmail.com>
+ * Copyright (C) 2025-2026  Michael Spencer <sonrisesoftware@gmail.com>
 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -39,7 +39,9 @@ inline std::string ota_boot_version;
 void ota_handle_boot();
 
 // Called on every main loop iteration. Once the board's WebSocket is live
-// (`live`), tells the bootloader that newly installed firmware works. Asks the
+// (`live`) and an https:// request has worked too, tells the bootloader that
+// newly installed firmware works (rebooting, so it's rolled back, if requests
+// keep failing). Asks the
 // server for an update over HTTP on the first call (once the firmware is
 // committed), then hourly, and right away when the server's state message
 // offers a different version (`offered_version`). The hourly check doesn't

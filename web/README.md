@@ -222,16 +222,44 @@ base config too (`pnpm exec wrangler preview base-config secret put
 BASIC_AUTH_PASSWORD`, and the same for the username); new previews start
 with them.
 
+### Boards on TLS
+
+Firmware with TLS (see `device/README.md`) talks only to
+`https://hymnboard.sonrise.io` and `wss://hymnboard.sonrise.io/ws` on port
+443, and checks Cloudflare's certificate. Firmware from before it talks plain
+HTTP to `api.hymnboard.sonrise.io` on port 80. That name has no valid
+certificate (Universal SSL covers `*.sonrise.io`, one level deep), which is
+why the boards move to `hymnboard.sonrise.io`. The server answers the same on
+either name, so the move is the firmware's alone:
+
+1. **Publish the TLS firmware** as the release (`POST /firmware`). Boards on
+   the old firmware download it over plain HTTP from `api.`, as before.
+2. **Each board commits it** once its `wss://` socket is live and a version
+   check over `https://` succeeds. A board that can't do both rolls back to
+   the old firmware and stays on `api.`; the devices page shows the rollback.
+3. **Remove `api.`** once the devices page shows every board on the TLS
+   firmware with no rollback (or its custom domain, on the Worker). After
+   that, **Always Use HTTPS** can be on for the whole zone:
+
+   ```sh
+   dokku domains:remove hymnboard api.hymnboard.sonrise.io
+   ```
+
+`.github/workflows/check-tls-roots.yml` checks daily that Cloudflare's
+certificate for `hymnboard.sonrise.io` (and the Worker's `workers.dev` name)
+still chains to a root the boards trust.
+
 ### Making it production
 
 Add `"vars": { "HEALTHCHECKS": "on" }` to `wrangler.jsonc` (and stop the dokku
 app's pings, or the boards' checks get both). Run `pnpm exec wrangler types`
 and drop `HEALTHCHECKS` from `src/worker/env.d.ts`, since the generated types
 then declare it. Then point
-`api.hymnboard.sonrise.io` and `hymnboard.sonrise.io` at the Worker as custom
-domains. The boards speak plain HTTP on port 80, so turn off **Always Use
-HTTPS** and HSTS for the api hostname: that includes the boards' WebSocket
-(`ws://`), so keep the zone's **WebSockets** setting on too. On Cloudflare the
+`hymnboard.sonrise.io` at the Worker as a custom domain, and keep the zone's
+**WebSockets** setting on for the boards' sockets. Boards still on firmware
+from before TLS (see "Boards on TLS" below) speak plain HTTP to
+`api.hymnboard.sonrise.io` on port 80: until none are left, point that name
+at the Worker too, with **Always Use HTTPS** and HSTS off for it. On Cloudflare the
 boards' sockets hibernate, so the Durable Object only runs for a change, a
 `shown` message, a socket opening or closing, and the 10 minute alarm. Keep
 the ETag unquoted: the firmware stores the header value as is.

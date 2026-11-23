@@ -29,6 +29,7 @@
 #include "pico/unique_id.h"
 #include "request_path.h"
 #include "state.h"
+#include "tls.h"
 #include "utils.h"
 #include "waveshare.h"
 #include "wifi.h"
@@ -146,6 +147,9 @@ static bool update_screens(Board &board)
         service(board);
     }
 
+    // How close TLS came to running out of memory, downloading beside the socket
+    tls_log_memory();
+
     if (any_failed)
     {
         screens.retry_at_ms = now_ms() + FETCH_RETRY_MS;
@@ -183,7 +187,7 @@ static void act(ConnectionPolicy &policy, BoardLink &link, uint64_t now)
     case ConnectionPolicy::Action::CONNECT: {
         printf("WS: connecting...\n");
         const auto path = build_request_path("/ws", current_device_status()) + "&proto=1";
-        if (!link.client().connect(SERVER_HOST, SERVER_PORT, path))
+        if (!link.client().connect(SERVER_HOST, SERVER_PORT, path, server_tls_allocator()))
         {
             policy.on_closed(now);
         }

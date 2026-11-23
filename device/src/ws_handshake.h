@@ -44,9 +44,10 @@ std::string expected_accept(std::string_view key);
 
 // The GET request that asks `host` to upgrade `target` (a path and query) to
 // a WebSocket, with `user_agent` when it isn't empty. The Host header carries
-// `port` unless it's ws://'s default, 80 (RFC 9110 section 7.2)
-std::string build_upgrade_request(std::string_view host, uint16_t port, std::string_view target, std::string_view key,
-                                  std::string_view user_agent);
+// `port` unless it's the scheme's default: 443 for wss:// (`secure`), 80 for
+// ws:// (RFC 9110 section 7.2)
+std::string build_upgrade_request(std::string_view host, uint16_t port, bool secure, std::string_view target,
+                                  std::string_view key, std::string_view user_agent);
 
 enum class HandshakeResult : uint8_t
 {

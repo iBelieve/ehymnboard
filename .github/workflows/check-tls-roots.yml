@@ -1,0 +1,60 @@
+name: Check TLS roots
+
+# The boards trust only the root CAs in device/certs/roots.pem. If the server's
+# certificate moves to a CA outside that bundle (Cloudflare picks the CA for
+# its edge certificates, and can switch), boards can't connect until someone
+# flashes them over USB. This checks every day that the live chains still
+# verify against the bundle, with the TLS the firmware speaks: TLS 1.2, its
+# ECDHE cipher suites and curves. A failed scheduled run emails whoever last
+# changed this schedule; fix it by adding the new root to roots.pem and
+# releasing firmware before the old certificate is gone.
+
+on:
+  schedule:
+    - cron: "17 13 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - device/certs/roots.pem
+      - .github/workflows/check-tls-roots.yml
+  push:
+    branches: [master]
+    paths:
+      - device/certs/roots.pem
+      - .github/workflows/check-tls-roots.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        # The boards' server, and the Worker it moves to
+        host: [hymnboard.sonrise.io, hymnboard.sonrise.workers.dev]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Verify ${{ matrix.host }} against the bundle
+        env:
+          HOST: ${{ matrix.host }}
+          # Those in device/src/mbedtls_config.h
+          CIPHERS: ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305
+        run: |
+          # -verify_return_error fails the handshake on a bad chain or name
+          out="$(openssl s_client -connect "$HOST:443" -servername "$HOST" \
+            -verify_hostname "$HOST" -verify_return_error \
+            -CAfile device/certs/roots.pem -no-CApath -no-CAstore \
+            -tls1_2 -cipher "$CIPHERS" -groups P-256:P-384 \
+            </dev/null 2>&1)" || status=$?
+          # The chain the server sent: each certificate's subject and issuer
+          echo "$out" | grep -E '^ *[0-9]+ s:|^ +i:' || true
+          echo "$out" | grep -E '^(Verified peername|Peer signature type|    Cipher)' || true
+          if [ -n "${status:-}" ] || ! echo "$out" | grep -qE '^ *Verify return code: 0 \(ok\)'; then
+            echo "$out" | tail -n 30
+            echo "::error::$HOST's certificate chain doesn't verify against device/certs/roots.pem with the firmware's TLS settings; boards would be cut off."
+            exit 1
+          fi

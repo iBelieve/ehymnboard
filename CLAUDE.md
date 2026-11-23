@@ -98,7 +98,11 @@ All checks below must pass; run them locally before committing.
   (tsc 7), `pnpm run lint` (oxlint with type-aware rules via tsrs, all
   errors) and `pnpm test`, which boots
   `../build/ehymnboard.uf2` (or `$FIRMWARE_UF2`) in rp2040js and runs the
-  scenario tests. Only erasable TypeScript syntax (no enums or parameter
+  scenario tests. The board talks TLS to the emulator's router, so build it
+  with `-DEHYMNBOARD_TEST_ROOT_CA=ON` (as CI does; it needs the example OTA
+  key) to trust the test CA in `certs/test/`. `certs/roots.pem` is what real
+  boards trust: `check-tls-roots.yml` checks the live server against it
+  daily. Only erasable TypeScript syntax (no enums or parameter
   properties); import with `.ts` extensions
 - Autobahn: the `ehymnboard_autobahn` build (an echo client on the same
   WebSocket code) runs the Autobahn fuzzingserver's sections 1-7 in the

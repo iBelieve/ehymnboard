@@ -29,6 +29,7 @@
 
 #include "pico/cyw43_arch.h"
 #include "pico/stdlib.h"
+#include "tls.h"
 #include "wifi.h"
 #include "ws_client.h"
 
@@ -36,8 +37,15 @@
 #define AUTOBAHN_HOST "autobahn.test"
 #endif
 #ifndef AUTOBAHN_PORT
-#define AUTOBAHN_PORT 80
+#define AUTOBAHN_PORT 443
 #endif
+
+// wss://, as the real firmware connects: the emulator's TLS server has a
+// test certificate for this name (device/certs/test)
+static altcp_allocator_t tls = {
+    tls_new_connection,
+    const_cast<char *>(AUTOBAHN_HOST), // NOLINT(cppcoreguidelines-pro-type-const-cast): only ever read
+};
 
 static constexpr const char *AGENT = "ehymnboard";
 
@@ -88,7 +96,7 @@ static bool run(const std::string &target, bool echo)
 {
     listener.echo = echo;
     listener.closed = false;
-    if (!client.connect(AUTOBAHN_HOST, AUTOBAHN_PORT, target))
+    if (!client.connect(AUTOBAHN_HOST, AUTOBAHN_PORT, target, &tls))
     {
         printf("AUTOBAHN: couldn't connect for %s\n", target.c_str());
         return false;

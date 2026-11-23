@@ -94,7 +94,7 @@ TEST(WsHandshake, RfcExample)
 
 TEST(WsHandshake, Request)
 {
-    EXPECT_EQ(ws::build_upgrade_request("api.example.com", 80, "/ws?device_id=AB", RFC_KEY, "Board/1.0"),
+    EXPECT_EQ(ws::build_upgrade_request("api.example.com", 80, false, "/ws?device_id=AB", RFC_KEY, "Board/1.0"),
               "GET /ws?device_id=AB HTTP/1.1\r\n"
               "Host: api.example.com\r\n"
               "Upgrade: websocket\r\n"
@@ -103,13 +103,29 @@ TEST(WsHandshake, Request)
               "Sec-WebSocket-Version: 13\r\n"
               "User-Agent: Board/1.0\r\n"
               "\r\n");
-    EXPECT_EQ(ws::build_upgrade_request("h", 80, "/", RFC_KEY, "").find("User-Agent"), std::string::npos);
+    EXPECT_EQ(ws::build_upgrade_request("h", 80, false, "/", RFC_KEY, "").find("User-Agent"), std::string::npos);
 }
 
 TEST(WsHandshake, RequestNamesAPortOtherThan80)
 {
-    const auto request = ws::build_upgrade_request("localhost", 8000, "/ws", RFC_KEY, "");
+    const auto request = ws::build_upgrade_request("localhost", 8000, false, "/ws", RFC_KEY, "");
     EXPECT_NE(request.find("\r\nHost: localhost:8000\r\n"), std::string::npos);
+}
+
+TEST(WsHandshake, RequestLeavesOut443ForWss)
+{
+    const auto request = ws::build_upgrade_request("example.com", 443, true, "/ws", RFC_KEY, "");
+    EXPECT_NE(request.find("\r\nHost: example.com\r\n"), std::string::npos);
+}
+
+TEST(WsHandshake, RequestNamesEachSchemesOtherDefault)
+{
+    EXPECT_NE(
+        ws::build_upgrade_request("example.com", 80, true, "/ws", RFC_KEY, "").find("\r\nHost: example.com:80\r\n"),
+        std::string::npos);
+    EXPECT_NE(
+        ws::build_upgrade_request("example.com", 443, false, "/ws", RFC_KEY, "").find("\r\nHost: example.com:443\r\n"),
+        std::string::npos);
 }
 
 TEST(WsHandshake, AcceptsAValidResponse)

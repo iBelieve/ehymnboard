@@ -24,6 +24,7 @@
 #include "pico/async_context.h"
 #include "pico/cyw43_arch.h"
 #include "request_path.h"
+#include "tls.h"
 #include "utils.h"
 
 static size_t image_buffer_offset = 0;
@@ -75,6 +76,7 @@ static err_t on_http_data_received([[maybe_unused]] void *arg, struct altcp_pcb 
                                    [[maybe_unused]] err_t err)
 {
     assert(arg);
+    tls_remember_session(conn);
 
     const auto space_left = image_buffer.size() - image_buffer_offset;
     const auto bytes_to_copy = p->tot_len < space_left ? p->tot_len : space_left;
@@ -121,6 +123,7 @@ FetchImageResult fetch_image(int image, std::string &etag)
     httpc_connection_t settings = {};
     settings.headers_done_fn = on_headers_received;
     settings.result_fn = on_http_req_completed;
+    settings.altcp_allocator = server_tls_allocator();
 
     image_buffer_offset = 0;
     image_bytes_received = 0;

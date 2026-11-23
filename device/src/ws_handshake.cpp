@@ -172,16 +172,16 @@ std::string expected_accept(std::string_view key)
     return base64_encode(digest.data(), digest.size());
 }
 
-std::string build_upgrade_request(std::string_view host, uint16_t port, std::string_view target, std::string_view key,
-                                  std::string_view user_agent)
+std::string build_upgrade_request(std::string_view host, uint16_t port, bool secure, std::string_view target,
+                                  std::string_view key, std::string_view user_agent)
 {
-    constexpr uint16_t DEFAULT_PORT = 80;
+    const uint16_t default_port = secure ? 443 : 80;
 
     std::string request = "GET ";
     request += target;
     request += " HTTP/1.1\r\nHost: ";
     request += host;
-    if (port != DEFAULT_PORT)
+    if (port != default_port)
     {
         request += ':';
         request += std::to_string(port);

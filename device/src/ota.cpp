@@ -1,6 +1,6 @@
 /*
  * eHymnBoard device firmware
- * Copyright (C) 2025  Michael Spencer <sonrisesoftware@gmail.com>
+ * Copyright (C) 2025-2026  Michael Spencer <sonrisesoftware@gmail.com>
 
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -30,6 +30,7 @@
 #include "pico/cyw43_arch.h"
 #include "pico_fota_bootloader/core.h"
 #include "state.h"
+#include "tls.h"
 #include "utils.h"
 
 // Defined by the bootloader's linker script; the symbol's address is the size
@@ -100,6 +101,7 @@ VersionCheckRequest version_check;
 err_t on_version_check_data(void *arg, struct altcp_pcb *conn, struct pbuf *p, [[maybe_unused]] err_t err)
 {
     auto *req = static_cast<VersionCheckRequest *>(arg);
+    tls_remember_session(conn);
 
     req->body_len += pbuf_copy_partial(p, req->body.data() + req->body_len, req->body.size() - req->body_len, 0);
 
@@ -136,6 +138,7 @@ std::optional<std::string> fetch_target_version()
 
     static httpc_connection_t settings = {};
     settings.result_fn = on_version_check_completed;
+    settings.altcp_allocator = server_tls_allocator();
 
     const std::string path = "/firmware/latest" + ota_query();
 
@@ -195,8 +198,9 @@ std::optional<std::string> fetch_target_version()
 // Received body bytes wait here until the main loop writes them to flash.
 // TCP flow control bounds how much can arrive: we only acknowledge bytes to
 // lwIP (altcp_recved) once they're written, so at most TCP_WND bytes are ever
-// buffered.
-constexpr size_t STAGING_SIZE = 16 * 1024;
+// buffered. (Over TLS that's still true of the decrypted bytes: lwIP's TLS
+// layer counts them against the window until we acknowledge them.)
+constexpr size_t STAGING_SIZE = 18 * 1024;
 static_assert(STAGING_SIZE >= TCP_WND, "Staging buffer must hold a full TCP window");
 static_assert(STAGING_SIZE % PFB_ALIGN_SIZE == 0, "Staging buffer must hold whole flash pages");
 
@@ -248,6 +252,7 @@ err_t on_download_headers([[maybe_unused]] httpc_state_t *connection, void *arg,
 err_t on_download_data(void *arg, struct altcp_pcb *conn, struct pbuf *p, [[maybe_unused]] err_t err)
 {
     auto *req = static_cast<DownloadRequest *>(arg);
+    tls_remember_session(conn);
 
     if (!req->accepting || req->overflow)
     {
@@ -325,6 +330,7 @@ bool start_download(const std::string &version)
     static httpc_connection_t settings = {};
     settings.headers_done_fn = on_download_headers;
     settings.result_fn = on_download_completed;
+    settings.altcp_allocator = server_tls_allocator();
 
     const std::string path = "/firmware/image" + ota_query() + "&target_version=" + version;
 
@@ -514,6 +520,34 @@ static bool awaiting_commit()
     return !firmware_committed && pfb_is_after_firmware_update();
 }
 
+// Whether newly installed firmware can make an https:// request (a version
+// check), tried every half minute while the socket is live. If it keeps
+// failing even so, the firmware is broken in a way the socket doesn't show,
+// so reboot: the bootloader then rolls it back.
+static bool commit_check_passed()
+{
+    constexpr int64_t RETRY_US = 30LL * 1000 * 1000;
+    constexpr int MAX_FAILURES = 5;
+    static std::optional<absolute_time_t> next_try;
+    static int failures = 0;
+
+    if (next_try && absolute_time_diff_us(get_absolute_time(), *next_try) > 0)
+    {
+        return false;
+    }
+    if (fetch_target_version())
+    {
+        return true;
+    }
+    if (++failures >= MAX_FAILURES)
+    {
+        printf("OTA: new firmware can't make requests, rebooting to roll it back\n");
+        reset_pico();
+    }
+    next_try = delayed_by_us(get_absolute_time(), RETRY_US);
+    return false;
+}
+
 // Asks the server for a firmware update and installs it if there is one.
 // Returns false if that failed part way (worth trying again soon).
 static bool ota_check_for_update()
@@ -591,11 +625,16 @@ void ota_loop(bool live, const std::string &offered_version)
     // The last version a state message offered, so each offer is checked once
     static std::string last_offer;
 
-    if (live)
+    if (!firmware_committed && live)
     {
-        // A live socket proves a newly installed firmware works; until it's
-        // committed, any reboot rolls it back
-        ota_commit_firmware();
+        // A live socket proves newly installed firmware can reach the server
+        // over wss://; one finished https:// request (this version check)
+        // proves its requests work too. Until it's committed, any reboot
+        // rolls it back.
+        if (!pfb_is_after_firmware_update() || commit_check_passed())
+        {
+            ota_commit_firmware();
+        }
     }
 
     if (awaiting_commit())

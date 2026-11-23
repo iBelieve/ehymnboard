@@ -18,11 +18,14 @@
 
 // A tiny virtual LAN behind the fake access point: one router at 10.0.0.1
 // that answers ARP, hands out 10.0.0.2 over DHCP, resolves DNS names and
-// serves HTTP on port 80 from a JavaScript handler. Its TCP is just enough for
+// serves HTTP on port 80, and HTTPS on 443, from a JavaScript handler (TLS
+// ends at the router, as at Cloudflare's edge). Its TCP is just enough for
 // lwIP as a client over a lossless link, with a go-back-N resend in case lwIP
 // drops a segment for lack of buffers. A connection can also be handed over
 // whole, as a byte stream both ways, to a tunnel handler: that's how
 // WebSockets (and anything else that outlives one request) are served.
+
+import type { TestCert, TlsReply, TlsServer, TlsSession } from "./tls-server.ts";
 
 const ETH_ARP = 0x0806;
 const ETH_IPV4 = 0x0800;
@@ -84,6 +87,17 @@ export interface HttpRequest {
    * firmware only sends GETs, so there's no body).
    */
   raw: string;
+  /** How it came over TLS (port 443), if it did */
+  tls?: TlsInfo;
+}
+
+/** A TLS connection's handshake, as the router's TLS server saw it. */
+export interface TlsInfo {
+  /** The name the board asked for (SNI) */
+  servername: string | undefined;
+  /** Whether the board resumed an earlier session */
+  resumed: boolean;
+  cipher: string | undefined;
 }
 
 export interface HttpResponse {
@@ -124,6 +138,8 @@ export interface NetworkOptions {
    * never sees the request.
    */
   tunnel?: (req: HttpRequest) => ((socket: VirtualSocket) => void) | undefined;
+  /** Answers port 443 with TLS in front of `http` and `tunnel` */
+  tls?: TlsServer;
   log?: (msg: string) => void;
 }
 
@@ -152,11 +168,20 @@ export interface VirtualSocket {
   readonly closed: boolean;
 }
 
-/** One TCP connection from the client to the router's port 80. */
+/** One TCP connection from the client to the router's port 80 or 443. */
 interface Connection {
   key: string;
   ip: number[];
   port: number;
+  /** The router's port: 80, or 443 for TLS */
+  localPort: number;
+  /** The TLS server's end of the connection, on port 443 */
+  tls: TlsSession | null;
+  tlsInfo: TlsInfo | undefined;
+  /** The request head is in and being answered */
+  responded: boolean;
+  /** Everything the router will send is queued (a FIN follows it) */
+  ended: boolean;
   iss: number;
   sndUna: number;
   sndNxt: number;
@@ -164,7 +189,7 @@ interface Connection {
   peerWnd: number;
   /** The request so far, one character per byte. */
   request: string;
-  out: Uint8Array | null; // response bytes once known
+  out: Uint8Array | null; // bytes for the board, once there are any
   /** The sequence number of out[0]: acknowledged bytes are dropped from a tunnel's out. */
   outBase: number;
   finSent: boolean;
@@ -228,7 +253,7 @@ class Tunnel implements VirtualSocket {
       return;
     }
     this.ended = true;
-    this.#net.tunnelWrite(this.#c, new Uint8Array(0));
+    this.#net.tunnelEnd(this.#c);
   }
 
   destroy() {
@@ -292,6 +317,11 @@ export class VirtualNetwork {
   /** Every HTTP request received, with the status it got (none if it got no answer). */
   requests: Served[] = [];
   readonly tunnel: NetworkOptions["tunnel"];
+  readonly tlsServer: TlsServer | undefined;
+  /** The certificate the TLS server shows, whatever name the board asks for */
+  tlsCert: TestCert | undefined;
+  /** Accept TLS connections but never answer their handshake */
+  tlsStall = false;
   readonly #pending = new Set<Promise<void>>();
 
   constructor(opts: NetworkOptions) {
@@ -300,6 +330,7 @@ export class VirtualNetwork {
     this.dns = opts.dns;
     this.http = opts.http;
     this.tunnel = opts.tunnel;
+    this.tlsServer = opts.tls;
     this.log = opts.log ?? ((msg) => console.log(`[net] ${msg}`));
   }
 
@@ -340,6 +371,7 @@ export class VirtualNetwork {
     this.connections.clear();
     for (const c of gone) {
       c.closed = true;
+      c.tls?.close();
       c.tunnel?.gone();
     }
   }
@@ -348,6 +380,8 @@ export class VirtualNetwork {
   #forget(c: Connection) {
     this.connections.delete(c.key);
     c.closed = true;
+    c.tls?.close();
+    c.tls = null;
     c.tunnel?.gone();
   }
 
@@ -577,7 +611,8 @@ export class VirtualNetwork {
     let c = this.connections.get(key);
 
     if (flags & TCP_SYN) {
-      if (dstPort !== 80 || !ipEq(dst, ROUTER_IP)) {
+      const listening = dstPort === 80 || (dstPort === 443 && this.tlsServer);
+      if (!listening || !ipEq(dst, ROUTER_IP)) {
         this.sendTcpRaw(src, dstPort, srcPort, 0, (seq + 1) >>> 0, TCP_RST | TCP_ACK, 0);
         return;
       }
@@ -585,13 +620,19 @@ export class VirtualNetwork {
         key,
         ip: src,
         port: srcPort,
+        localPort: dstPort,
+        tls:
+          dstPort === 443 && !this.tlsStall ? (this.tlsServer?.open(this.tlsCert) ?? null) : null,
+        tlsInfo: undefined,
+        responded: false,
+        ended: false,
         iss: 1000,
         sndUna: 1001,
         sndNxt: 1001,
         rcvNxt: (seq + 1) >>> 0,
         peerWnd: window,
         request: "",
-        out: null, // response bytes once known
+        out: dstPort === 443 ? new Uint8Array(0) : null,
         outBase: 1001,
         finSent: false,
         peerFin: false,
@@ -602,7 +643,7 @@ export class VirtualNetwork {
         tunnel: null,
       };
       this.connections.set(key, c);
-      this.sendTcpRaw(src, 80, srcPort, c.iss, c.rcvNxt, TCP_SYN | TCP_ACK, MSS);
+      this.sendTcpRaw(src, dstPort, srcPort, c.iss, c.rcvNxt, TCP_SYN | TCP_ACK, MSS);
       return;
     }
     if (!c) {
@@ -629,13 +670,7 @@ export class VirtualNetwork {
       }
       this.sendSegment(c, c.sndNxt, new Uint8Array(0), TCP_ACK);
       if (inOrder) {
-        if (c.tunnel) {
-          if (data.length > 0) {
-            c.tunnel.deliver(data);
-          }
-        } else {
-          c.request += latin1(data);
-        }
+        this.#received(c, data);
       }
       if (inOrder && flags & TCP_FIN) {
         c.peerFin = true;
@@ -650,15 +685,75 @@ export class VirtualNetwork {
       this.#forget(c);
       return;
     }
-    if (!c.out && c.request.includes("\r\n\r\n")) {
+    if (!c.responded && !c.closed && c.request.includes("\r\n\r\n")) {
       this.respond(c);
     }
     this.pump(c);
   }
 
+  /** Bytes from the board, in order: decrypted first on port 443. */
+  #received(c: Connection, data: Bytes) {
+    let plain = data;
+    if (c.localPort === 443) {
+      if (!c.tls) {
+        return; // tlsStall: never answered
+      }
+      plain = this.#fromTls(c, c.tls.receive(data));
+    }
+    if (plain.length === 0) {
+      return;
+    }
+    if (c.tunnel) {
+      c.tunnel.deliver(plain);
+    } else {
+      c.request += latin1(plain);
+    }
+  }
+
+  /** Queues what the TLS server sent; returns what the board's bytes decrypted to. */
+  #fromTls(c: Connection, reply: TlsReply) {
+    if (reply.servername !== undefined || reply.cipher !== undefined) {
+      c.tlsInfo = {
+        servername: reply.servername,
+        resumed: reply.resumed ?? false,
+        cipher: reply.cipher,
+      };
+    }
+    if (reply.out.length > 0) {
+      c.out = c.out ? concat(c.out, reply.out) : reply.out;
+      this.scheduleResend(c);
+    }
+    if (reply.error && !c.ended) {
+      this.log(`TLS: ${reply.error}`);
+    }
+    if ((reply.error || reply.ended) && !c.ended) {
+      // The handshake failed, or the board closed its side: close ours
+      c.ended = true;
+      this.scheduleResend(c);
+    }
+    return reply.plain;
+  }
+
+  /** Queues bytes for the board, encrypted on port 443. */
+  #emit(c: Connection, data: Bytes) {
+    if (c.tls) {
+      this.#fromTls(c, c.tls.send(data));
+    } else if (c.localPort !== 443) {
+      c.out = c.out ? concat(c.out, data) : data;
+    }
+  }
+
+  /** Nothing more for the board: close_notify on port 443, then a FIN. */
+  #finish(c: Connection) {
+    if (c.tls) {
+      this.#fromTls(c, c.tls.end());
+    }
+    c.ended = true;
+  }
+
   /** Drops a tunnel's acknowledged bytes. */
   #trim(c: Connection) {
-    if (!c.tunnel || !c.out) {
+    if (!c.out || (!c.tunnel && !c.tls)) {
       return;
     }
     const acked = Math.min((c.sndUna - c.outBase) | 0, c.out.length);
@@ -673,7 +768,7 @@ export class VirtualNetwork {
     const tunnel = new Tunnel(this, c, served);
     const received = fromLatin1(c.request);
     c.request = "";
-    c.out = new Uint8Array(0);
+    c.out ??= new Uint8Array(0);
     c.tunnel = tunnel;
     const target = served.raw.split(" ")[1] ?? served.path;
     this.log(`HTTP ${served.method} ${target} -> tunnel`);
@@ -681,12 +776,22 @@ export class VirtualNetwork {
     tunnel.deliver(received);
   }
 
-  /** Queues a tunnel's bytes for the board (none, to send a pending FIN). */
+  /** Queues a tunnel's bytes for the board. */
   tunnelWrite(c: Connection, data: Bytes) {
     if (c.closed || this.connections.get(c.key) !== c) {
       return;
     }
-    c.out = c.out ? concat(c.out, data) : data;
+    this.#emit(c, data);
+    this.pump(c);
+    this.scheduleResend(c);
+  }
+
+  /** A tunnel's last bytes are queued: the FIN follows them. */
+  tunnelEnd(c: Connection) {
+    if (c.closed || this.connections.get(c.key) !== c) {
+      return;
+    }
+    this.#finish(c);
     this.pump(c);
     this.scheduleResend(c);
   }
@@ -705,7 +810,15 @@ export class VirtualNetwork {
     const [path, qs = ""] = target.split("?");
     const query = Object.fromEntries(new URLSearchParams(qs));
     const hostLine = headerLines.find((h) => h.toLowerCase().startsWith("host:"));
-    const req = { method, path, query, host: hostLine ? hostLine.slice(5).trim() : "", raw: head };
+    const req: HttpRequest = {
+      method,
+      path,
+      query,
+      host: hostLine ? hostLine.slice(5).trim() : "",
+      raw: head,
+      ...(c.tlsInfo ? { tls: c.tlsInfo } : {}),
+    };
+    c.responded = true;
     const served: Served = { ...req, status: undefined };
     this.requests.push(served);
     const handler = this.tunnel?.(req);
@@ -718,8 +831,8 @@ export class VirtualNetwork {
       this.answer(c, served, res);
       return;
     }
-    // Hold the connection, sending nothing, until the answer comes.
-    c.out = new Uint8Array(0);
+    // Hold the connection, sending nothing more, until the answer comes.
+    c.out ??= new Uint8Array(0);
     c.stalled = true;
     const done = res
       .catch((e: unknown): HttpResponse => {
@@ -732,7 +845,9 @@ export class VirtualNetwork {
           return; // the link or the router went away meanwhile
         }
         c.stalled = false;
-        c.out = null;
+        if (!c.tls) {
+          c.out = null;
+        }
         this.answer(c, served, answer);
         this.pump(c);
       });
@@ -753,12 +868,13 @@ export class VirtualNetwork {
       return;
     }
     if (res.stall) {
-      c.out = new Uint8Array(0);
+      c.out ??= new Uint8Array(0);
       c.stalled = true;
       return;
     }
     if (res.raw) {
-      c.out = res.raw;
+      this.#emit(c, res.raw);
+      this.#finish(c);
       this.scheduleResend(c);
       return;
     }
@@ -775,8 +891,11 @@ export class VirtualNetwork {
     const full = new Uint8Array(headBytes.length + body.length);
     full.set(headBytes);
     full.set(body, headBytes.length);
-    c.out =
-      res.truncateAt !== undefined ? full.subarray(0, headBytes.length + res.truncateAt) : full;
+    this.#emit(
+      c,
+      res.truncateAt !== undefined ? full.subarray(0, headBytes.length + res.truncateAt) : full,
+    );
+    this.#finish(c);
     this.scheduleResend(c);
   }
 
@@ -798,7 +917,7 @@ export class VirtualNetwork {
       this.sendSegment(c, c.sndNxt, c.out.subarray(offset, offset + len), TCP_ACK | TCP_PSH);
       c.sndNxt = (c.sndNxt + len) >>> 0;
     }
-    if (!c.finSent && (!c.tunnel || c.tunnel.ended)) {
+    if (!c.finSent && c.ended) {
       c.finSent = true;
       this.sendSegment(c, c.sndNxt, new Uint8Array(0), TCP_FIN | TCP_ACK);
       c.sndNxt = (c.sndNxt + 1) >>> 0;
@@ -825,7 +944,7 @@ export class VirtualNetwork {
         this.pump(c);
       }
       // A tunnel's FIN waits for its end()
-      const finDue = !c.finSent && (!c.tunnel || c.tunnel.ended);
+      const finDue = !c.finSent && c.ended;
       if (c.sndUna !== c.sndNxt || finDue) {
         this.scheduleResend(c);
       }
@@ -833,7 +952,7 @@ export class VirtualNetwork {
   }
 
   sendSegment(c: Connection, seq: number, data: Bytes, flags: number) {
-    this.sendTcpRaw(c.ip, 80, c.port, seq, c.rcvNxt, flags, 0, data);
+    this.sendTcpRaw(c.ip, c.localPort, c.port, seq, c.rcvNxt, flags, 0, data);
   }
 
   sendTcpRaw(
