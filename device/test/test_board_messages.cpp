@@ -85,7 +85,9 @@ RC_GTEST_PROP(BoardMessages, StateRoundTrips, ())
     {
         etag = *word(SAFE, 40);
     }
-    state.firmware_version = *rc::gen::oneOf(rc::gen::just(std::string()), word(SAFE, 47));
+    // "-" is how the message says "no firmware", so it can't be a version
+    state.firmware_version = *rc::gen::oneOf(
+        rc::gen::just(std::string()), rc::gen::suchThat(word(SAFE, 47), [](const std::string &v) { return v != "-"; }));
 
     const auto message = format_state_message(state);
     RC_ASSERT(message.size() <= MAX_BOARD_MESSAGE);
