@@ -4,44 +4,16 @@
 # release is out.
 version: 2
 updates:
+  # One entry for the whole pnpm workspace (web/, e2e/, device/emulator/):
+  # they share the lockfile at the root.
   - package-ecosystem: npm
-    directory: /web
+    directory: /
     schedule:
       interval: weekly
     cooldown:
       default-days: 1
     groups:
       npm-minor-and-patch:
-        applies-to: version-updates
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-
-  - package-ecosystem: npm
-    directory: /device/emulator
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 1
-    groups:
-      emulator-minor-and-patch:
-        applies-to: version-updates
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-
-  - package-ecosystem: npm
-    directory: /e2e
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 1
-    groups:
-      e2e-minor-and-patch:
         applies-to: version-updates
         patterns:
           - "*"

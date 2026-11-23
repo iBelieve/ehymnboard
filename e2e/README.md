@@ -36,9 +36,9 @@ that keeps those passes unchanged.
 
 ## Run them
 
-Build the firmware (see [device/README.md](../device/README.md)) and
-install the emulator's packages (`pnpm install` in `device/emulator`). Start
-a server, then:
+Build the firmware (see [device/README.md](../device/README.md)) and start
+a server, then (`pnpm install` installs the whole workspace, the emulator
+included):
 
 ```sh
 cd e2e
@@ -47,11 +47,11 @@ pnpm exec playwright install chromium
 E2E_BASE_URL=http://localhost:8000 E2E_USERNAME=e2e E2E_PASSWORD=e2e-password pnpm test
 ```
 
-To start the server for this, run its Docker image, as CI does, or `pnpm dev`
-in `web/` (both listen on port 8000):
+To start the server for this, run its Docker image, as CI does (built from
+the repository root), or `pnpm dev` in `web/` (both listen on port 8000):
 
 ```sh
-docker build -t hymnboard web && docker run --rm -p 8000:8000 \
+docker build -t hymnboard -f web/Dockerfile . && docker run --rm -p 8000:8000 \
   -e BASIC_AUTH_USERNAME=e2e -e BASIC_AUTH_PASSWORD=e2e-password hymnboard
 ```
 

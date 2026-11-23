@@ -13,12 +13,11 @@
   "dependencies": {
     "rp2040js": "1.4.2"
   },
-  "packageManager": "pnpm@12.21.0",
   "devDependencies": {
-    "@types/node": "^26.6.6",
-    "oxlint": "1.94.0",
-    "prettier": "3.10.1",
-    "tsrs": "7.1.0-beta.tsrs3",
-    "typescript": "7.0.2"
+    "@types/node": "catalog:",
+    "oxlint": "catalog:",
+    "prettier": "catalog:",
+    "tsrs": "catalog:",
+    "typescript": "catalog:"
   }
 }

@@ -46,13 +46,26 @@ commands on the host, or from a machine on the tailnet as
 `ssh dokku@dev.sonrise.io dokku …`.
 
 ```sh
-APP=hymnboard-web   # any name; the staging app is hymnboard-test
+APP=hymnboard-web   # any name
 dokku apps:create "$APP"
-dokku builder:set "$APP" build-dir web
+# Build web/Dockerfile from the repository root, where the pnpm workspace's
+# lockfile is (the root .dockerignore sends only what web/ needs).
+dokku builder:set "$APP" selected dockerfile
+dokku builder-dockerfile:set "$APP" dockerfile-path web/Dockerfile
 dokku storage:ensure-directory "$APP"
 dokku storage:mount "$APP" "/var/lib/dokku/data/storage/$APP:/data"
 dokku config:set "$APP" BASIC_AUTH_USERNAME=... BASIC_AUTH_PASSWORD=...
 git push "dokku@dev.sonrise.io:$APP" master
+```
+
+An app set up before the pnpm workspace builds from `web/` alone
+(`build-dir web`), which no longer has a lockfile. Switch it over before
+deploying a commit with the workspace:
+
+```sh
+dokku builder:set "$APP" build-dir   # clear it: build from the repository root
+dokku builder:set "$APP" selected dockerfile
+dokku builder-dockerfile:set "$APP" dockerfile-path web/Dockerfile
 ```
 
 The image listens on `$PORT`, or 8000 when it isn't set (as with `docker run`

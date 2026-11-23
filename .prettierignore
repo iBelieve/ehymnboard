@@ -1,0 +1,5 @@
+# Each package checks its own files, with its own .prettierignore. This
+# covers only the workspace's config files at the root.
+*/
+*.md
+pnpm-lock.yaml

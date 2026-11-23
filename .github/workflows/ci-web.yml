@@ -5,10 +5,28 @@ on:
     branches: [master]
     paths:
       - "web/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".node-version"
+      - ".oxlintrc.base.json"
+      - ".prettierrc.json"
+      - "tsconfig.base.json"
+      - ".prettierignore"
+      - ".dockerignore"
       - ".github/workflows/ci-web.yml"
   pull_request:
     paths:
       - "web/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".node-version"
+      - ".oxlintrc.base.json"
+      - ".prettierrc.json"
+      - "tsconfig.base.json"
+      - ".prettierignore"
+      - ".dockerignore"
       - ".github/workflows/ci-web.yml"
 
 concurrency:
@@ -28,11 +46,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Installs the pnpm from package.json's packageManager, Node.js from
-      # web/.node-version, and runs pnpm install --frozen-lockfile.
+      # Installs the pnpm from the root package.json's packageManager, Node.js
+      # from .node-version, and runs pnpm install --frozen-lockfile for the
+      # whole workspace.
       - uses: pnpm/setup@v3
         with:
-          working-directory: web
           cache: true
           require-lockfile: true
 
@@ -55,6 +73,13 @@ jobs:
         if: success() || failure()
         run: pnpm run build
 
+      # The workspace's own files at the root (package.json and the shared
+      # configs); each package checks its own.
+      - name: Check root formatting
+        if: success() || failure()
+        working-directory: .
+        run: pnpm exec prettier --check .
+
   docker:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -66,7 +91,9 @@ jobs:
       - name: Build Docker image
         uses: docker/build-push-action@v7
         with:
-          context: web
+          # The workspace's lockfile is at the root (see /.dockerignore).
+          context: .
+          file: web/Dockerfile
           push: false
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web

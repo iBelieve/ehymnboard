@@ -7,6 +7,13 @@ on:
       - "device/**"
       - "tools/**"
       - ".jscpd.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".node-version"
+      - ".oxlintrc.base.json"
+      - ".prettierrc.json"
+      - "tsconfig.base.json"
       - ".github/workflows/ci-device.yml"
       - ".github/actions/build-firmware/**"
   pull_request:
@@ -14,6 +21,13 @@ on:
       - "device/**"
       - "tools/**"
       - ".jscpd.json"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".node-version"
+      - ".oxlintrc.base.json"
+      - ".prettierrc.json"
+      - "tsconfig.base.json"
       - ".github/workflows/ci-device.yml"
       - ".github/actions/build-firmware/**"
 
@@ -129,12 +143,12 @@ jobs:
           name: firmware
           path: device/build
 
-      # Installs the pnpm from package.json's packageManager, Node.js from
-      # device/emulator/.node-version, and runs pnpm install --frozen-lockfile.
+      # Installs the pnpm from the root package.json's packageManager, Node.js
+      # from .node-version, and runs pnpm install --frozen-lockfile for the
+      # whole workspace.
       - id: setup
         uses: pnpm/setup@v3
         with:
-          working-directory: device/emulator
           cache: true
           require-lockfile: true
 

@@ -13,6 +13,14 @@ on:
       - "device/**"
       - "web/**"
       - "e2e/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".node-version"
+      - ".oxlintrc.base.json"
+      - ".prettierrc.json"
+      - "tsconfig.base.json"
+      - ".dockerignore"
       - ".github/actions/build-firmware/**"
       - ".github/workflows/ci-e2e.yml"
   pull_request:
@@ -20,6 +28,14 @@ on:
       - "device/**"
       - "web/**"
       - "e2e/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".node-version"
+      - ".oxlintrc.base.json"
+      - ".prettierrc.json"
+      - "tsconfig.base.json"
+      - ".dockerignore"
       - ".github/actions/build-firmware/**"
       - ".github/workflows/ci-e2e.yml"
 
@@ -68,18 +84,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Installs the pnpm from package.json's packageManager, Node.js from
-      # e2e/.node-version, and runs pnpm install --frozen-lockfile.
+      # Installs the pnpm from the root package.json's packageManager, Node.js
+      # from .node-version, and runs pnpm install --frozen-lockfile for the
+      # whole workspace, the emulator the tests import included.
       - id: setup
         uses: pnpm/setup@v3
         with:
-          working-directory: e2e
           cache: true
           require-lockfile: true
-
-      # The tests import the emulator, so its types come from its packages.
-      - name: Install emulator dependencies
-        run: pnpm --dir ../device/emulator install --frozen-lockfile
 
       - name: Type check
         run: pnpm run typecheck
@@ -109,7 +121,9 @@ jobs:
       - name: Build server image
         uses: docker/build-push-action@v7
         with:
-          context: ${{ env.SERVER_DIR }}
+          # Built from the root, where the workspace's lockfile is.
+          context: .
+          file: ${{ env.SERVER_DIR }}/Dockerfile
           push: false
           load: true
           tags: ehymnboard-e2e-server:ci
@@ -131,12 +145,8 @@ jobs:
       - id: setup
         uses: pnpm/setup@v3
         with:
-          working-directory: e2e
           cache: true
           require-lockfile: true
-
-      - name: Install emulator dependencies
-        run: pnpm --dir ../device/emulator install --frozen-lockfile
 
       - name: Install browser
         run: pnpm exec playwright install --with-deps chromium

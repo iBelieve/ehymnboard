@@ -3,15 +3,23 @@
 
 FROM node:26-slim AS build
 
+# The build context is the repository root (see /.dockerignore): the lockfile
+# is the pnpm workspace's, at the root, so build with
+# `docker build -f web/Dockerfile .`.
 WORKDIR /app
 
 COPY --link package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY --link web/package.json web/
 
-# Install the pnpm version pinned in package.json's packageManager field.
+# Install the pnpm version pinned in the root package.json's packageManager
+# field, then only web/'s dependencies.
 RUN npm install -g "$(node -p 'require("./package.json").packageManager')" \
-    && pnpm install --frozen-lockfile
+    && pnpm install --frozen-lockfile --filter ehymnboard-web
 
-COPY --link . .
+COPY --link tsconfig.base.json ./
+COPY --link web web/
+
+WORKDIR /app/web
 
 RUN pnpm run build \
     && node selfhost/generate-config.mjs \
@@ -27,7 +35,7 @@ WORKDIR /app
 # base's /bin is a symlink to usr/bin, which COPY --link would hide.
 COPY --link --from=busybox:1.37.0-musl@sha256:f6a95d611e0a8780fabdb2aec43e31275b2720dfefa3e41b16835bfc42454478 /bin/busybox /usr/bin/sh
 COPY --link --from=build /app/workerd /usr/local/bin/workerd
-COPY --link --from=build /app/dist ./dist
+COPY --link --from=build /app/web/dist ./dist
 
 # Mount persistent storage here (dokku storage:mount), or every deploy starts
 # with empty lines and device history.

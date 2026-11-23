@@ -2,9 +2,7 @@
   "threshold": 0,
   "minTokens": 50,
   "mode": "weak",
-  "reporters": [
-    "console"
-  ],
+  "reporters": ["console"],
   "gitignore": true,
   "ignore": [
     "**/build*/**",

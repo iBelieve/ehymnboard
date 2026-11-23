@@ -1,0 +1,16 @@
+{
+  "name": "ehymnboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "pnpm -r run lint",
+    "format": "prettier --write . && pnpm -r run format",
+    "format:check": "prettier --check . && pnpm -r run format:check"
+  },
+  "packageManager": "pnpm@12.21.0",
+  "devDependencies": {
+    "oxlint": "catalog:",
+    "prettier": "catalog:"
+  }
+}
