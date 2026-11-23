@@ -165,6 +165,11 @@ jobs:
       - name: Check complexity
         run: uv run lizard --CCN 15 --length 150 --arguments 7 --warnings_only src test
 
+      # tools/ holds the CRAP checker (tools/crap.py) the host tests use.
+      - name: Check tools complexity
+        if: success() || failure()
+        run: uv run lizard --CCN 10 --length 80 --arguments 7 --warnings_only ../tools
+
       - uses: actions/setup-node@v7
         with:
           node-version: lts/*
@@ -172,7 +177,7 @@ jobs:
       - name: Check for duplicate code
         if: success() || failure()
         working-directory: .
-        run: npx --yes jscpd@5.4.3 device
+        run: npx --yes jscpd@5.4.3 device tools
 
   python:
     runs-on: ubuntu-latest
@@ -189,12 +194,16 @@ jobs:
         run: uv sync
 
       - name: Lint
-        run: uv run ruff check .
+        run: uv run ruff check . ../tools
 
       - name: Check formatting
         if: success() || failure()
-        run: uv run ruff format --check .
+        run: uv run ruff format --check . ../tools
 
       - name: Check for dead code
         if: success() || failure()
         run: uv run vulture
+
+      - name: Test the CRAP checker
+        if: success() || failure()
+        run: uv run pytest -p no:cacheprovider ../tools

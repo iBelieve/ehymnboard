@@ -16,8 +16,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Sends the board's HTTP requests on to a real hymn board server (Flask in
-// server/, or its replacement) over a real TCP connection, and hands the
+// Sends the board's HTTP requests on to a real hymn board server (web/, or
+// any replacement) over a real TCP connection, and hands the
 // answer back byte for byte, so the firmware parses exactly what that
 // server sends: its status line, header casing, framing and body.
 import net from "node:net";

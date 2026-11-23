@@ -1,24 +1,24 @@
 name: CI (e2e)
 
 # Full-stack end-to-end tests (e2e/): the firmware built here runs in the
-# emulator and talks to the server's Docker image over its real HTTP, while
-# Playwright drives the server's admin page. To test a replacement server,
-# point SERVER_DIR and SERVER_PORT at it and add its directory to the paths
-# below; the tests themselves shouldn't need to change.
+# emulator and talks to the server's (web/) Docker image over its real HTTP,
+# while Playwright drives the server's admin page. To test a replacement
+# server, point SERVER_DIR and SERVER_PORT at it and add its directory to the
+# paths below; the tests themselves shouldn't need to change.
 
 on:
   push:
     branches: [master]
     paths:
       - "device/**"
-      - "server/**"
+      - "web/**"
       - "e2e/**"
       - ".github/actions/build-firmware/**"
       - ".github/workflows/ci-e2e.yml"
   pull_request:
     paths:
       - "device/**"
-      - "server/**"
+      - "web/**"
       - "e2e/**"
       - ".github/actions/build-firmware/**"
       - ".github/workflows/ci-e2e.yml"
@@ -30,8 +30,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  SERVER_DIR: server
-  SERVER_PORT: "8000"
+  SERVER_DIR: web
+  # The image listens on $PORT. 5000 is what dokku gives it in production.
+  SERVER_PORT: "5000"
 
 defaults:
   run:
@@ -117,11 +118,11 @@ jobs:
 
       - name: Start server
         run: |
-          docker run -d --name server -p "8000:$SERVER_PORT" \
+          docker run -d --name server -p "$SERVER_PORT:$SERVER_PORT" -e PORT="$SERVER_PORT" \
             -e BASIC_AUTH_USERNAME=e2e -e BASIC_AUTH_PASSWORD=e2e-password \
             ehymnboard-e2e-server:ci
           for _ in $(seq 30); do
-            curl -fsS http://localhost:8000/ok && exit 0
+            curl -fsS "http://localhost:$SERVER_PORT/ok" && exit 0
             sleep 1
           done
           docker logs server
@@ -142,7 +143,7 @@ jobs:
 
       - name: Run end-to-end tests
         env:
-          E2E_BASE_URL: http://localhost:8000
+          E2E_BASE_URL: http://localhost:${{ env.SERVER_PORT }}
           E2E_USERNAME: e2e
           E2E_PASSWORD: e2e-password
         run: pnpm test

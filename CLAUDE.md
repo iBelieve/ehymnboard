@@ -1,19 +1,23 @@
 # eHymnBoard
 
 E-ink hymn board: `device/` is Raspberry Pi Pico W firmware (C++, pico-sdk,
-CMake), `server/` is a Flask app (Python, uv) with Tailwind-built assets and a
-Docker image deployed via dokku. `hardware/` is the KiCad design (no CI).
+CMake), `web/` is the server: a Hono Worker + Durable Object + React admin,
+self-hosted on workerd via a Docker image deployed with dokku (see
+`web/README.md`). It replaced a Flask app (`server/`, last at commit 02ece7f)
+and keeps its device protocol byte-for-byte. `hardware/` is the KiCad design
+(no CI).
 
 ## CI
 
-GitHub Actions runs on any change to `device/**` or `server/**`, or to the
-shared `tools/` and `.jscpd.json` (`.github/workflows/ci-device.yml`,
-`ci-server.yml`). The full-stack e2e tests (`ci-e2e.yml`) run on any change to
-`device/`, `server/` or `e2e/`. Firmware builds in CI go through
-`.github/actions/build-firmware`, which pins the Pico SDK and Arm toolchain.
-**The device build treats all compiler warnings as errors in CI** (`-Wall
--Wextra` plus `-DWERROR=ON`), so fix warnings before pushing even if a local
-build only prints them.
+GitHub Actions runs on any change to `device/**` or `web/**`
+(`.github/workflows/ci-device.yml`, `ci-web.yml`); the device workflow also
+runs on changes to `tools/` (the CRAP checker) and `.jscpd.json`. The
+full-stack e2e tests (`ci-e2e.yml`) run on any change to `device/`, `web/` or
+`e2e/`, against `web/`'s Docker image.
+Firmware builds in CI go through `.github/actions/build-firmware`, which pins
+the Pico SDK and Arm toolchain. **The device build treats all compiler
+warnings as errors in CI** (`-Wall -Wextra` plus `-DWERROR=ON`), so fix
+warnings before pushing even if a local build only prints them.
 
 All checks below must pass; run them locally before committing.
 
@@ -39,10 +43,14 @@ All checks below must pass; run them locally before committing.
 - Coverage and CRAP: `uv run gcovr --root . --filter 'src/' --object-directory build-test --exclude-throw-branches --cobertura build-test/coverage.xml --fail-under-line 90`
   then `uv run python ../tools/crap.py --coverage build-test/coverage.xml <host-tested src files>`
 - Complexity: `uv run lizard --CCN 15 --length 150 --arguments 7 --warnings_only src test`
-- Duplicate code: `npx jscpd@5.4.3 device` from the repo root (config in
+  and `uv run lizard --CCN 10 --length 80 --arguments 7 --warnings_only ../tools`
+- Duplicate code: `npx jscpd@5.4.3 device tools` from the repo root (config in
   `.jscpd.json`, zero tolerance)
-- Python: `uv run ruff check .`, `uv run ruff format --check .` and
-  `uv run vulture`
+- Python: deps managed by uv (`uv add --dev`, never hand-edit pins; CI runs
+  `uv lock --check`); `uv run ruff check . ../tools`,
+  `uv run ruff format --check . ../tools`, `uv run vulture` and
+  `uv run pytest ../tools` (`tools/` is the CRAP checker, linted and tested
+  from here)
 - Emulator (`device/emulator/`, TypeScript run directly by Node, no build
   step): `pnpm install`, then `pnpm run typecheck` (tsc 7), `pnpm run lint`
   (oxlint with type-aware rules via tsrs, all errors), `pnpm run format:check`
@@ -51,31 +59,22 @@ All checks below must pass; run them locally before committing.
   TypeScript syntax (no enums or parameter properties); import with `.ts`
   extensions
 
-### server/
+### web/
 
-- Deps: managed by uv — use `uv add` / `uv add --dev`, never hand-edit version
-  pins; CI runs `uv lock --check`
-- Lint/format: `uv run ruff check . ../tools` and
-  `uv run ruff format --check . ../tools` (`tools/` is the shared CRAP checker)
-- Types: `uv run pyright` (zero errors expected)
-- Dead code: `uv run vulture` (config and allowlist in `pyproject.toml`)
-- Complexity: `uv run lizard --CCN 10 --length 80 --arguments 7 --warnings_only app.py config ../tools`
-- Duplicate code: `npx jscpd@5.4.3 server tools` from the repo root
-- Dockerfile: hadolint (`docker run --rm -i hadolint/hadolint:v2.15.1 < Dockerfile`)
-- Tests: `uv run pytest --cov --cov-report=xml` (unit, Flask integration and
-  Hypothesis property tests in `tests/`; coverage must stay at 95%+), then
-  `uv run python ../tools/crap.py --coverage coverage.xml app.py` and
-  `uv run pytest ../tools`
-- E2E: CI runs the built image and `uv run pytest e2e --base-url http://localhost:8000`
-  (Playwright); locally, run the server and `uv run playwright install chromium`
-  first. Set `E2E_USERNAME`/`E2E_PASSWORD` when basic auth is on
-- Assets: pnpm, pinned by `packageManager` in `package.json`; `pnpm install`
-  then `pnpm run build` (CI uses `--frozen-lockfile`). New dependency build
-  scripts must be allowed or denied under `allowBuilds` in
-  `pnpm-workspace.yaml`, or install fails. `minimumReleaseAge` there rejects
-  releases under a day old, so don't pin a version published today
-- Docker: CI builds the image (`docker build server`); the tailwind/pnpm asset
-  build runs inside it
+- Deps: pnpm, pinned by `packageManager` in `package.json` (CI uses
+  `--frozen-lockfile`). New dependency build scripts must be allowed or denied
+  under `allowBuilds` in `pnpm-workspace.yaml`, or install fails.
+  `minimumReleaseAge` there rejects releases under a day old, so don't pin a
+  version published today. `device/emulator/` and `e2e/` follow the same rules
+- Checks: `pnpm run typecheck` (TypeScript 7), `pnpm run lint` (oxlint with
+  type-aware rules via tsrs, config in `.oxlintrc.json`), `pnpm run
+  format:check`, `pnpm run test`, `pnpm run build`
+- After changing `wrangler.jsonc`, regenerate `worker-configuration.d.ts`
+  with `pnpm exec wrangler types`
+- Don't change the device endpoints' paths, query parameters or response
+  bytes: the firmware hard-codes them. The rasterizer is compared against
+  the old Flask server's output in `test/render.test.ts`
+- Docker: CI builds the image (`docker build web`)
 
 ### e2e/
 

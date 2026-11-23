@@ -23,12 +23,12 @@ The on-device code is responsible for driving the e-ink screens and handling the
 
 **Server**
 
-The web app and backend for the eHymnBoard project.
+The web app and backend for the eHymnBoard project ([web/](./web/README.md)).
 
-- Python 3
-- Flask
-- Tailwind CSS
-- daisyUI
+- TypeScript
+- [Hono](https://hono.dev) on a Cloudflare Worker with a SQLite-backed Durable Object
+- React, Tailwind CSS and daisyUI
+- Self-hosted on [workerd](https://github.com/cloudflare/workerd) in Docker
 
 Code is deployed to a [Hetzner VPS](https://www.hetzner.com/cloud/) using [Dokku](https://dokku.com).
 

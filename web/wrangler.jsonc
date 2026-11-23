@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ehymnboard",
+  "main": "src/worker/index.ts",
+  // Keep at or below the date the pinned workerd supports; the self-hosted
+  // Docker image reads it from the build output.
+  "compatibility_date": "2026-11-15",
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // Everything goes through the Worker first so basic auth covers the admin.
+    "run_worker_first": true,
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "HYMN_BOARD", "class_name": "HymnBoard" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HymnBoard"] }],
+  "observability": { "enabled": true },
+}
