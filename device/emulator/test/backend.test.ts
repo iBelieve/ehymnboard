@@ -22,7 +22,7 @@ import assert from "node:assert/strict";
 import http from "node:http";
 import net from "node:net";
 import { test } from "node:test";
-import { type Emulator, IMAGE_BYTES, SERVER_HOST, testImage } from "../src/emulator.ts";
+import { type Emulator, IMAGE_BYTES, testImage } from "../src/emulator.ts";
 import { tunnelTo } from "../src/backend.ts";
 import { MockSocket } from "../src/mock-ws.ts";
 import type { VirtualSocket } from "../src/virtual-net.ts";
@@ -165,7 +165,8 @@ test("forwards requests to a real server and shows what it sends back", async ()
     await emu.runFor(60_000);
     assert.equal(sockets.filter((s) => s.open).length, 1);
     assert.ok(sockets[0].received.filter((m) => m === "ping").length >= 2);
-    assert.deepEqual([...hosts], [SERVER_HOST], "the Host header is passed on unchanged");
+    // As a shared front end (a Cloudflare preview) needs, not the board's SERVER_HOST
+    assert.deepEqual([...hosts], [new URL(url).host], "the Host header names the server");
   } finally {
     shutDown(server);
   }

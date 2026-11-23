@@ -3,7 +3,7 @@ import { getFont } from "../shared/font";
 import { renderScreen } from "../shared/render";
 import { EMPTY_LINES, isLines, linesForScreen, SCREEN_COUNT, type Lines } from "../shared/screen";
 import type { Device, DeviceStatusParams, FirmwareInfo } from "../shared/api";
-import { getDeviceName, pingHealthcheck } from "./devices";
+import { getDeviceName, healthchecksOn, pingHealthcheck } from "./devices";
 import { migrate } from "./migrations";
 
 // Column names are interpolated into SQL, so only these are accepted.
@@ -343,7 +343,7 @@ export class HymnBoard extends DurableObject<Env> {
       saved_state_writes: writes !== null && /^\d+$/.test(writes) ? Number(writes) : undefined,
     });
     console.log(`Device socket connected: ${getDeviceName(deviceId)} (${deviceId})`);
-    this.ctx.waitUntil(pingHealthcheck(deviceId, "", "Socket connected"));
+    this.ctx.waitUntil(this.ping(deviceId, "", "Socket connected"));
 
     server.send(await this.stateMessage());
     if ((await this.ctx.storage.getAlarm()) === null) {
@@ -430,9 +430,16 @@ export class HymnBoard extends DurableObject<Env> {
     for (const deviceId of live) {
       this.updateDevice(deviceId, { last_seen: at });
     }
-    await Promise.all([...live].map((id) => pingHealthcheck(id, "", "Socket live")));
+    await Promise.all([...live].map((id) => this.ping(id, "", "Socket live")));
     if (this.openSockets().length > 0) {
       await this.ctx.storage.setAlarm(Date.now() + HEALTH_INTERVAL_MS);
+    }
+  }
+
+  /** Pings the board's healthchecks.io check, when HEALTHCHECKS=on. */
+  private async ping(...args: Parameters<typeof pingHealthcheck>): Promise<void> {
+    if (healthchecksOn(this.env)) {
+      await pingHealthcheck(...args);
     }
   }
 
@@ -469,7 +476,7 @@ export class HymnBoard extends DurableObject<Env> {
     }
     const at = new Date().toISOString();
     this.sql.exec("UPDATE devices SET disconnected_at = ? WHERE id = ?", at, deviceId);
-    this.ctx.waitUntil(pingHealthcheck(deviceId, "/log", `Socket closed (${why})`));
+    this.ctx.waitUntil(this.ping(deviceId, "/log", `Socket closed (${why})`));
   }
 
   private writeScreen(id: number, { etag, buffer }: StoredScreen): void {

@@ -20,6 +20,7 @@ export default defineConfig({
                 BASIC_AUTH_USERNAME: "admin",
                 BASIC_AUTH_PASSWORD: "secret",
                 EXTRA_DEVICE_IDS: "0000000000000000, 1111111111111111",
+                HEALTHCHECKS: "on",
               },
             },
           }),

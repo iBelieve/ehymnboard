@@ -2,7 +2,13 @@ import { Hono, type Context, type MiddlewareHandler } from "hono";
 import { basicAuth } from "hono/basic-auth";
 import type { BoardState, DeviceStatusParams } from "../shared/api";
 import { EMPTY_LINES, isLines, SCREEN_COUNT, trimLines } from "../shared/screen";
-import { DEVICE_NAMES, deviceSortIndex, getDeviceName, pingHealthcheck } from "./devices";
+import {
+  DEVICE_NAMES,
+  deviceSortIndex,
+  getDeviceName,
+  healthchecksOn,
+  pingHealthcheck,
+} from "./devices";
 
 import { STUCK_ETAG_DOWNLOADS } from "./hymn-board";
 
@@ -58,8 +64,14 @@ function parseInteger(value: string | undefined): number | undefined {
   return value !== undefined && /^\s*[+-]?\d+\s*$/.test(value) ? Number(value) : undefined;
 }
 
-/** Runs a healthchecks.io ping after the response is sent. */
+/**
+ * Runs a healthchecks.io ping after the response is sent, when this server is
+ * the one the boards' checks belong to (HEALTHCHECKS=on).
+ */
 function ping(c: AppContext, ...args: Parameters<typeof pingHealthcheck>) {
+  if (!healthchecksOn(c.env)) {
+    return;
+  }
   c.executionCtx.waitUntil(pingHealthcheck(...args));
 }
 

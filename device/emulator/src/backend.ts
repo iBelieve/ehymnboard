@@ -34,14 +34,15 @@ const ANSWER_TIMEOUT_MS = 30_000;
 const STREAM_HOLD_MS = 200;
 
 /**
- * Forwards each request, unchanged (Host header and all), to the server at
- * `baseUrl` (http only). The firmware only sends GETs and asks for
+ * Forwards each request to the server at `baseUrl` (http only), with its Host
+ * header naming that server: a server behind a shared front end, such as a
+ * Cloudflare preview, is found by its Host. The firmware only sends GETs and asks for
  * `Connection: Close`, so the answer is everything the server sends before
  * it closes, or up to its Content-Length if it keeps the connection open.
  */
 export function forwardTo(baseUrl: string) {
-  const { host, port } = hostAndPort(baseUrl);
-  return (req: HttpRequest) => exchange(host, port, req.raw);
+  const { host, port, authority } = hostAndPort(baseUrl);
+  return (req: HttpRequest) => exchange(host, port, withHost(req.raw, authority));
 }
 
 function hostAndPort(baseUrl: string) {
@@ -49,7 +50,12 @@ function hostAndPort(baseUrl: string) {
   if (url.protocol !== "http:") {
     throw new Error(`${baseUrl}: the board only speaks plain HTTP`);
   }
-  return { host: url.hostname, port: Number(url.port || 80) };
+  return { host: url.hostname, port: Number(url.port || 80), authority: url.host };
+}
+
+/** `head` (a request's head, at least) with its Host header set to `authority`. */
+function withHost(head: string, authority: string) {
+  return head.replace(/^host:[^\r\n]*/im, `Host: ${authority}`);
 }
 
 /** Whether a request asks to switch protocols (a WebSocket upgrade). */
@@ -63,16 +69,29 @@ export function isUpgrade(req: HttpRequest) {
  * long as either side keeps it open.
  */
 export function tunnelTo(baseUrl: string, holdMs = STREAM_HOLD_MS) {
-  const { host, port } = hostAndPort(baseUrl);
+  const { host, port, authority } = hostAndPort(baseUrl);
   return (req: HttpRequest) =>
-    isUpgrade(req) ? (board: VirtualSocket) => pipe(board, host, port, holdMs) : undefined;
+    isUpgrade(req)
+      ? (board: VirtualSocket) => pipe(board, host, port, authority, holdMs)
+      : undefined;
 }
 
-function pipe(board: VirtualSocket, host: string, port: number, holdMs: number) {
+function pipe(board: VirtualSocket, host: string, port: number, authority: string, holdMs: number) {
   board.holdMs = holdMs;
   const server = net.connect({ host, port });
   server.setNoDelay(true);
-  board.onData = (data) => server.write(data);
+  // The first bytes are the whole upgrade request's head
+  let first = true;
+  board.onData = (data) => {
+    if (first) {
+      first = false;
+      server.write(
+        Buffer.from(withHost(Buffer.from(data).toString("latin1"), authority), "latin1"),
+      );
+      return;
+    }
+    server.write(data);
+  };
   board.onEnd = () => server.end();
   board.onClose = () => server.destroy();
   server.on("data", (chunk: Buffer) => board.write(new Uint8Array(chunk)));

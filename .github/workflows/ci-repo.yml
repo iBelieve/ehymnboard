@@ -1,8 +1,9 @@
 name: CI (repository)
 
 # Repository-wide checks, run from the root on every change: Prettier over the
-# whole repository (.prettierignore lists what it leaves out) and jscpd's
-# copy-paste check over the code (.jscpd.json).
+# whole repository (.prettierignore lists what it leaves out), jscpd's
+# copy-paste check over the code (.jscpd.json), and the check that any
+# dependency a change adds or changes is the newest release (scripts/).
 
 on:
   push:
@@ -21,17 +22,22 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The new-dependency check compares a pull request's merge commit
+          # with HEAD^, its base.
+          fetch-depth: 2
 
       # Installs the pnpm from the root package.json's packageManager and
       # Node.js from .node-version, then only the root's own dev
-      # dependencies (Prettier, jscpd, and oxlint for the schema that
-      # .oxlintrc.base.json points at), not the packages.
+      # dependencies (Prettier, jscpd, npm-check-updates, and oxlint for the
+      # schema that .oxlintrc.base.json points at) and scripts/, not the
+      # other packages.
       - uses: pnpm/setup@v3
         with:
           install: false
 
       - name: Install
-        run: pnpm install --frozen-lockfile --filter ehymnboard
+        run: pnpm install --frozen-lockfile --filter ehymnboard --filter ehymnboard-scripts
 
       - name: Check formatting
         run: pnpm run format:check
@@ -39,3 +45,20 @@ jobs:
       - name: Check for duplicate code
         if: success() || failure()
         run: pnpm run dupes
+
+      - name: Check scripts/
+        if: success() || failure()
+        run: |
+          pnpm --filter ehymnboard-scripts run typecheck
+          pnpm --filter ehymnboard-scripts run lint
+          pnpm --filter ehymnboard-scripts run test
+
+      # Pull requests only, against their base (HEAD^, the merge commit's
+      # first parent): on master the change has already been checked. Not
+      # Dependabot's: its grouped minor-and-patch PRs don't move a dependency
+      # to a new major version even when one is out, so they'd fail this.
+      - name: Check that new dependencies are the newest release
+        if: >-
+          (success() || failure()) && github.event_name == 'pull_request' &&
+          github.event.pull_request.user.login != 'dependabot[bot]'
+        run: pnpm run check-new-deps HEAD^
