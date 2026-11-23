@@ -2,6 +2,7 @@ packages:
   - web
   - e2e
   - device/emulator
+  - scripts
 
 # Versions shared by every package, which depend on them as "catalog:". The
 # linter and compiler stay in lockstep: tsrs is built against one
