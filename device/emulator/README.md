@@ -36,8 +36,8 @@ pnpm run lint           # oxlint, type-aware rules via tsrs
 # Prettier runs from the repository root: pnpm run format:check
 ```
 
-CI runs the tests against the firmware the `build` job produces (the `emulator`
-job in `.github/workflows/ci-device.yml`). The whole suite takes a few seconds:
+CI runs the tests against the firmware the `firmware` job builds (the
+`emulator` job in `.github/workflows/ci.yml`). The whole suite takes a few seconds:
 sleeps jump straight to the next timer alarm, so simulated time runs far
 faster than real time.
 

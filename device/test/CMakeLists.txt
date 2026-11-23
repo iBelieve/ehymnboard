@@ -4,7 +4,7 @@
 #   cmake -S test -B build-test -G Ninja && ninja -C build-test && ctest --test-dir build-test
 #
 # ASan and UBSan are on by default; -DCOVERAGE=ON adds gcov instrumentation
-# for gcovr (see .github/workflows/ci-device.yml).
+# for gcovr (see the host-tests job in .github/workflows/ci.yml).
 
 cmake_minimum_required(VERSION 3.16)
 

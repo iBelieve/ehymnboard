@@ -11,19 +11,18 @@ workspace" below).
 
 ## CI
 
-GitHub Actions runs on any change to `device/**` or `web/**`
-(`.github/workflows/ci-device.yml`, `ci-web.yml`); the device workflow also
-runs on changes to `tools/` (the CRAP checker). The
-full-stack e2e tests (`ci-e2e.yml`) run on any change to `device/`, `web/` or
-`e2e/`, against `web/`'s Docker image. The workspace's root files
-(`package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.node-version` and
-the shared configs) trigger each workflow that uses them.
+One GitHub Actions workflow, `.github/workflows/ci.yml`, runs every check on
+every push to master and every pull request, with no path filters, as
+parallel jobs. The firmware is built once (the `firmware` job) and the
+server's Docker image once (`server-image`); the emulator, Autobahn and e2e
+jobs download them as artifacts. The `All green` job passes only if every
+other job did and is the one required status check, so a new job needs no
+branch protection change, only a line in its `needs` (a step there fails if a
+job is missing). `check-pico-sdk.yml` is a separate weekly job.
 Firmware builds in CI go through `.github/actions/build-firmware`, which pins
 the Pico SDK and Arm toolchain. **The device build treats all compiler
 warnings as errors in CI** (`-Wall -Wextra` plus `-DWERROR=ON`), so fix
 warnings before pushing even if a local build only prints them.
-`ci-repo.yml` runs on every change: Prettier and the copy-paste check, both
-repository-wide, the new-dependency check, and `scripts/`'s own checks.
 
 All checks below must pass; run them locally before committing.
 
@@ -48,7 +47,7 @@ All checks below must pass; run them locally before committing.
 ### Repository-wide: formatting, duplicate code and new dependencies
 
 - Prettier runs once, from the root, over the whole repository:
-  `pnpm run format` (or `format:check`, as `ci-repo.yml` runs). That covers Markdown, YAML (workflows, `.clang-tidy`) and JSON as
+  `pnpm run format` (or `format:check`, as CI's `repo` job runs). That covers Markdown, YAML (workflows, `.clang-tidy`) and JSON as
   well as the TypeScript. `.prettierignore` lists what's left out: generated
   files, the submodule, vendored code and `device/.vscode/` (the Pico
   extension writes it). C++ is clang-format's and Python ruff's (`device/`)
@@ -106,7 +105,7 @@ All checks below must pass; run them locally before committing.
   properties); import with `.ts` extensions
 - Autobahn: the `ehymnboard_autobahn` build (an echo client on the same
   WebSocket code) runs the Autobahn fuzzingserver's sections 1-7 in the
-  emulator: start the container as `ci-device.yml` does, then
+  emulator: start the container as CI's `autobahn` job does, then
   `node autobahn/run.ts` in `device/emulator` (see `autobahn/README.md`).
   Every case must come back OK, NON-STRICT or INFORMATIONAL
 
@@ -131,7 +130,7 @@ All checks below must pass; run them locally before committing.
 Full-stack tests: the firmware in the emulator talks to a running server's
 real HTTP while Playwright drives its admin page (only through the page; no
 server internals). CI runs them against the server's Docker image
-(`SERVER_DIR`/`SERVER_CONTEXT`/`SERVER_PORT` in `ci-e2e.yml`). Same TypeScript conventions as
+(`SERVER_DIR`/`SERVER_CONTEXT`/`SERVER_PORT` in `ci.yml`). Same TypeScript conventions as
 the emulator.
 
 - Needs the firmware build. The tests import the emulator's source by
@@ -150,4 +149,4 @@ the emulator.
 
 ### .github/workflows/
 
-- actionlint (`ci-workflows.yml`) runs on any workflow change
+- actionlint (CI's `actionlint` job) lints every workflow
