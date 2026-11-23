@@ -2,9 +2,7 @@
   "threshold": 0,
   "minTokens": 50,
   "mode": "weak",
-  "reporters": [
-    "console"
-  ],
+  "reporters": ["console"],
   "gitignore": true,
   "ignore": [
     "**/build*/**",
@@ -15,7 +13,11 @@
     "**/pnpm-lock.yaml",
     "**/static/**",
     "**/*.svg",
-    "device/lib/**"
+    "device/lib/**",
+    "web/dist/**",
+    "**/.wrangler/**",
+    "web/test/fixtures/**",
+    "web/worker-configuration.d.ts"
   ],
   "absolute": false
 }

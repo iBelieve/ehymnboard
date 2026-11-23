@@ -5,10 +5,24 @@ on:
     branches: [master]
     paths:
       - "web/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".node-version"
+      - ".oxlintrc.base.json"
+      - "tsconfig.base.json"
+      - ".dockerignore"
       - ".github/workflows/ci-web.yml"
   pull_request:
     paths:
       - "web/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".node-version"
+      - ".oxlintrc.base.json"
+      - "tsconfig.base.json"
+      - ".dockerignore"
       - ".github/workflows/ci-web.yml"
 
 concurrency:
@@ -28,11 +42,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Installs the pnpm from package.json's packageManager, Node.js from
-      # web/.node-version, and runs pnpm install --frozen-lockfile.
+      # Installs the pnpm from the root package.json's packageManager, Node.js
+      # from .node-version, and runs pnpm install --frozen-lockfile for the
+      # whole workspace.
       - uses: pnpm/setup@v3
         with:
-          working-directory: web
           cache: true
           require-lockfile: true
 
@@ -42,10 +56,6 @@ jobs:
       - name: Lint
         if: success() || failure()
         run: pnpm run lint
-
-      - name: Check formatting
-        if: success() || failure()
-        run: pnpm run format:check
 
       - name: Test
         if: success() || failure()
@@ -66,7 +76,9 @@ jobs:
       - name: Build Docker image
         uses: docker/build-push-action@v7
         with:
-          context: web
+          # The workspace's lockfile is at the root (see /.dockerignore).
+          context: .
+          file: web/Dockerfile
           push: false
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web

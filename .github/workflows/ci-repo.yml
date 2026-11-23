@@ -1,0 +1,41 @@
+name: CI (repository)
+
+# Repository-wide checks, run from the root on every change: Prettier over the
+# whole repository (.prettierignore lists what it leaves out) and jscpd's
+# copy-paste check over the code (.jscpd.json).
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-repo-${{ github.ref }}
+  # Cancel superseded runs on PR branches only; let every master commit finish
+  # so each one keeps its own CI result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # Installs the pnpm from the root package.json's packageManager and
+      # Node.js from .node-version, then only the root's own dev
+      # dependencies (Prettier, jscpd, and oxlint for the schema that
+      # .oxlintrc.base.json points at), not the packages.
+      - uses: pnpm/setup@v3
+        with:
+          install: false
+
+      - name: Install
+        run: pnpm install --frozen-lockfile --filter ehymnboard
+
+      - name: Check formatting
+        run: pnpm run format:check
+
+      - name: Check for duplicate code
+        if: success() || failure()
+        run: pnpm run dupes

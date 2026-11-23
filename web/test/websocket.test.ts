@@ -3,6 +3,7 @@ import { exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { BoardState } from "../src/shared/api";
 import { CLOSE_REPLACED, HEALTH_INTERVAL_MS } from "../src/worker/hymn-board";
+import { type Ping, recordPings } from "./healthchecks";
 
 const LEFT = "E6614103E71F8D26";
 const RIGHT = "E661A4D41787452B";
@@ -68,15 +69,10 @@ function device(s: BoardState, id = LEFT) {
   return s.devices.find((d) => d.id === id);
 }
 
-let pings: { url: string; body: string }[];
+let pings: Ping[];
 
 beforeEach(() => {
-  pings = [];
-  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-    const url = input instanceof Request ? input.url : input.toString();
-    pings.push({ url, body: typeof init?.body === "string" ? init.body : "" });
-    return Promise.resolve(new Response(null, { status: 200 }));
-  });
+  pings = recordPings();
 });
 
 afterEach(async () => {
@@ -92,6 +88,22 @@ afterEach(async () => {
 /** Lets the object's waitUntil'd work (healthcheck pings) finish. */
 async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+/** The board hangs up, and the server has dealt with it. */
+async function hangUp(board: Board) {
+  board.ws.close(1000, "bye");
+  await board.closed;
+  await settle();
+}
+
+/** The next alarm pings nobody and schedules no other. */
+async function expectAlarmToStop() {
+  const stub = env.HYMN_BOARD.getByName("main");
+  pings.length = 0;
+  expect(await runDurableObjectAlarm(stub)).toBe(true);
+  expect(pings).toEqual([]);
+  expect(await runInDurableObject(stub, (_, ctx) => ctx.storage.getAlarm())).toBeNull();
 }
 
 describe("GET /ws", () => {
@@ -189,7 +201,7 @@ describe("GET /ws", () => {
     const old = await connect();
     await old.next(0);
     const before = device(await state())!.disconnected_at;
-    pings = [];
+    pings.length = 0;
     const replacement = await connect();
     await replacement.next(0);
 
@@ -213,24 +225,16 @@ describe("GET /ws", () => {
     expect(gone.status).toBe(101);
     const rebooted = await connect();
     await rebooted.next(0);
-    rebooted.ws.close(1000, "bye");
-    await rebooted.closed;
-    await settle();
+    await hangUp(rebooted);
 
     expect(device(await state())?.live).toBe(false);
-    const stub = env.HYMN_BOARD.getByName("main");
-    pings = [];
-    expect(await runDurableObjectAlarm(stub)).toBe(true);
-    expect(pings).toEqual([]);
-    expect(await runInDurableObject(stub, (_, ctx) => ctx.storage.getAlarm())).toBeNull();
+    await expectAlarmToStop();
   });
 
   test("a closed socket shows the board offline and logs it", async () => {
     const board = await connect();
     await board.next(0);
-    board.ws.close(1000, "bye");
-    await board.closed;
-    await settle();
+    await hangUp(board);
 
     const s = await state();
     expect(device(s)?.live).toBe(false);
@@ -248,7 +252,7 @@ describe("GET /ws", () => {
     const scheduled = await runInDurableObject(stub, (_, ctx) => ctx.storage.getAlarm());
     expect(scheduled).toBeGreaterThan(Date.now() + HEALTH_INTERVAL_MS - 60_000);
 
-    pings = [];
+    pings.length = 0;
     expect(await runDurableObjectAlarm(stub)).toBe(true);
     expect(pings).toEqual([{ url: LEFT_PING, body: "Socket live" }]);
     expect(await runInDurableObject(stub, (_, ctx) => ctx.storage.getAlarm())).not.toBeNull();
@@ -257,15 +261,8 @@ describe("GET /ws", () => {
   test("the alarm stops once no board is connected", async () => {
     const board = await connect();
     await board.next(0);
-    board.ws.close(1000, "bye");
-    await board.closed;
-    await settle();
-
-    const stub = env.HYMN_BOARD.getByName("main");
-    pings = [];
-    expect(await runDurableObjectAlarm(stub)).toBe(true);
-    expect(pings).toEqual([]);
-    expect(await runInDurableObject(stub, (_, ctx) => ctx.storage.getAlarm())).toBeNull();
+    await hangUp(board);
+    await expectAlarmToStop();
   });
 });
 

@@ -1,0 +1,22 @@
+packages:
+  - web
+  - e2e
+  - device/emulator
+
+# Versions shared by every package, which depend on them as "catalog:". The
+# linter and compiler stay in lockstep: tsrs is built against one
+# TypeScript release, and the configs at the root are written for these.
+catalog:
+  "@types/node": ^26.6.6
+  oxlint: 1.94.0
+  tsrs: 7.1.0-beta.tsrs4
+  typescript: 7.0.2
+
+# pnpm 12 refuses to install a dependency release younger than this many
+# minutes (1 day, also pnpm's default), matching Dependabot's 1-day cooldown.
+minimumReleaseAge: 1440
+
+# Build scripts pnpm 12 may run: both download a prebuilt platform binary.
+allowBuilds:
+  esbuild: true
+  workerd: true

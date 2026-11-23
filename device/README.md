@@ -44,13 +44,13 @@ picotool load -xf ehymnboard.elf
 
 Boards update themselves over the air using [pico_fota_bootloader](https://github.com/JZimnol/pico_fota_bootloader) (the RP2040 has no built-in A/B boot support). Flash is laid out as:
 
-| Region | Size |
-| --- | --- |
-| Bootloader | 36 KB |
-| Bootloader flags | 4 KB |
-| Application slot (running firmware) | 1000 KB |
-| Download slot | 1000 KB |
-| Reserved (last sector: `SavedState`) | 8 KB |
+| Region                               | Size    |
+| ------------------------------------ | ------- |
+| Bootloader                           | 36 KB   |
+| Bootloader flags                     | 4 KB    |
+| Application slot (running firmware)  | 1000 KB |
+| Download slot                        | 1000 KB |
+| Reserved (last sector: `SavedState`) | 8 KB    |
 
 Whenever the server pushes a new version, and hourly besides, a board asks the server (`/firmware/latest`) whether it should run a different firmware version. If so, it downloads the image into the download slot, checks its SHA-256, and reboots. The bootloader then swaps the two slots (about 30 seconds) and starts the new firmware. Once the new firmware successfully talks to the server, it commits itself; if it reboots before that (crash, watchdog, or no network for 3 minutes), the bootloader swaps the old firmware back and the board won't retry that version.
 
@@ -80,17 +80,16 @@ when one changes. The client is our own, on lwIP's raw TCP API
 
 The messages are short text (`src/board_messages.h`):
 
-| From   | Message                                     | Meaning                                                                                      |
-| ------ | ------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| From   | Message                                     | Meaning                                                                                                  |
+| ------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | server | `state 1 <etag1> <etag2> <etag3> <version>` | What each screen should show and the firmware to run (`-` for none). Sent on connect and on every change |
-| board  | `ping`                                      | Every 30 s. The server answers `pong` (on Cloudflare, without waking the Durable Object)    |
-| board  | `shown <etag1> <etag2> <etag3>`             | What the panels show now (`-` for a screen never drawn)                                      |
+| board  | `ping`                                      | Every 30 s. The server answers `pong` (on Cloudflare, without waking the Durable Object)                 |
+| board  | `shown <etag1> <etag2> <etag3>`             | What the panels show now (`-` for a screen never drawn)                                                  |
 
 The upgrade request carries the same query string as every other request
 (`device_id`, `saved_state_writes`, `watchdog_caused_reboot`,
 `firmware_version`) plus `proto=1`. The server only takes known board IDs
-(403 otherwise) and keeps one socket per board, closing an older one with code
-4000.
+(403 otherwise) and keeps one socket per board, closing an older one with code 4000.
 
 When the socket fails (no `pong` within 10 s, no `state` within 30 s of
 connecting, or the server closes it), the board retries after 1 s, doubling to
