@@ -1,0 +1,19 @@
+{
+  "name": "ehymnboard-scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test 'test/*.test.ts'",
+    "typecheck": "tsc -p .",
+    "lint": "oxlint"
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "oxlint": "catalog:",
+    "tsrs": "catalog:",
+    "typescript": "catalog:"
+  }
+}

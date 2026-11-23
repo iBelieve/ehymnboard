@@ -5,8 +5,9 @@ CMake), `web/` is the server: a Hono Worker + Durable Object + React admin,
 self-hosted on workerd via a Docker image deployed with dokku (see
 `web/README.md`). It replaced a Flask app (`server/`, last at commit 02ece7f)
 and keeps its device protocol byte-for-byte. `hardware/` is the KiCad design
-(no CI). `web/`, `e2e/` and `device/emulator/` are one pnpm workspace,
-rooted at the repository root (see "pnpm workspace" below).
+(no CI). `web/`, `e2e/`, `device/emulator/` and `scripts/` (repository
+tooling) are one pnpm workspace, rooted at the repository root (see "pnpm
+workspace" below).
 
 ## CI
 
@@ -22,7 +23,7 @@ the Pico SDK and Arm toolchain. **The device build treats all compiler
 warnings as errors in CI** (`-Wall -Wextra` plus `-DWERROR=ON`), so fix
 warnings before pushing even if a local build only prints them.
 `ci-repo.yml` runs on every change: Prettier and the copy-paste check, both
-repository-wide.
+repository-wide, the new-dependency check, and `scripts/`'s own checks.
 
 All checks below must pass; run them locally before committing.
 
@@ -44,15 +45,24 @@ All checks below must pass; run them locally before committing.
 - From the root, `pnpm run typecheck` and `pnpm run lint` run every
   package's checks (each package lints with its own tsconfig)
 
-### Repository-wide: formatting and duplicate code
+### Repository-wide: formatting, duplicate code and new dependencies
 
 - Prettier runs once, from the root, over the whole repository:
   `pnpm run format` (or `format:check`, as `ci-repo.yml` runs). That covers Markdown, YAML (workflows, `.clang-tidy`) and JSON as
   well as the TypeScript. `.prettierignore` lists what's left out: generated
   files, the submodule, vendored code and `device/.vscode/` (the Pico
   extension writes it). C++ is clang-format's and Python ruff's (`device/`)
-- Duplicate code: `pnpm run dupes` (jscpd over `device/`, `tools/`, `web/`
-  and `e2e/`, config in `.jscpd.json`, zero tolerance)
+- Duplicate code: `pnpm run dupes` (jscpd over `device/`, `tools/`, `web/`,
+  `e2e/` and `scripts/`, config in `.jscpd.json`, zero tolerance)
+- New dependencies: `pnpm run check-new-deps` fails if a dependency the
+  branch adds, or whose version it changes (in any `package.json` or the
+  catalog), isn't the newest release that `minimumReleaseAge` allows. It
+  compares with where the branch left `origin/master` (CI passes `HEAD^`) and
+  asks npm-check-updates about only those dependencies, so add a dependency
+  at its latest version. To hold one back on purpose, add it to `reject` in
+  `.ncurc.cjs` with a comment saying why. CI skips Dependabot's PRs
+- `scripts/` (TypeScript run directly by Node, like the emulator):
+  `pnpm run typecheck`, `pnpm run lint` and `pnpm test` there
 
 ### device/
 

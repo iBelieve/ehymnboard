@@ -1,0 +1,17 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "extends": ["../.oxlintrc.base.json"],
+  "plugins": ["node"],
+  "env": {
+    "node": true,
+    "es2024": true
+  },
+  "overrides": [
+    {
+      "files": ["test/*.test.ts"],
+      "rules": {
+        "typescript/no-floating-promises": "off"
+      }
+    }
+  ]
+}
