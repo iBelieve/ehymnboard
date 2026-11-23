@@ -38,12 +38,18 @@ All checks below must pass; run them locally before committing.
   pin a version published today
 - Shared configs: each package's `.oxlintrc.json` extends
   `.oxlintrc.base.json` and adds its own plugins, `env` (not inherited) and
-  ignores; tsconfigs extend `tsconfig.base.json`; `.prettierrc.json` covers
-  everything. Each package keeps its own `.prettierignore`
-- From the root, `pnpm run typecheck`, `pnpm run lint` and
-  `pnpm run format:check` run every package's checks; `format:check` also
-  checks the root's config files (CI: `pnpm exec prettier --check .` in
-  `ci-web.yml`)
+  ignores; tsconfigs extend `tsconfig.base.json`
+- From the root, `pnpm run typecheck` and `pnpm run lint` run every
+  package's checks (each package lints with its own tsconfig)
+
+### Formatting
+
+- Prettier runs once, from the root, over the whole repository:
+  `pnpm run format` (or `format:check`, as `ci-format.yml` runs on every
+  push). That covers Markdown, YAML (workflows, `.clang-tidy`) and JSON as
+  well as the TypeScript. `.prettierignore` lists what's left out: generated
+  files, the submodule, vendored code and `device/.vscode/` (the Pico
+  extension writes it). C++ is clang-format's and Python ruff's (`device/`)
 
 ### device/
 
@@ -78,7 +84,7 @@ All checks below must pass; run them locally before committing.
 - Emulator (`device/emulator/`, TypeScript run directly by Node, no build
   step): `pnpm install` (installs the workspace), then `pnpm run typecheck`
   (tsc 7), `pnpm run lint` (oxlint with type-aware rules via tsrs, all
-  errors), `pnpm run format:check` (Prettier) and `pnpm test`, which boots
+  errors) and `pnpm test`, which boots
   `../build/ehymnboard.uf2` (or `$FIRMWARE_UF2`) in rp2040js and runs the
   scenario tests. Only erasable TypeScript syntax (no enums or parameter
   properties); import with `.ts` extensions
@@ -86,8 +92,8 @@ All checks below must pass; run them locally before committing.
 ### web/
 
 - Checks: `pnpm run typecheck` (TypeScript 7), `pnpm run lint` (oxlint with
-  type-aware rules via tsrs, config in `.oxlintrc.json`), `pnpm run
-  format:check`, `pnpm run test`, `pnpm run build`
+  type-aware rules via tsrs, config in `.oxlintrc.json`), `pnpm run test`,
+  `pnpm run build`; formatting is checked once for the whole repository
 - After changing `wrangler.jsonc`, regenerate `worker-configuration.d.ts`
   with `pnpm exec wrangler types`
 - Don't change the device endpoints' paths, query parameters or response
@@ -112,7 +118,7 @@ the emulator.
   packages too
 - `pnpm install`, `pnpm exec playwright install chromium`, then with a server
   running: `E2E_BASE_URL=http://localhost:8000 E2E_USERNAME=… E2E_PASSWORD=… pnpm test`
-- `pnpm run typecheck`, `pnpm run lint`, `pnpm run format:check`
+- `pnpm run typecheck`, `pnpm run lint`
 - The selectors are what a person sees, so a rewritten admin page passes
   unchanged if it keeps the six text boxes, Apply/Clear buttons,
   "<board> (last seen …" line and the SVG board picture with one `<image>`

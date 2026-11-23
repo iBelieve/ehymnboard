@@ -5,16 +5,13 @@
   "scripts": {
     "test": "playwright test",
     "typecheck": "tsc -p .",
-    "lint": "oxlint",
-    "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "lint": "oxlint"
   },
   "devDependencies": {
     "@playwright/test": "1.65.1",
     "@types/node": "catalog:",
     "ehymnboard-emulator": "workspace:*",
     "oxlint": "catalog:",
-    "prettier": "catalog:",
     "tsrs": "catalog:",
     "typescript": "catalog:"
   }

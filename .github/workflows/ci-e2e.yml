@@ -18,7 +18,6 @@ on:
       - "pnpm-workspace.yaml"
       - ".node-version"
       - ".oxlintrc.base.json"
-      - ".prettierrc.json"
       - "tsconfig.base.json"
       - ".dockerignore"
       - ".github/actions/build-firmware/**"
@@ -33,7 +32,6 @@ on:
       - "pnpm-workspace.yaml"
       - ".node-version"
       - ".oxlintrc.base.json"
-      - ".prettierrc.json"
       - "tsconfig.base.json"
       - ".dockerignore"
       - ".github/actions/build-firmware/**"
@@ -77,7 +75,7 @@ jobs:
             device/build/lib/pico_fota_bootloader/pico_fota_bootloader.uf2
           if-no-files-found: error
 
-  # Type checks, lints and formats the tests themselves.
+  # Type checks and lints the tests themselves (formatting is ci-format.yml).
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -99,10 +97,6 @@ jobs:
       - name: Lint
         if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm run lint
-
-      - name: Check formatting
-        if: (success() || failure()) && steps.setup.outcome == 'success'
-        run: pnpm run format:check
 
   e2e:
     needs: firmware

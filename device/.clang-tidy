@@ -27,8 +27,8 @@ Checks: >
   -portability-avoid-pragma-once,
   cppcoreguidelines-pro-type-member-init,
   readability-function-cognitive-complexity
-WarningsAsErrors: '*'
-HeaderFilterRegex: '.*/device/(src|test)/.*'
+WarningsAsErrors: "*"
+HeaderFilterRegex: ".*/device/(src|test)/.*"
 CheckOptions:
   readability-function-cognitive-complexity.Threshold: 25
   # lwIP and pico-sdk callbacks take non-const pointers we can't change.

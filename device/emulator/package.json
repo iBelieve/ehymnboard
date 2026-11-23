@@ -6,9 +6,7 @@
     "start": "node src/run.ts",
     "test": "node --test 'test/*.test.ts'",
     "typecheck": "tsc -p .",
-    "lint": "oxlint",
-    "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "lint": "oxlint"
   },
   "dependencies": {
     "rp2040js": "1.4.2"
@@ -16,7 +14,6 @@
   "devDependencies": {
     "@types/node": "catalog:",
     "oxlint": "catalog:",
-    "prettier": "catalog:",
     "tsrs": "catalog:",
     "typescript": "catalog:"
   }

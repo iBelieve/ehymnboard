@@ -210,9 +210,6 @@ importers:
 
   .:
     devDependencies:
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.94.0
       prettier:
         specifier: 'catalog:'
         version: 3.10.1
@@ -229,9 +226,6 @@ importers:
       oxlint:
         specifier: 'catalog:'
         version: 1.94.0
-      prettier:
-        specifier: 'catalog:'
-        version: 3.10.1
       tsrs:
         specifier: 'catalog:'
         version: 7.1.0-beta.tsrs3
@@ -253,9 +247,6 @@ importers:
       oxlint:
         specifier: 'catalog:'
         version: 1.94.0
-      prettier:
-        specifier: 'catalog:'
-        version: 3.10.1
       tsrs:
         specifier: 'catalog:'
         version: 7.1.0-beta.tsrs3
@@ -311,9 +302,6 @@ importers:
       oxlint:
         specifier: 'catalog:'
         version: 1.94.0
-      prettier:
-        specifier: 'catalog:'
-        version: 3.10.1
       tailwindcss:
         specifier: ^4.3.5
         version: 4.3.5

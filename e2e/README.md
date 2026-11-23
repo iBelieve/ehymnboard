@@ -76,9 +76,9 @@ build's key must match `device/secrets.cmake` (or the example key).
 Checks, all run in CI (`.github/workflows/ci-e2e.yml`):
 
 ```sh
-pnpm run typecheck      # tsc 7 (needs device/emulator's packages installed)
+pnpm run typecheck      # tsc 7
 pnpm run lint           # oxlint, type-aware rules via tsrs
-pnpm run format:check   # Prettier
+# Prettier runs from the repository root: pnpm run format:check
 ```
 
 ## Testing a replacement server

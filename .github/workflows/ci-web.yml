@@ -10,11 +10,8 @@ on:
       - "pnpm-workspace.yaml"
       - ".node-version"
       - ".oxlintrc.base.json"
-      - ".prettierrc.json"
       - "tsconfig.base.json"
-      - ".prettierignore"
       - ".dockerignore"
-      - ".jscpd.json"
       - ".github/workflows/ci-web.yml"
   pull_request:
     paths:
@@ -24,11 +21,8 @@ on:
       - "pnpm-workspace.yaml"
       - ".node-version"
       - ".oxlintrc.base.json"
-      - ".prettierrc.json"
       - "tsconfig.base.json"
-      - ".prettierignore"
       - ".dockerignore"
-      - ".jscpd.json"
       - ".github/workflows/ci-web.yml"
 
 concurrency:
@@ -63,10 +57,6 @@ jobs:
         if: success() || failure()
         run: pnpm run lint
 
-      - name: Check formatting
-        if: success() || failure()
-        run: pnpm run format:check
-
       - name: Test
         if: success() || failure()
         run: pnpm run test
@@ -74,13 +64,6 @@ jobs:
       - name: Build
         if: success() || failure()
         run: pnpm run build
-
-      # The workspace's own files at the root (package.json and the shared
-      # configs); each package checks its own.
-      - name: Check root formatting
-        if: success() || failure()
-        working-directory: .
-        run: pnpm exec prettier --check .
 
   docker:
     runs-on: ubuntu-latest

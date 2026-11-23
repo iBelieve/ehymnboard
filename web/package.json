@@ -9,9 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc -b",
-    "lint": "oxlint",
-    "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "lint": "oxlint"
   },
   "dependencies": {
     "hono": "^4.13.19",
@@ -31,7 +29,6 @@
     "@vitejs/plugin-react": "^6.3.0",
     "daisyui": "^5.8.1",
     "oxlint": "catalog:",
-    "prettier": "catalog:",
     "tailwindcss": "^4.3.5",
     "tsrs": "catalog:",
     "typescript": "catalog:",

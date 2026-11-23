@@ -12,7 +12,6 @@ on:
       - "pnpm-workspace.yaml"
       - ".node-version"
       - ".oxlintrc.base.json"
-      - ".prettierrc.json"
       - "tsconfig.base.json"
       - ".github/workflows/ci-device.yml"
       - ".github/actions/build-firmware/**"
@@ -26,7 +25,6 @@ on:
       - "pnpm-workspace.yaml"
       - ".node-version"
       - ".oxlintrc.base.json"
-      - ".prettierrc.json"
       - "tsconfig.base.json"
       - ".github/workflows/ci-device.yml"
       - ".github/actions/build-firmware/**"
@@ -158,10 +156,6 @@ jobs:
       - name: Lint
         if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm run lint
-
-      - name: Check formatting
-        if: (success() || failure()) && steps.setup.outcome == 'success'
-        run: pnpm run format:check
 
       - name: Run scenario tests
         if: (success() || failure()) && steps.setup.outcome == 'success'

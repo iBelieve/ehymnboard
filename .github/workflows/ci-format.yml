@@ -1,0 +1,36 @@
+name: CI (format)
+
+# Prettier, run once from the root over the whole repository; .prettierignore
+# lists what it leaves out. It runs on every change, since any Markdown, YAML
+# or JSON file can need it.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-format-${{ github.ref }}
+  # Cancel superseded runs on PR branches only; let every master commit finish
+  # so each one keeps its own CI result.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  prettier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # Installs the pnpm from the root package.json's packageManager and
+      # Node.js from .node-version. Prettier is the root's only dependency, so
+      # only the root is installed, not the packages.
+      - uses: pnpm/setup@v3
+        with:
+          install: false
+
+      - name: Install
+        run: pnpm install --frozen-lockfile --filter ehymnboard
+
+      - name: Check formatting
+        run: pnpm run format:check
