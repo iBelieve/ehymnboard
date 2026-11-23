@@ -18,7 +18,11 @@
     "bindings": [{ "name": "HYMN_BOARD", "class_name": "HymnBoard" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HymnBoard"] }],
-  "observability": { "enabled": true },
+  "observability": {
+    "enabled": true,
+    "traces": { "enabled": true },
+    "issues": { "enabled": true },
+  },
   // No HEALTHCHECKS var here: only the self-hosted image (prod) pings
   // healthchecks.io, so the Cloudflare deploy can't touch the boards' checks.
   // Set "vars": { "HEALTHCHECKS": "on" } when Cloudflare becomes prod.
@@ -36,6 +40,10 @@
     "durable_objects": {
       "bindings": [{ "name": "HYMN_BOARD", "class_name": "HymnBoard" }],
     },
-    "observability": { "enabled": true },
+    "observability": {
+      "enabled": true,
+      "traces": { "enabled": true },
+      "issues": { "enabled": true },
+    },
   },
 }
