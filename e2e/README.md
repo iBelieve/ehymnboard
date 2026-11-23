@@ -59,6 +59,10 @@ docker build -t hymnboard -f web/Dockerfile . && docker run --rm -p 8000:8000 \
   -e EXTRA_DEVICE_IDS=0000000000000000 hymnboard
 ```
 
+They also run against a Cloudflare preview of a branch: set `E2E_BASE_URL`
+to its `http://…workers.dev` URL (previews accept the emulated board). The
+board's clock waits longer for a server that isn't local.
+
 The tests change the server's lines and published firmware, so don't point
 them at a server in use. Each test publishes the build under test as the server's firmware release
 before its board boots and again when it ends, so a release left on the

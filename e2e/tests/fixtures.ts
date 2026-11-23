@@ -209,7 +209,10 @@ export class Board {
 
   constructor(backend: string) {
     const verbose = !!process.env.EMULATOR_VERBOSE;
-    const toServer = tunnelTo(backend);
+    // A server far away (a Cloudflare preview) takes a few hundred ms to
+    // answer, which the default hold of the board's clock doesn't cover
+    const local = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(backend).hostname);
+    const toServer = tunnelTo(backend, local ? {} : { holdMs: 3_000 });
     this.emu = new Emulator({
       firmware: FIRMWARE,
       backend,
@@ -315,9 +318,12 @@ export class Board {
  */
 export const test = base.extend<{ admin: AdminPage; backend: string; board: Board }>({
   admin: async ({ page, backend }, use) => {
-    // Stay hermetic: the pages load web fonts and scripts from CDNs.
+    // Stay hermetic: the pages load web fonts and scripts from CDNs. The
+    // browser may upgrade the server to https itself (*.workers.dev is on
+    // the HSTS preload list).
+    const origins = new Set([backend, backend.replace(/^http:/, "https:")]);
     await page.route("**/*", (route) =>
-      new URL(route.request().url()).origin === backend ? route.continue() : route.abort(),
+      origins.has(new URL(route.request().url()).origin) ? route.continue() : route.abort(),
     );
     await use(new AdminPage(page));
   },

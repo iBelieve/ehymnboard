@@ -63,22 +63,35 @@ export function isUpgrade(req: HttpRequest) {
   return /^upgrade:/im.test(req.raw);
 }
 
+/** Options for `tunnelTo`. */
+export interface TunnelOptions {
+  /** The Host header the server sees (default: the server's own) */
+  hostHeader?: string;
+  /**
+   * How long, in real time, the simulated clock waits for the server to
+   * answer what the board sent (default 200 ms): longer for a server far away
+   */
+  holdMs?: number;
+}
+
 /**
  * For a VirtualNetwork's `tunnel`: pipes each upgrade request's connection,
  * byte for byte both ways, to the server at `baseUrl` (http only), for as
- * long as either side keeps it open. The request's Host header becomes
- * `hostHeader`, by default the server's.
+ * long as either side keeps it open.
  */
-export function tunnelTo(baseUrl: string, hostHeader?: string) {
+export function tunnelTo(
+  baseUrl: string,
+  { hostHeader, holdMs = STREAM_HOLD_MS }: TunnelOptions = {},
+) {
   const { host, port, authority } = hostAndPort(baseUrl);
   return (req: HttpRequest) =>
     isUpgrade(req)
-      ? (board: VirtualSocket) => pipe(board, host, port, hostHeader ?? authority)
+      ? (board: VirtualSocket) => pipe(board, host, port, hostHeader ?? authority, holdMs)
       : undefined;
 }
 
-function pipe(board: VirtualSocket, host: string, port: number, authority: string) {
-  board.holdMs = STREAM_HOLD_MS;
+function pipe(board: VirtualSocket, host: string, port: number, authority: string, holdMs: number) {
+  board.holdMs = holdMs;
   const server = net.connect({ host, port });
   server.setNoDelay(true);
   // The first bytes are the whole upgrade request's head
