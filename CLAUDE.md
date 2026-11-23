@@ -33,7 +33,7 @@ All checks below must pass; run them locally before committing.
   pnpm is pinned by `packageManager` in the root `package.json`, Node by
   `.node-version`
 - `pnpm-workspace.yaml` lists the packages and holds the catalog: tools every
-  package uses (TypeScript, oxlint, tsrs, Prettier, `@types/node`) are
+  package uses (TypeScript, oxlint, tsrs, `@types/node`) are
   versioned there once and depended on as `"catalog:"`. New dependency build
   scripts must be allowed or denied under `allowBuilds` there, or install
   fails. `minimumReleaseAge` there rejects releases under a day old, so don't

@@ -196,9 +196,6 @@ catalogs:
     oxlint:
       specifier: 1.94.0
       version: 1.94.0
-    prettier:
-      specifier: 3.10.1
-      version: 3.10.1
     tsrs:
       specifier: 7.1.0-beta.tsrs3
       version: 7.1.0-beta.tsrs3
@@ -217,7 +214,7 @@ importers:
         specifier: 'catalog:'
         version: 1.94.0
       prettier:
-        specifier: 'catalog:'
+        specifier: 3.10.1
         version: 3.10.1
 
   device/emulator:

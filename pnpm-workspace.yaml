@@ -4,12 +4,11 @@ packages:
   - device/emulator
 
 # Versions shared by every package, which depend on them as "catalog:". The
-# linter, formatter and compiler stay in lockstep: tsrs is built against one
+# linter and compiler stay in lockstep: tsrs is built against one
 # TypeScript release, and the configs at the root are written for these.
 catalog:
   "@types/node": ^26.6.6
   oxlint: 1.94.0
-  prettier: 3.10.1
   tsrs: 7.1.0-beta.tsrs3
   typescript: 7.0.2
 

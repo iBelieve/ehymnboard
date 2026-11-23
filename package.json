@@ -13,6 +13,6 @@
   "devDependencies": {
     "jscpd": "5.4.3",
     "oxlint": "catalog:",
-    "prettier": "catalog:"
+    "prettier": "3.10.1"
   }
 }
