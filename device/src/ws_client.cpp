@@ -157,7 +157,8 @@ err_t WsClient::on_connected(void *arg, [[maybe_unused]] struct altcp_pcb *pcb, 
     }
 
     self->state_ = State::HANDSHAKE;
-    const auto request = ws::build_upgrade_request(self->host_, self->target_, self->key_, HTTPC_CLIENT_AGENT);
+    const auto request =
+        ws::build_upgrade_request(self->host_, self->port_, self->target_, self->key_, HTTPC_CLIENT_AGENT);
     self->tx_.insert(self->tx_.end(), request.begin(), request.end());
     if (!self->flush())
     {

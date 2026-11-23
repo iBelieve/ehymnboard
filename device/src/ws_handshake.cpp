@@ -172,13 +172,20 @@ std::string expected_accept(std::string_view key)
     return base64_encode(digest.data(), digest.size());
 }
 
-std::string build_upgrade_request(std::string_view host, std::string_view target, std::string_view key,
+std::string build_upgrade_request(std::string_view host, uint16_t port, std::string_view target, std::string_view key,
                                   std::string_view user_agent)
 {
+    constexpr uint16_t DEFAULT_PORT = 80;
+
     std::string request = "GET ";
     request += target;
     request += " HTTP/1.1\r\nHost: ";
     request += host;
+    if (port != DEFAULT_PORT)
+    {
+        request += ':';
+        request += std::to_string(port);
+    }
     request += "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ";
     request += key;
     request += "\r\nSec-WebSocket-Version: 13\r\n";

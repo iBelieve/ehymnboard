@@ -94,7 +94,7 @@ TEST(WsHandshake, RfcExample)
 
 TEST(WsHandshake, Request)
 {
-    EXPECT_EQ(ws::build_upgrade_request("api.example.com", "/ws?device_id=AB", RFC_KEY, "Board/1.0"),
+    EXPECT_EQ(ws::build_upgrade_request("api.example.com", 80, "/ws?device_id=AB", RFC_KEY, "Board/1.0"),
               "GET /ws?device_id=AB HTTP/1.1\r\n"
               "Host: api.example.com\r\n"
               "Upgrade: websocket\r\n"
@@ -103,7 +103,13 @@ TEST(WsHandshake, Request)
               "Sec-WebSocket-Version: 13\r\n"
               "User-Agent: Board/1.0\r\n"
               "\r\n");
-    EXPECT_EQ(ws::build_upgrade_request("h", "/", RFC_KEY, "").find("User-Agent"), std::string::npos);
+    EXPECT_EQ(ws::build_upgrade_request("h", 80, "/", RFC_KEY, "").find("User-Agent"), std::string::npos);
+}
+
+TEST(WsHandshake, RequestNamesAPortOtherThan80)
+{
+    const auto request = ws::build_upgrade_request("localhost", 8000, "/ws", RFC_KEY, "");
+    EXPECT_NE(request.find("\r\nHost: localhost:8000\r\n"), std::string::npos);
 }
 
 TEST(WsHandshake, AcceptsAValidResponse)
