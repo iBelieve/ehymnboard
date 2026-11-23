@@ -69,6 +69,7 @@ add_executable(ehymnboard
         src/healthchecks.cpp
         src/http_headers.cpp
         src/long_watchdog.cpp
+        src/malloc_lock.cpp
         src/ota.cpp
         src/request_path.cpp
         src/saved_state.cpp
@@ -148,6 +149,7 @@ add_executable(ehymnboard_autobahn
         src/autobahn_main.cpp
         src/http_headers.cpp
         src/long_watchdog.cpp
+        src/malloc_lock.cpp
         src/request_path.cpp
         src/saved_state.cpp
         src/state.cpp

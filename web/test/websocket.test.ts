@@ -188,13 +188,20 @@ describe("GET /ws", () => {
   test("a newer socket from the same board replaces the old one", async () => {
     const old = await connect();
     await old.next(0);
+    const before = device(await state())!.disconnected_at;
+    pings = [];
     const replacement = await connect();
     await replacement.next(0);
 
     const closed = await old.closed;
     expect(closed.code).toBe(CLOSE_REPLACED);
     expect(await replacement.ask("ping")).toBe("pong");
-    expect(device(await state())!.live).toBe(true);
+    await settle();
+    const s = await state();
+    expect(device(s)!.live).toBe(true);
+    // Not a disconnect: the board never went away
+    expect(device(s)!.disconnected_at).toBe(before);
+    expect(pings.filter((p) => p.url.endsWith("/log"))).toEqual([]);
   });
 
   test("a replaced socket whose board never answers the close doesn't count", async () => {

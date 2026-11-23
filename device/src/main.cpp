@@ -34,10 +34,14 @@
 #include "wifi.h"
 #include "ws_connection.h"
 #include <array>
+#include <optional>
 #include <stdio.h>
+#include <string>
 
 // How long to wait before retrying screens whose download failed
 static constexpr uint64_t FETCH_RETRY_MS = 15'000;
+// How long downloads may keep failing before the board reboots
+static constexpr uint64_t DOWNLOADS_FAILING_REBOOT_MS = 180'000;
 // How often the main loop runs
 static constexpr uint32_t LOOP_MS = 100;
 
@@ -87,15 +91,35 @@ struct Screens
     ScreenEtags wanted;
     // When to retry after a failed download
     uint64_t retry_at_ms = 0;
+    // Since when downloads have kept failing, if they have
+    std::optional<uint64_t> failing_since_ms;
+};
+
+// The panels, the socket to the server, and what the server last offered
+struct Board
+{
+    Board(uint32_t jitter_seed, uint64_t now) : policy(jitter_seed, now)
+    {
+    }
+
+    Screens screens;
+    BoardLink link;
+    ConnectionPolicy policy;
+    std::string offered_version;
 };
 
 } // namespace
 
-// Downloads and draws every screen that doesn't show what the server wants.
-// Returns true if any panel changed.
-static bool update_screens(Screens &screens)
+static void service(Board &board);
+
+// Downloads and draws every screen that doesn't show what the server wants,
+// keeping the socket serviced in between. Returns true if any download got
+// an answer (a new image or a 304), so the server should hear what's shown.
+static bool update_screens(Board &board)
 {
+    auto &screens = board.screens;
     bool any_updated = false;
+    bool any_answered = false;
     bool any_failed = false;
 
     for (std::size_t i = 0; i < SCREEN_COUNT; i++)
@@ -105,24 +129,34 @@ static bool update_screens(Screens &screens)
             continue;
         }
         const auto ret = refresh_screen(static_cast<int>(i + 1), *screens.panels.at(i), screens.shown.at(i));
-        if (ret == FetchImageResult::NEW_IMAGE)
+        if (ret == FetchImageResult::NEW_IMAGE || ret == FetchImageResult::NO_CHANGE)
         {
-            any_updated = true;
-        }
-        else if (ret == FetchImageResult::NO_CHANGE)
-        {
-            // Already current: the state message was older than the image
+            any_updated = any_updated || ret == FetchImageResult::NEW_IMAGE;
+            any_answered = true;
+            // The server's answer is current: a 304 means the state message
+            // was older than the image, and an image without a usable ETag
+            // mustn't be downloaded again and again
             screens.wanted.at(i) = screens.shown.at(i);
         }
         else
         {
             any_failed = true;
         }
+        // A download and a redraw take seconds: keep pinging meanwhile
+        service(board);
     }
 
     if (any_failed)
     {
         screens.retry_at_ms = now_ms() + FETCH_RETRY_MS;
+        if (!screens.failing_since_ms)
+        {
+            screens.failing_since_ms = now_ms();
+        }
+    }
+    else
+    {
+        screens.failing_since_ms.reset();
     }
 
     if (any_updated)
@@ -138,7 +172,7 @@ static bool update_screens(Screens &screens)
         printf("State saved to flash, %d total writes.\n", new_state.write_count);
     }
 
-    return any_updated;
+    return any_answered;
 }
 
 // Carries out what the connection policy asks for
@@ -171,6 +205,44 @@ static void act(ConnectionPolicy &policy, BoardLink &link, uint64_t now)
     case ConnectionPolicy::Action::NONE:
         break;
     }
+}
+
+// Takes what arrived on the socket, then does what the connection policy asks
+static void service(Board &board)
+{
+    const auto now = now_ms();
+    auto &screens = board.screens;
+    auto &policy = board.policy;
+
+    const auto events = board.link.take_events();
+    if (events.state)
+    {
+        if (policy.state() == ConnectionPolicy::State::CONNECTING)
+        {
+            printf("WS: live\n");
+            policy.on_live(now);
+        }
+        screens.wanted = events.state->etags;
+        screens.retry_at_ms = now;
+        board.offered_version = events.state->firmware_version;
+
+        // Let the server know what the panels show, if they're current
+        if (screens.wanted == screens.shown)
+        {
+            board.link.client().send_text(format_shown_message(screens.shown));
+        }
+    }
+    if (events.pong)
+    {
+        policy.on_pong();
+    }
+    if (events.closed)
+    {
+        policy.on_closed(now);
+        printf("WS: socket closed, retrying in %llums\n", policy.retry_at() - now);
+    }
+
+    act(policy, board.link, now);
 }
 
 // Shown by `picotool info`
@@ -250,7 +322,10 @@ int main()
                          22  // Busy pin
     );
 
-    Screens screens;
+    // The server pushes the board's state over a WebSocket; images still come
+    // over plain HTTP (fetch_image), only when one changes
+    Board board(jitter_seed_for(unique_board_id), now_ms());
+    auto &screens = board.screens;
     screens.panels = {&screen1, &screen2, &screen3};
     screens.shown = {flash_saved_state->etag1, flash_saved_state->etag2, flash_saved_state->etag3};
     screens.wanted = screens.shown;
@@ -259,54 +334,27 @@ int main()
     printf("Screen 2 Etag: %s\n", screens.shown[1].c_str());
     printf("Screen 3 Etag: %s\n", screens.shown[2].c_str());
 
-    // The server pushes the board's state over a WebSocket; images still come
-    // over plain HTTP (fetch_image), only when one changes
-    BoardLink link;
-    ConnectionPolicy policy(jitter_seed_for(unique_board_id), now_ms());
-    std::string offered_version;
-
     while (true)
     {
         long_watchdog_update();
+        service(board);
+
         const auto now = now_ms();
-
-        const auto events = link.take_events();
-        if (events.state)
+        const bool live = board.policy.state() == ConnectionPolicy::State::LIVE;
+        if (live && screens.wanted != screens.shown && now >= screens.retry_at_ms && update_screens(board))
         {
-            if (policy.state() == ConnectionPolicy::State::CONNECTING)
-            {
-                printf("WS: live\n");
-                policy.on_live(now);
-            }
-            screens.wanted = events.state->etags;
-            screens.retry_at_ms = now;
-            offered_version = events.state->firmware_version;
-
-            // Let the server know what the panels show, if they're current
-            if (screens.wanted == screens.shown)
-            {
-                link.client().send_text(format_shown_message(screens.shown));
-            }
-        }
-        if (events.pong)
-        {
-            policy.on_pong();
-        }
-        if (events.closed)
-        {
-            policy.on_closed(now);
-            printf("WS: socket closed, retrying in %llums\n", policy.retry_at() - now);
+            board.link.client().send_text(format_shown_message(screens.shown));
         }
 
-        act(policy, link, now);
-
-        const bool live = policy.state() == ConnectionPolicy::State::LIVE;
-        if (live && screens.wanted != screens.shown && now >= screens.retry_at_ms && update_screens(screens))
+        // A board that can't download its images, however long its socket
+        // stays up, may have run out of something only a reboot gives back
+        if (screens.failing_since_ms && now_ms() - *screens.failing_since_ms >= DOWNLOADS_FAILING_REBOOT_MS)
         {
-            link.client().send_text(format_shown_message(screens.shown));
+            printf("Image downloads failing for >3 minutes, rebooting to recover\n");
+            reset_pico();
         }
 
-        ota_loop(live, offered_version);
+        ota_loop(board.policy.state() == ConnectionPolicy::State::LIVE, board.offered_version);
 
         sleep_ms(LOOP_MS);
     }

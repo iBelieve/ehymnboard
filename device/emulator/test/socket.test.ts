@@ -20,7 +20,7 @@
 // dead, backs off, and catches up on what changed while it was down.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CLOSE_REPLACED, type Emulator } from "../src/emulator.ts";
+import { CLOSE_REPLACED, type Emulator, testImage } from "../src/emulator.ts";
 import { boot, count, waitForFirstImages } from "./helpers.ts";
 
 /** Boots and waits until the first images are on the panels and the server knows. */
@@ -183,4 +183,49 @@ test("takes state messages as long as the real server's, one after another", () 
   assert.ok(!emu.serial.includes("WS: socket closed", saved), "the socket stayed up");
   assert.equal(socket.closeCode, undefined);
   assert.equal(emu.server.sockets.length, 1);
+});
+
+test("an image without a usable ETag is drawn once, not downloaded again and again", () => {
+  const emu = boot();
+  emu.server.override = (req) =>
+    req.path === "/images/2" ? { status: 200, body: testImage(2, 1) } : undefined;
+  const at = waitForFirstImages(emu);
+  emu.run(60_000);
+  assert.equal(emu.net.requests.filter((r) => r.path === "/images/2").length, 1);
+  assert.deepEqual(
+    emu.displays.map((d) => d.screen),
+    [1, 2, 3],
+  );
+  assert.equal(count(emu, "State saved to flash"), 1);
+  assert.ok(emu.serial.indexOf("Refreshing screen 2", at) < 0, "no second download");
+});
+
+test("downloads that keep failing for 3 minutes reboot the board, though the socket is up", () => {
+  const emu = boot();
+  emu.server.override = (req) => (req.path === "/images/2" ? { status: 500 } : undefined);
+  const at = emu.waitForSerial("Refreshing screen 2 failed", 40_000);
+  const failedAt = emu.simMs;
+  emu.waitForSerial("Image downloads failing for >3 minutes, rebooting to recover", 240_000, at);
+  const after = emu.simMs - failedAt;
+  assert.ok(after >= 170_000 && after <= 200_000, `rebooted ${(after / 1000).toFixed(0)} s in`);
+  assert.equal(emu.server.openSockets.length, 1, "the socket was up all along");
+  emu.waitFor("a watchdog reset", () => emu.reboots === 1, 30_000);
+});
+
+test("keeps pinging while it downloads screens one after another", () => {
+  // Three downloads that each time out: the socket mustn't go quiet for
+  // the whole update (a proxy closes it after a minute without traffic)
+  const { emu, at } = bootLive();
+  const socket = emu.server.sockets[0];
+  const pings = () => socket.received.filter((m) => m === "ping").length;
+  emu.server.override = (req) => (req.path.startsWith("/images/") ? { stall: true } : undefined);
+  for (const screen of [1, 2, 3]) {
+    emu.server.setImage(screen, 2);
+  }
+  const first = emu.waitForSerial("Refreshing screen 1", 5_000, at);
+  const before = pings();
+  emu.waitForSerial("Refreshing screen 3", 120_000, first);
+  assert.ok(pings() > before, "a ping between downloads");
+  emu.waitForSerial("Refreshing screen 3 failed", 60_000, first);
+  assert.equal(emu.server.sockets.length, 1, "the socket stayed up");
 });

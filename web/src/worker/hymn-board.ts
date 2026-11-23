@@ -461,10 +461,14 @@ export class HymnBoard extends DurableObject<Env> {
       return;
     }
     const { deviceId } = attachment;
-    const at = new Date().toISOString();
-    this.sql.exec("UPDATE devices SET disconnected_at = ? WHERE id = ?", at, deviceId);
     const name = getDeviceName(deviceId);
     console.log(`Device socket closed (${why}): ${name} (${deviceId})`);
+    if (this.openSockets(deviceId).some((other) => other !== ws)) {
+      // A newer socket replaced it: the board never went away
+      return;
+    }
+    const at = new Date().toISOString();
+    this.sql.exec("UPDATE devices SET disconnected_at = ? WHERE id = ?", at, deviceId);
     this.ctx.waitUntil(pingHealthcheck(deviceId, "/log", `Socket closed (${why})`));
   }
 

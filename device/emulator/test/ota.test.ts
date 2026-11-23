@@ -151,6 +151,24 @@ test("installs firmware the server pushes on the socket at once", () => {
   emu.waitForSerial("OTA: firmware is healthy, committing", 60_000, at);
 });
 
+test("an offer whose check fails is checked again within 5 minutes, not an hour", () => {
+  const emu = boot();
+  const at = waitForFirstImages(emu);
+  let refused = 0;
+  emu.server.override = (req) =>
+    req.path === "/firmware/latest" && refused++ === 0 ? { status: 503 } : undefined;
+  emu.server.setFirmware({ version: NEXT, image: build.imageFor(NEXT) });
+  const failed = emu.waitForSerial("OTA: version check failed with status 503", 5_000, at);
+  const failedAt = emu.simMs;
+  emu.waitForSerial(`OTA: updating from ${build.version} to ${NEXT}`, 6 * 60_000, failed);
+  const after = emu.simMs - failedAt;
+  assert.ok(
+    after >= 4 * 60_000 && after <= 6 * 60_000,
+    `retried ${(after / 1000).toFixed(0)} s later`,
+  );
+  emu.waitForSerial(`Firmware version: ${NEXT}`, 180_000, failed);
+});
+
 test("still checks over HTTP hourly, and at boot even without a socket", () => {
   // A server whose socket is broken can still ship a fixed firmware
   const emu = boot();
