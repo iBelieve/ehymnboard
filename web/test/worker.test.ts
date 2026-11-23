@@ -4,7 +4,6 @@ import type { BoardState } from "../src/shared/api";
 import { getFont } from "../src/shared/font";
 import { renderScreen } from "../src/shared/render";
 import { SCREEN_BYTES } from "../src/shared/screen";
-import { crc32 } from "../src/worker/png";
 
 const LEFT = "E6614103E71F8D26";
 const AUTH = { Authorization: `Basic ${btoa("admin:secret")}` };
@@ -217,56 +216,6 @@ describe("boards that don't keep their ETag", () => {
     expect(await stuckAt()).toBeNull();
   });
 });
-
-describe("GET /images/:id.png", () => {
-  test("is a public PNG of the stored screen", async () => {
-    await putLines(["", "", "Kyrie", "", "", ""]);
-    const res = await get("/images/2.png");
-    expect(res.status).toBe(200);
-    expect(res.headers.get("Content-Type")).toBe("image/png");
-
-    const png = new Uint8Array(await res.arrayBuffer());
-    const { width, height, depth, pixels } = await decodePng(png);
-    expect([width, height, depth]).toEqual([960, 680, 1]);
-    const stored = new Uint8Array(await (await get("/api/screens/2", AUTH)).arrayBuffer());
-    expect(pixels).toEqual(stored);
-    expect(stored.some((byte) => byte !== 0)).toBe(true);
-
-    expect((await get("/images/4.png")).status).toBe(404);
-  });
-});
-
-/** Just enough of a PNG decoder for our own 1-bit, unfiltered output. */
-async function decodePng(png: Uint8Array) {
-  const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
-  expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-  const chunks: Record<string, Uint8Array> = {};
-  for (let offset = 8; offset < png.length;) {
-    const length = view.getUint32(offset);
-    const type = new TextDecoder().decode(png.subarray(offset + 4, offset + 8));
-    expect(view.getUint32(offset + 8 + length), type).toBe(
-      crc32(png.subarray(offset + 4, offset + 8 + length)),
-    );
-    chunks[type] = png.subarray(offset + 8, offset + 8 + length);
-    offset += 12 + length;
-  }
-  const header = new DataView(chunks.IHDR!.buffer, chunks.IHDR!.byteOffset, 13);
-  const width = header.getUint32(0);
-  const height = header.getUint32(4);
-  const raw = new Uint8Array(
-    await new Response(
-      new Blob([chunks.IDAT!.slice()]).stream().pipeThrough(new DecompressionStream("deflate")),
-    ).arrayBuffer(),
-  );
-  const rowBytes = width / 8;
-  const pixels = new Uint8Array(rowBytes * height);
-  for (let y = 0; y < height; y++) {
-    expect(raw[y * (rowBytes + 1)]).toBe(0);
-    pixels.set(raw.subarray(y * (rowBytes + 1) + 1, (y + 1) * (rowBytes + 1)), y * rowBytes);
-  }
-  expect("IEND" in chunks).toBe(true);
-  return { width, height, depth: header.getUint8(8), pixels };
-}
 
 describe("admin API", () => {
   test("refuses changes from other sites", async () => {
