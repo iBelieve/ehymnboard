@@ -24,7 +24,8 @@ const DEVICE_FIELDS = new Set([
 // the server sends "state 1 <etag1> <etag2> <etag3> <firmware or ->" when the
 // socket opens and whenever any of it changes; the board sends "ping" every
 // 30 s (answered with "pong" by the runtime, without waking this object) and
-// "shown <etag1> <etag2> <etag3>" once its panels match a state.
+// "shown <etag1> <etag2> <etag3>" with what its panels show, after a state
+// it already shows and after each update (even one some screens failed).
 const STATE_VERSION = 1;
 const PING = "ping";
 const PONG = "pong";
@@ -42,8 +43,11 @@ export const SOCKET_SILENT_MS = 90_000;
 /** How often the alarm pings healthchecks.io for each live board. */
 export const HEALTH_INTERVAL_MS = 10 * 60_000;
 
-/** What each socket remembers through hibernation. */
-type SocketAttachment = { deviceId: string; connectedAt: number };
+/**
+ * What each socket remembers through hibernation. `gone` once the socket's
+ * close is dealt with, so it's dealt with once.
+ */
+type SocketAttachment = { deviceId: string; connectedAt: number; gone?: boolean };
 
 // A board that keeps downloading the same image never kept its ETag (say, a
 // header it can't parse), so it redraws every poll. Flag it after this many
@@ -389,7 +393,7 @@ export class HymnBoard extends DurableObject<Env> {
       this.updateDevice(attachment.deviceId, { last_seen: at });
       return;
     }
-    const shown = /^shown ([0-9A-Za-z-]+) ([0-9A-Za-z-]+) ([0-9A-Za-z-]+)$/.exec(message);
+    const shown = /^shown ([0-9A-Za-z._-]+) ([0-9A-Za-z._-]+) ([0-9A-Za-z._-]+)$/.exec(message);
     if (shown) {
       this.updateDevice(attachment.deviceId, {
         last_seen: at,
@@ -422,6 +426,8 @@ export class HymnBoard extends DurableObject<Env> {
       const at = this.lastHeardFrom(ws);
       if (!attachment || at === undefined || Date.now() - at >= SOCKET_SILENT_MS) {
         closeQuietly(ws, CLOSE_SILENT, "no ping");
+        // A board that's gone never answers the close, so don't wait for it
+        this.socketGone(ws, "no ping");
         continue;
       }
       live.add(attachment.deviceId);
@@ -464,8 +470,13 @@ export class HymnBoard extends DurableObject<Env> {
 
   private socketGone(ws: WebSocket, why: string): void {
     const attachment = attachmentOf(ws);
-    if (!attachment) {
+    if (!attachment || attachment.gone) {
       return;
+    }
+    try {
+      ws.serializeAttachment({ ...attachment, gone: true } satisfies SocketAttachment);
+    } catch {
+      // Already closed: no other event can come for it
     }
     const { deviceId } = attachment;
     const name = getDeviceName(deviceId);
@@ -499,7 +510,11 @@ function attachmentOf(ws: WebSocket): SocketAttachment | undefined {
     typeof attachment.deviceId === "string" &&
     typeof attachment.connectedAt === "number"
   ) {
-    return { deviceId: attachment.deviceId, connectedAt: attachment.connectedAt };
+    return {
+      deviceId: attachment.deviceId,
+      connectedAt: attachment.connectedAt,
+      gone: "gone" in attachment && attachment.gone === true,
+    };
   }
   return undefined;
 }

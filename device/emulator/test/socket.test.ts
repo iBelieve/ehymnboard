@@ -212,6 +212,18 @@ test("downloads that keep failing for 3 minutes reboot the board, though the soc
   emu.waitFor("a watchdog reset", () => emu.reboots === 1, 30_000);
 });
 
+test("a download that stops being wanted no longer counts as failing", () => {
+  const { emu, at } = bootLive();
+  emu.server.override = (req) => (req.path === "/images/2" ? { status: 500 } : undefined);
+  emu.server.setImage(2, 2);
+  emu.waitForSerial("Refreshing screen 2 failed", 10_000, at);
+  // The admin puts the old lines back before the retry
+  emu.server.setImage(2, 1);
+  emu.run(240_000);
+  assert.equal(emu.reboots, 0);
+  assert.ok(!emu.serial.includes("Image downloads failing"));
+});
+
 test("keeps pinging while it downloads screens one after another", () => {
   // Three downloads that each time out: the socket mustn't go quiet for
   // the whole update (a proxy closes it after a minute without traffic)

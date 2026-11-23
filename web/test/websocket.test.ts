@@ -2,7 +2,12 @@ import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test"
 import { exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { BoardState } from "../src/shared/api";
-import { CLOSE_REPLACED, HEALTH_INTERVAL_MS } from "../src/worker/hymn-board";
+import {
+  CLOSE_REPLACED,
+  CLOSE_SILENT,
+  HEALTH_INTERVAL_MS,
+  SOCKET_SILENT_MS,
+} from "../src/worker/hymn-board";
 import { type Ping, recordPings } from "./healthchecks";
 
 const LEFT = "E6614103E71F8D26";
@@ -197,6 +202,15 @@ describe("GET /ws", () => {
     expect(JSON.parse(device(await state())!.shown_etags!)).toEqual(etags);
   });
 
+  test("takes any etag the firmware counts as safe", async () => {
+    const board = await connect();
+    await board.next(0);
+    board.ws.send("shown a.b c_d -");
+    await board.ask("ping");
+    await runInDurableObject(env.HYMN_BOARD.getByName("main"), () => undefined);
+    expect(JSON.parse(device(await state())!.shown_etags!)).toEqual(["a.b", "c_d", "-"]);
+  });
+
   test("a newer socket from the same board replaces the old one", async () => {
     const old = await connect();
     await old.next(0);
@@ -243,6 +257,31 @@ describe("GET /ws", () => {
       url: `${LEFT_PING}/log`,
       body: "Socket closed (code 1000, bye)",
     });
+  });
+
+  test("the alarm closes a silent board's socket and logs it once", async () => {
+    const board = await connect();
+    await board.next(0);
+    const stub = env.HYMN_BOARD.getByName("main");
+    // The board last pinged longer ago than the server waits
+    await runInDurableObject(stub, (_, ctx) => {
+      for (const ws of ctx.getWebSockets(LEFT)) {
+        ws.serializeAttachment({ deviceId: LEFT, connectedAt: Date.now() - SOCKET_SILENT_MS });
+      }
+    });
+
+    pings.length = 0;
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    // Recorded at once: a board that's gone never answers the close
+    const s = await state();
+    expect(device(s)?.live).toBe(false);
+    expect(device(s)?.disconnected_at).toBeTruthy();
+    expect(pings).toEqual([{ url: `${LEFT_PING}/log`, body: "Socket closed (no ping)" }]);
+
+    // One that's still there answers it, and that isn't logged again
+    expect((await board.closed).code).toBe(CLOSE_SILENT);
+    await settle();
+    expect(pings).toHaveLength(1);
   });
 
   test("the alarm pings healthchecks.io for each live board and reschedules", async () => {

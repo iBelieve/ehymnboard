@@ -226,9 +226,11 @@ static void service(Board &board)
         screens.retry_at_ms = now;
         board.offered_version = events.state->firmware_version;
 
-        // Let the server know what the panels show, if they're current
+        // Let the server know what the panels show, if they're current. Then
+        // nothing needs downloading, so no download is failing either
         if (screens.wanted == screens.shown)
         {
+            screens.failing_since_ms.reset();
             board.link.client().send_text(format_shown_message(screens.shown));
         }
     }

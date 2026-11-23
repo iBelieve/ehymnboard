@@ -24,7 +24,9 @@
 //
 // Everything runs in lwIP's callbacks, so the listener is called with the
 // lwIP lock held: it must be quick and must not block. The public methods
-// take the lock themselves (it's recursive, so the listener may call them).
+// take the lock themselves (it's recursive, so the listener may call them),
+// except abort(), and close() before the socket is open: those free the
+// connection the callback is still using, so call them from outside.
 
 #include <cstddef>
 #include <cstdint>
