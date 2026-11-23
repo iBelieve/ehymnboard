@@ -32,9 +32,10 @@
   // get no version preview URLs, so this enables nothing else.)
   "preview_urls": true,
   // Worker Previews: Workers Builds deploys each non-master branch to its own
-  // URL with its own, empty Durable Object. Previews inherit nothing from the
-  // settings above, so the binding is repeated here, and with no HEALTHCHECKS
-  // var they never ping healthchecks.io. Their basic-auth secrets are set
+  // URL with its own, empty Durable Object. Previews don't inherit bindings or
+  // vars, so the binding is repeated here, and with no HEALTHCHECKS var they
+  // never ping healthchecks.io. Observability is spelled out too, so previews
+  // keep traces and Issues whatever the dashboard's Previews base says. Their basic-auth secrets are set
   // with `wrangler preview base-config secret put` (see README.md).
   "previews": {
     "durable_objects": {

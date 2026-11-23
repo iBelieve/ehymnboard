@@ -178,8 +178,8 @@ Every push to another branch that changes the web app gets its own
 [Worker Preview](https://developers.cloudflare.com/workers/previews/): a URL
 of its own, shown in a comment on the pull request, with its own empty Durable
 Object, so a branch never touches the main deploy's data or another branch's.
-Previews take nothing from the top-level settings, so `wrangler.jsonc`'s
-`previews` block repeats the Durable Object binding; it has no `HEALTHCHECKS`,
+Previews don't inherit bindings or vars, so `wrangler.jsonc`'s `previews`
+block repeats the Durable Object binding; it has no `HEALTHCHECKS`,
 so previews never ping healthchecks.io. Workers Builds runs the same build
 command and variable for previews, with `pnpm exec wrangler preview` as the
 preview command.

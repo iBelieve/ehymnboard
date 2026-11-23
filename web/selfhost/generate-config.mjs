@@ -3,11 +3,20 @@
 // wrangler.json, so they can't drift from what Cloudflare would run.
 
 import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const dist = new URL("../dist/", import.meta.url);
-// The Vite plugin writes the Worker to dist/<name from wrangler.jsonc>/.
-const worker = "hymnboard";
-const wrangler = JSON.parse(readFileSync(new URL(`${worker}/wrangler.json`, dist), "utf8"));
+// The Vite plugin writes the Worker to dist/<name from wrangler.jsonc>/ and
+// points .wrangler/deploy/config.json at its wrangler.json; follow that rather
+// than hard-coding the name.
+const deployConfig = new URL("../.wrangler/deploy/config.json", import.meta.url);
+const wranglerJson = new URL(
+  JSON.parse(readFileSync(deployConfig, "utf8")).configPath,
+  deployConfig,
+);
+const worker = path.basename(path.dirname(fileURLToPath(wranglerJson)));
+const wrangler = JSON.parse(readFileSync(wranglerJson, "utf8"));
 
 const flags = wrangler.compatibility_flags.map((flag) => JSON.stringify(flag)).join(", ");
 const classes = wrangler.durable_objects.bindings.map((binding) => binding.class_name);
