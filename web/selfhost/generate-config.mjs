@@ -5,7 +5,9 @@
 import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
 
 const dist = new URL("../dist/", import.meta.url);
-const wrangler = JSON.parse(readFileSync(new URL("ehymnboard/wrangler.json", dist), "utf8"));
+// The Vite plugin writes the Worker to dist/<name from wrangler.jsonc>/.
+const worker = "hymnboard";
+const wrangler = JSON.parse(readFileSync(new URL(`${worker}/wrangler.json`, dist), "utf8"));
 
 const flags = wrangler.compatibility_flags.map((flag) => JSON.stringify(flag)).join(", ");
 const classes = wrangler.durable_objects.bindings.map((binding) => binding.class_name);
@@ -27,7 +29,7 @@ const config :Workerd.Config = (
 );
 
 const main :Workerd.Worker = (
-  modules = [(name = "index.js", esModule = embed "ehymnboard/index.js")],
+  modules = [(name = "index.js", esModule = embed "${worker}/index.js")],
   compatibilityDate = ${JSON.stringify(wrangler.compatibility_date)},
   compatibilityFlags = [${flags}],
   bindings = [
@@ -40,6 +42,9 @@ ${wrangler.durable_objects.bindings
   .join("\n")}
     (name = "BASIC_AUTH_USERNAME", fromEnvironment = "BASIC_AUTH_USERNAME"),
     (name = "BASIC_AUTH_PASSWORD", fromEnvironment = "BASIC_AUTH_PASSWORD"),
+    # The self-hosted image is production, so it pings healthchecks.io; a
+    # Cloudflare deploy doesn't unless its config sets this.
+    (name = "HEALTHCHECKS", text = "on"),
   ],
   durableObjectNamespaces = [
 ${classes.map((name) => `    (className = ${JSON.stringify(name)}, uniqueKey = "ehymnboard-${name}", enableSql = true),`).join("\n")}
