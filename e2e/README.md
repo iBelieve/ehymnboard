@@ -7,7 +7,7 @@ admin page with [Playwright](https://playwright.dev). The tests never reach
 into the server: the usher's side goes through the page, as a person would,
 and the board's side is the firmware's own HTTP client. A server rewrite is
 held to the same tests as the server it replaces: if it behaves the same,
-the tests pass unchanged. CI (`.github/workflows/ci-e2e.yml`) runs them
+the tests pass unchanged. CI (the `e2e` job in `.github/workflows/ci.yml`) runs them
 against the server's Docker image.
 
 | Test file       | Covers                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -81,7 +81,7 @@ bootloader, `firmware_version.txt` and the encrypted OTA image. The OTA test
 relabels that image as a new release with the emulator's `OtaBuild`, so the
 build's key must match `device/secrets.cmake` (or the example key).
 
-Checks, all run in CI (`.github/workflows/ci-e2e.yml`):
+Checks, all run in CI (`.github/workflows/ci.yml`):
 
 ```sh
 pnpm run typecheck      # tsc 7
@@ -91,9 +91,8 @@ pnpm run lint           # oxlint, type-aware rules via tsrs
 
 ## Testing a replacement server
 
-Point `SERVER_DIR`, `SERVER_CONTEXT` and `SERVER_PORT` in `ci-e2e.yml` at
+Point `SERVER_DIR`, `SERVER_CONTEXT` and `SERVER_PORT` in `ci.yml` at
 it (the directory with its Dockerfile, the image's build context, usually that
-same directory, and the port its image listens on), and add its directory to
-the workflow's `paths`. The image must serve the device API and the admin page on that port,
+same directory, and the port its image listens on). The image must serve the device API and the admin page on that port,
 with basic auth from `BASIC_AUTH_USERNAME` and `BASIC_AUTH_PASSWORD`, and
 answer `GET /ok` once it's ready.
