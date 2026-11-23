@@ -154,7 +154,7 @@ deploys every push to `master` that changes the web app. Its settings (Worker
 | ----------------- | ------------------------------------------------------------------------------------------------------- |
 | Branch            | `master`                                                                                                |
 | Root directory    | `web`                                                                                                   |
-| Build command     | `pnpm install --frozen-lockfile && pnpm run build`                                                      |
+| Build command     | `pnpm install --frozen-lockfile --filter ehymnboard-web && pnpm run build`                              |
 | Deploy command    | `pnpm exec wrangler deploy`                                                                             |
 | Build watch paths | `web/*`, `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `.node-version`, `tsconfig.base.json` |
 
@@ -169,12 +169,15 @@ the Vite build wrote (`.wrangler/deploy/config.json` points it at
 Basic auth comes from the Worker's secrets, `BASIC_AUTH_USERNAME` and
 `BASIC_AUTH_PASSWORD` (Settings > Variables and Secrets, or
 `pnpm exec wrangler secret put BASIC_AUTH_PASSWORD`). Without them the admin
-is open to anyone, so keep them set.
+is open to anyone, so keep them set, and set them before the first deploy of
+any new Worker.
 
 ### Making it production
 
 Add `"vars": { "HEALTHCHECKS": "on" }` to `wrangler.jsonc` (and stop the dokku
-app's pings, or the boards' checks get both), then point
+app's pings, or the boards' checks get both). Run `pnpm exec wrangler types`
+and drop `HEALTHCHECKS` from `src/worker/env.d.ts`, since the generated types
+then declare it. Then point
 `api.hymnboard.sonrise.io` and `hymnboard.sonrise.io` at the Worker as custom
 domains. The boards speak plain HTTP on port 80, so turn off **Always Use
 HTTPS** and HSTS for the api hostname. Keep the ETag unquoted: the firmware

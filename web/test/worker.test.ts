@@ -127,18 +127,21 @@ describe("device status", () => {
     expect(state.devices[1]!.booted_at).toBeNull();
   });
 
-  test("pings healthchecks.io only where HEALTHCHECKS is on", async () => {
-    // A Cloudflare deploy has no HEALTHCHECKS var, unlike the self-hosted image.
-    const ctx = createExecutionContext();
-    const res = await worker.fetch(
-      new Request(`http://api.hymnboard.sonrise.io/device_booted?device_id=${LEFT}`),
-      { ...env, HEALTHCHECKS: undefined },
-      ctx,
-    );
-    await waitOnExecutionContext(ctx);
-    expect(res.status).toBe(204);
-    expect(pings).toEqual([]);
-  });
+  // A Cloudflare deploy has no HEALTHCHECKS var, unlike the self-hosted image.
+  test.each([undefined, "", "off", "true"])(
+    "pings nothing when HEALTHCHECKS is %j",
+    async (healthchecks) => {
+      const ctx = createExecutionContext();
+      const res = await worker.fetch(
+        new Request(`http://api.hymnboard.sonrise.io/device_booted?device_id=${LEFT}`),
+        { ...env, HEALTHCHECKS: healthchecks },
+        ctx,
+      );
+      await waitOnExecutionContext(ctx);
+      expect(res.status).toBe(204);
+      expect(pings).toEqual([]);
+    },
+  );
 
   test("ignores a saved_state_writes that isn't an integer", async () => {
     await get(`/device_healthy?device_id=${LEFT}&saved_state_writes=9`);
