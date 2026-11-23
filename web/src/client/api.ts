@@ -27,7 +27,8 @@ export async function saveLines(lines: Lines): Promise<BoardState> {
   return json<BoardState>(res);
 }
 
-/** The bits a board downloads for this screen. */
-export async function fetchScreen(id: number): Promise<Uint8Array> {
-  return new Uint8Array(await (await check(await fetch(`/api/screens/${id}`))).arrayBuffer());
+/** The bits a board downloads for this screen, and their ETag. */
+export async function fetchScreen(id: number): Promise<{ etag: string; buffer: Uint8Array }> {
+  const res = await check(await fetch(`/api/screens/${id}`));
+  return { etag: res.headers.get("Etag") ?? "", buffer: new Uint8Array(await res.arrayBuffer()) };
 }

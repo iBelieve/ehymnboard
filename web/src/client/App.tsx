@@ -2,7 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { BoardState } from "../shared/api";
 import { getFont } from "../shared/font";
 import { renderScreen } from "../shared/render";
-import { EMPTY_LINES, linesForScreen, SCREEN_COUNT, withLine, type Lines } from "../shared/screen";
+import {
+  EMPTY_LINES,
+  linesForScreen,
+  SCREEN_COUNT,
+  trimLines,
+  withLine,
+  type Lines,
+} from "../shared/screen";
 import { fetchScreen, fetchState, saveLines } from "./api";
 import { BoardPreview } from "./BoardPreview";
 import { DeviceList } from "./DeviceList";
@@ -18,24 +25,38 @@ export function App() {
   const [error, setError] = useState<string>();
   const [loadError, setLoadError] = useState<string>();
   const fetching = useRef(new Set<string>());
+  const lastLines = useRef<Lines>(undefined);
+  // Bumped when a save starts and ends, so a poll that overlaps a save can't
+  // put back the state from before it.
+  const saves = useRef(0);
 
   const applyState = useCallback((next: BoardState, resetDraft: boolean) => {
+    const previous = lastLines.current;
+    lastLines.current = next.lines;
     setState(next);
-    // Until a load succeeds there's no draft, and the inputs stay disabled.
-    setDraft((prev) => (resetDraft || prev === undefined ? next.lines : prev));
+    // Follow the saved lines unless there are edits in progress (someone else
+    // may have changed them). Until a load succeeds there's no draft, and the
+    // inputs stay disabled.
+    setDraft((prev) =>
+      resetDraft || prev === undefined || (previous && sameLines(prev, previous))
+        ? next.lines
+        : prev,
+    );
   }, []);
 
   // Load once, then keep device status fresh (like the old 10 s htmx poll).
   useEffect(() => {
     let cancelled = false;
-    const load = (first: boolean) =>
-      fetchState()
+    const load = (first: boolean) => {
+      const started = saves.current;
+      return fetchState()
         .then((next) => {
-          if (cancelled) return;
+          if (cancelled || started !== saves.current) return;
           applyState(next, first);
           setLoadError(undefined);
         })
         .catch((e: unknown) => !cancelled && setLoadError(String(e)));
+    };
     void load(true);
     const timer = setInterval(() => void load(false), REFRESH_MS);
     return () => {
@@ -50,10 +71,18 @@ export function App() {
       const key = `${id}:${etag}`;
       if (stored[id]?.etag !== etag && !fetching.current.has(key)) {
         fetching.current.add(key);
+        // Cached under the ETag the server sent with the bits, which is newer
+        // than the state's if the lines changed in between. Then the old ETag
+        // stays marked as fetched, so it isn't fetched again in a loop.
         fetchScreen(id)
-          .then((buffer) => setStored((prev) => ({ ...prev, [id]: { etag, buffer } })))
-          .catch((e: unknown) => setLoadError(String(e)))
-          .finally(() => fetching.current.delete(key));
+          .then((screen) => {
+            setStored((prev) => ({ ...prev, [id]: screen }));
+            if (screen.etag === etag) fetching.current.delete(key);
+          })
+          .catch((e: unknown) => {
+            fetching.current.delete(key);
+            setLoadError(String(e));
+          });
       }
     }
   }, [state?.screens, stored]);
@@ -64,7 +93,8 @@ export function App() {
   // server uses; otherwise show exactly what the boards download, rendering
   // the saved lines the same way until those bits arrive.
   const preview = useMemo(() => {
-    const lines = dirty ? draft : state?.lines;
+    // Trimmed the way the server saves them.
+    const lines = dirty && draft ? trimLines(draft) : state?.lines;
     const font = lines && getFont();
     return SCREEN_IDS.map((id) => {
       const current = state?.screens.find((screen) => screen.id === id)?.etag;
@@ -78,11 +108,13 @@ export function App() {
   async function save(lines: Lines) {
     setSaving(true);
     setError(undefined);
+    saves.current++;
     try {
       applyState(await saveLines(lines), true);
     } catch (e) {
       setError(String(e));
     } finally {
+      saves.current++;
       setSaving(false);
     }
   }
@@ -152,4 +184,8 @@ export function App() {
       <BoardPreview screens={preview} />
     </div>
   );
+}
+
+function sameLines(a: Lines, b: Lines): boolean {
+  return a.every((line, i) => line === b[i]);
 }

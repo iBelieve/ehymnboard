@@ -5,6 +5,7 @@ import { EMPTY_LINES, isLines, SCREEN_COUNT, trimLines } from "../shared/screen"
 import { deviceSortIndex, getDeviceName, pingHealthcheck } from "./devices";
 
 import { STUCK_ETAG_DOWNLOADS } from "./hymn-board";
+import { screenToPng } from "./png";
 
 export { HymnBoard } from "./hymn-board";
 
@@ -26,8 +27,18 @@ function board(env: Env) {
   return env.HYMN_BOARD.getByName("main");
 }
 
-/** Basic auth for the admin, only when credentials are configured. */
+/**
+ * Basic auth for the admin, only when credentials are configured. A browser
+ * sends cached Basic credentials with a cross-site form post too, so changes
+ * must come from the admin page itself (or from a tool like curl, which sends
+ * no Sec-Fetch-Site).
+ */
 const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
+  const site = c.req.header("Sec-Fetch-Site");
+  const changes = c.req.method !== "GET" && c.req.method !== "HEAD";
+  if (changes && (site === "cross-site" || site === "same-site")) {
+    return c.text("Cross-site request refused\n", 403);
+  }
   const username = c.env.BASIC_AUTH_USERNAME;
   const password = c.env.BASIC_AUTH_PASSWORD;
   if (!username || !password) {
@@ -96,6 +107,20 @@ app.get("/images/:id{[0-9]+}", async (c) => {
   }
 
   return c.body(result.buffer, 200, { "Content-Type": "application/octet-stream" });
+});
+
+// A PNG of each screen, public like Flask's, for pages that embed the board.
+app.get("/images/:file{[0-9]+\\.png}", async (c) => {
+  const id = Number.parseInt(c.req.param("file"), 10);
+  if (id < 1 || id > SCREEN_COUNT) {
+    return c.notFound();
+  }
+  const screen = await board(c.env).getScreen(id);
+  return c.body(await screenToPng(screen.buffer), 200, {
+    "Content-Type": "image/png",
+    "Cache-Control": "no-cache",
+    ETag: `"${screen.etag}"`,
+  });
 });
 
 app.get("/device_booted", async (c) => {

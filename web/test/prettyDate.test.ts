@@ -15,6 +15,7 @@ test("a browser clock behind the server's still says just now", () => {
   expect(prettyDate("2026-11-22T12:00:05Z", now)).toBe("just now");
 });
 
-test("older dates are absolute", () => {
-  expect(prettyDate("2026-11-01T12:00:00Z", now)).toBe("on 01 Nov 26");
+test("older dates are absolute, in local time", () => {
+  const localNoon = new Date(2026, 10, 1, 12);
+  expect(prettyDate(localNoon.toISOString(), new Date(2026, 10, 22, 12))).toBe("on 01 Nov 26");
 });

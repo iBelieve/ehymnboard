@@ -6,5 +6,11 @@
     "lib": ["ES2023"],
     "types": ["node", "vite/client"]
   },
-  "include": ["*.config.ts", "eslint.config.js", "test/render.test.ts", "src/shared"]
+  "include": [
+    "*.config.ts",
+    "test/render.test.ts",
+    "test/prettyDate.test.ts",
+    "src/shared",
+    "src/client/prettyDate.ts"
+  ]
 }
