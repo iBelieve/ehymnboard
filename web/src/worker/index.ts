@@ -5,7 +5,6 @@ import { EMPTY_LINES, isLines, SCREEN_COUNT, trimLines } from "../shared/screen"
 import { deviceSortIndex, getDeviceName, pingHealthcheck } from "./devices";
 
 import { STUCK_ETAG_DOWNLOADS } from "./hymn-board";
-import { screenToPng } from "./png";
 
 export { HymnBoard } from "./hymn-board";
 
@@ -107,20 +106,6 @@ app.get("/images/:id{[0-9]+}", async (c) => {
   }
 
   return c.body(result.buffer, 200, { "Content-Type": "application/octet-stream" });
-});
-
-// A PNG of each screen, public like Flask's, for pages that embed the board.
-app.get("/images/:file{[0-9]+\\.png}", async (c) => {
-  const id = Number.parseInt(c.req.param("file"), 10);
-  if (id < 1 || id > SCREEN_COUNT) {
-    return c.notFound();
-  }
-  const screen = await board(c.env).getScreen(id);
-  return c.body(await screenToPng(screen.buffer), 200, {
-    "Content-Type": "image/png",
-    "Cache-Control": "no-cache",
-    ETag: `"${screen.etag}"`,
-  });
 });
 
 app.get("/device_booted", async (c) => {
