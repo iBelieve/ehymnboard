@@ -90,12 +90,30 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-/** As if the board connected long ago and its pings were never recorded. */
-async function makeSilent() {
+/**
+ * As if the board connected long ago and its pings were never recorded, and
+ * (given) the object last heard from it and the alarm last sent it the state
+ * these many ms ago.
+ */
+async function makeSilent(ago: { heard?: number; probed?: number } = {}) {
   await runInDurableObject(env.HYMN_BOARD.getByName("main"), (_, ctx) => {
+    const now = Date.now();
     for (const ws of ctx.getWebSockets(LEFT)) {
-      ws.serializeAttachment({ deviceId: LEFT, connectedAt: Date.now() - SOCKET_SILENT_MS });
+      ws.serializeAttachment({
+        deviceId: LEFT,
+        connectedAt: now - 2 * HEALTH_INTERVAL_MS,
+        heardAt: ago.heard === undefined ? undefined : now - ago.heard,
+        probedAt: ago.probed === undefined ? undefined : now - ago.probed,
+      });
     }
+  });
+}
+
+/** The board sends what it shows; resolves once the server has recorded it. */
+async function sendShown(board: Board, etags: string[]) {
+  board.ws.send(`shown ${etags.join(" ")}`);
+  await vi.waitFor(async () => {
+    expect(JSON.parse(device(await state())?.shown_etags ?? "null")).toEqual(etags);
   });
 }
 
@@ -280,8 +298,9 @@ describe("GET /ws", () => {
     expect(STATE.test(await board.next(1))).toBe(true);
     expect(pings).toEqual([{ url: LEFT_PING, body: "Socket live" }]);
 
-    // Unanswered by the next run: closed, and recorded at once, since a
-    // board that's gone never answers the close
+    // Still unanswered by the next run, 10 minutes on: closed, and recorded
+    // at once, since a board that's gone never answers the close
+    await makeSilent({ probed: HEALTH_INTERVAL_MS });
     pings.length = 0;
     expect(await runDurableObjectAlarm(stub)).toBe(true);
     const s = await state();
@@ -311,11 +330,33 @@ describe("GET /ws", () => {
       expect(pings).toEqual([{ url: LEFT_PING, body: "Socket live" }]);
       // The firmware answers every state message with what it shows
       expect(STATE.test(await board.next(seen))).toBe(true);
-      board.ws.send("shown a b c");
-      await settle();
+      await sendShown(board, ["a", "b", String(run)]);
+      expect(device(await state())?.live).toBe(true);
+      // Still live by the next run, 10 minutes on, on that answer alone
+      await makeSilent({ heard: HEALTH_INTERVAL_MS, probed: HEALTH_INTERVAL_MS + 1_000 });
       expect(device(await state())?.live).toBe(true);
     }
     expect(board.ws.readyState).toBe(WebSocket.OPEN);
+
+    // An answer from longer ago than a run and a bit doesn't count
+    await makeSilent({
+      heard: HEALTH_INTERVAL_MS + SOCKET_SILENT_MS,
+      probed: HEALTH_INTERVAL_MS + SOCKET_SILENT_MS + 1_000,
+    });
+    expect(device(await state())?.live).toBe(false);
+  });
+
+  // A run that throws is retried seconds later, before the board could answer
+  test("a run soon after the last doesn't close a socket whose board hasn't answered yet", async () => {
+    const board = await connect();
+    await board.next(0);
+    const stub = env.HYMN_BOARD.getByName("main");
+    await makeSilent({ probed: 1_000 });
+
+    pings.length = 0;
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    expect(pings).toEqual([{ url: LEFT_PING, body: "Socket live" }]);
+    expect(STATE.test(await board.next(1))).toBe(true);
   });
 
   test("the alarm pings healthchecks.io for each live board and reschedules", async () => {
@@ -329,6 +370,11 @@ describe("GET /ws", () => {
     expect(await runDurableObjectAlarm(stub)).toBe(true);
     expect(pings).toEqual([{ url: LEFT_PING, body: "Socket live" }]);
     expect(await runInDurableObject(stub, (_, ctx) => ctx.storage.getAlarm())).not.toBeNull();
+    // A board that pings isn't sent the state, which would make one that
+    // can't keep an ETag redraw every run
+    expect(await board.ask("ping")).toBe("pong");
+    await settle();
+    expect(board.messages).toEqual([board.messages[0], "pong"]);
   });
 
   test("the alarm stops once no board is connected", async () => {

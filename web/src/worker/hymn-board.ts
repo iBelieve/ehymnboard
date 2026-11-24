@@ -22,7 +22,8 @@ const DEVICE_FIELDS = new Set([
 
 // The board protocol over the WebSocket (see device/src/board_messages.h):
 // the server sends "state 1 <etag1> <etag2> <etag3> <firmware or ->" when the
-// socket opens and whenever any of it changes; the board sends "ping" every
+// socket opens, whenever any of it changes, and from the alarm every 10
+// minutes, to hear the board answer (see alarm()); the board sends "ping" every
 // 30 s (answered with "pong" by the runtime, without waking this object) and
 // "shown <etag1> <etag2> <etag3>" with what its panels show, after a state
 // it already shows and after each update (even one some screens failed).
@@ -32,7 +33,7 @@ const PONG = "pong";
 const NO_FIRMWARE = "-";
 /** Close code for a socket that a newer one from the same board replaced. */
 export const CLOSE_REPLACED = 4000;
-/** Close code for a socket that stopped pinging. */
+/** Close code for a socket that stopped pinging and didn't answer the alarm's state. */
 export const CLOSE_SILENT = 4001;
 
 /**
@@ -265,7 +266,7 @@ export class HymnBoard extends DurableObject<Env> {
 
   /**
    * Every board the server has heard from, with whether its socket is live.
-   * A live board's last ping counts as seeing it.
+   * A live board's last ping or message counts as seeing it.
    */
   getDevices(): (Device & { live: boolean })[] {
     const seen = new Map<string, number>();
@@ -436,10 +437,13 @@ export class HymnBoard extends DurableObject<Env> {
    * enough on its own: on Cloudflare, after a restart (a deploy), it stops
    * moving for sockets from before it, though their pings are still
    * answered (seen 2026-11-24, when this closed both boards' live sockets).
-   * So each run also sends every socket the state, which a board answers
-   * with "shown", and a socket is closed only once it has neither pinged
-   * lately nor answered the last run's state. A board that's gone is closed
-   * by the second run after it went.
+   * So each run also sends the state to every socket that hasn't pinged
+   * lately, which a board answers with "shown", and a socket is closed only
+   * once it has neither pinged lately nor answered the last run's state,
+   * given time to (a retried run comes seconds after the one it retries). A
+   * board that's gone is closed by the second run after it went. Sockets
+   * whose pings are recorded get no state, so a board that can't keep an
+   * ETag isn't made to redraw every run.
    */
   override async alarm(): Promise<void> {
     const live = new Set<string>();
@@ -447,13 +451,16 @@ export class HymnBoard extends DurableObject<Env> {
     const probe = await this.stateMessage();
     for (const ws of this.openSockets()) {
       const attachment = attachmentOf(ws);
-      if (!attachment || (!this.isLive(ws, now) && unansweredProbe(attachment))) {
+      if (!attachment || (!this.isLive(ws, now) && unansweredProbe(attachment, now))) {
         closeQuietly(ws, CLOSE_SILENT, "no ping");
         // A board that's gone never answers the close, so don't wait for it
         this.socketGone(ws, "no ping");
         continue;
       }
       live.add(attachment.deviceId);
+      if (this.pingedLately(ws, now)) {
+        continue;
+      }
       try {
         ws.serializeAttachment({ ...attachment, probedAt: now } satisfies SocketAttachment);
         ws.send(probe);
@@ -499,16 +506,15 @@ export class HymnBoard extends DurableObject<Env> {
 
   /**
    * Whether the board on this socket pinged lately, or answered the alarm's
-   * last state (the alarm runs every HEALTH_INTERVAL_MS, so a live board's
-   * answer is never older than that).
+   * last state (the alarm runs about every HEALTH_INTERVAL_MS, so a live
+   * board's answer is never much older than that).
    */
   private isLive(ws: WebSocket, now: number): boolean {
     const attachment = attachmentOf(ws);
-    const at = this.lastHeardFrom(ws);
-    if (!attachment || at === undefined) {
+    if (!attachment) {
       return false;
     }
-    if (now - at < SOCKET_SILENT_MS) {
+    if (this.pingedLately(ws, now)) {
       return true;
     }
     const { heardAt, probedAt } = attachment;
@@ -518,6 +524,12 @@ export class HymnBoard extends DurableObject<Env> {
       heardAt >= probedAt &&
       now - heardAt < HEALTH_INTERVAL_MS + SOCKET_SILENT_MS
     );
+  }
+
+  /** Whether the board on this socket was heard from (or connected) lately. */
+  private pingedLately(ws: WebSocket, now: number): boolean {
+    const at = this.lastHeardFrom(ws);
+    return at !== undefined && now - at < SOCKET_SILENT_MS;
   }
 
   private socketGone(ws: WebSocket, why: string): void {
@@ -557,9 +569,12 @@ function numberField(value: object, key: string): number | undefined {
   return typeof field === "number" ? field : undefined;
 }
 
-/** The alarm sent this socket the state, and nothing came back since. */
-function unansweredProbe({ heardAt, probedAt }: SocketAttachment): boolean {
-  return probedAt !== undefined && (heardAt ?? 0) < probedAt;
+/**
+ * The alarm sent this socket the state long enough ago for a live board to
+ * have answered, and nothing came back since.
+ */
+function unansweredProbe({ heardAt, probedAt }: SocketAttachment, now: number): boolean {
+  return probedAt !== undefined && (heardAt ?? 0) < probedAt && now - probedAt >= SOCKET_SILENT_MS;
 }
 
 function attachmentOf(ws: WebSocket): SocketAttachment | undefined {
