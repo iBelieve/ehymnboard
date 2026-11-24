@@ -1,7 +1,8 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // Also the Cloudflare Worker's name: Workers Builds deploys master to
-  // https://hymnboard.sonrise.workers.dev (see README.md). The build writes
+  // Also the Cloudflare Worker's name: Workers Builds deploys master to it, the
+  // production server at https://hymnboard.sonrise.io (and
+  // https://hymnboard.sonrise.workers.dev; see README.md). The build writes
   // dist/hymnboard/, which selfhost/generate-config.mjs reads.
   "name": "hymnboard",
   "main": "src/worker/index.ts",
@@ -23,9 +24,9 @@
     "traces": { "enabled": true },
     "issues": { "enabled": true },
   },
-  // No HEALTHCHECKS var here: only the self-hosted image (prod) pings
-  // healthchecks.io, so the Cloudflare deploy can't touch the boards' checks.
-  // Set "vars": { "HEALTHCHECKS": "on" } when Cloudflare becomes prod.
+  // This deploy is production (the boards' server, hymnboard.sonrise.io), so
+  // it pings the boards' healthchecks.io checks. Previews don't inherit it.
+  "vars": { "HEALTHCHECKS": "on" },
   "workers_dev": true,
   // Gives each Worker Preview (below) a URL,
   // https://<branch>-hymnboard.sonrise.workers.dev. (Durable Object Workers
