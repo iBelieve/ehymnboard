@@ -4,9 +4,11 @@ The hymn board server (it replaced the Flask app that lived in `server/`,
 last at commit 02ece7f): a Cloudflare Worker written in TypeScript with
 [Hono](https://hono.dev), a React admin built with Vite, and a single
 `HymnBoard` Durable Object (SQLite-backed) that holds the lines, the rendered
-screens, device status and the OTA firmware image. It is self-hosted on
-[workerd](https://github.com/cloudflare/workerd) in Docker today and can move
-to Cloudflare later with `wrangler deploy` and a DNS change.
+screens, device status and the OTA firmware image. Production runs on
+Cloudflare as the Worker `hymnboard`, at `hymnboard.sonrise.io` (see
+"Cloudflare (production)"). The same build can be self-hosted on
+[workerd](https://github.com/cloudflare/workerd) in Docker with dokku, where
+production ran until 2026-11-23.
 
 ## Layout
 
@@ -38,8 +40,9 @@ tests' emulated board; leave it unset in production). While any board is
 connected, an alarm every 10 minutes pings each live board's
 healthchecks.io check (the boards no longer call `/device_healthy`) and
 closes sockets that stopped pinging. A socket opening and closing is logged
-to the board's check too (pings need `HEALTHCHECKS=on`, which only the
-self-hosted image sets), and the admin shows each board as Live or Offline.
+to the board's check too (pings need `HEALTHCHECKS=on`, which the production
+Worker and the self-hosted image set, and previews and tests don't), and the
+admin shows each board as Live or Offline.
 
 ## Development
 
@@ -58,7 +61,9 @@ set (for `pnpm dev`, put them in `.dev.vars`). After changing
 
 ## Self-hosting (dokku)
 
-The Docker image runs the built Worker on workerd and stores Durable Object
+Production ran on the dokku app `hymnboard` until the move to Cloudflare on
+2026-11-23; it's kept as a fallback (see "Rolling back to dokku" below). The
+Docker image runs the built Worker on workerd and stores Durable Object
 data under `/data`, which must be a persistent volume. Run the `dokku`
 commands on the host, or from a machine on the tailnet as
 `ssh dokku@dev.sonrise.io dokku …`.
@@ -168,15 +173,14 @@ git push dokku@dev.sonrise.io:hymnboard 02ece7f:refs/heads/master   # its deploy
    destroy it later. Device status and firmware live in each app's own storage,
    so nothing needs to be copied back.
 
-## Cloudflare (test deploy)
+## Cloudflare (production)
 
-The same Worker also runs on Cloudflare as `hymnboard`, at
-<https://hymnboard.sonrise.workers.dev>, in the Sonrise Software account. It's
-for testing, and may become production later; the boards don't use it, and it
-has its own Durable Object, so its lines, device status and firmware are
-separate from the dokku app's. It never pings healthchecks.io: only the
-self-hosted image sets `HEALTHCHECKS=on` (in `selfhost/generate-config.mjs`),
-so test traffic can't touch the boards' real checks.
+Production is the Worker `hymnboard` in the Sonrise Software account, at
+`https://hymnboard.sonrise.io` (a Workers custom domain) and
+<https://hymnboard.sonrise.workers.dev>. Its Durable Object holds the lines,
+device status and firmware the boards use; the dokku app's are separate.
+`wrangler.jsonc` sets `HEALTHCHECKS=on`, so it pings the boards'
+healthchecks.io checks (previews don't inherit it).
 
 [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/)
 deploys every push to `master` that changes the web app. Its settings (Worker
@@ -249,17 +253,25 @@ either name, so the move is the firmware's alone:
 certificate for `hymnboard.sonrise.io` (and the Worker's `workers.dev` name)
 still chains to a root the boards trust.
 
-### Making it production
+### Production setup
 
-Add `"vars": { "HEALTHCHECKS": "on" }` to `wrangler.jsonc` (and stop the dokku
-app's pings, or the boards' checks get both). Run `pnpm exec wrangler types`
-and drop `HEALTHCHECKS` from `src/worker/env.d.ts`, since the generated types
-then declare it. Then point
-`hymnboard.sonrise.io` at the Worker as a custom domain, and keep the zone's
-**WebSockets** setting on for the boards' sockets. Boards still on firmware
-from before TLS (see "Boards on TLS" above) speak plain HTTP to
-`api.hymnboard.sonrise.io` on port 80: until none are left, point that name
-at the Worker too, with **Always Use HTTPS** and HSTS off for it. On Cloudflare the
-boards' sockets hibernate, so the Durable Object only runs for a change, a
-`shown` message, a socket opening or closing, and the 10 minute alarm. Keep
-the ETag unquoted: the firmware stores the header value as is.
+- `hymnboard.sonrise.io` is a custom domain of the Worker (Worker
+  **hymnboard** > Settings > Domains & Routes). It has no DNS record of its
+  own besides the one the custom domain makes, and its certificate is
+  Cloudflare's for custom domains; `check-tls-roots.yml` checks daily that the
+  boards trust it.
+- The zone's **WebSockets** setting must stay on for the boards' sockets.
+- Every board runs the TLS firmware, so nothing uses `api.hymnboard.sonrise.io`
+  any more. A board on firmware from before TLS would need that name pointed
+  at the Worker, with **Always Use HTTPS** and HSTS off for it.
+- On Cloudflare the boards' sockets hibernate, so the Durable Object only runs
+  for a change, a `shown` message, a socket opening or closing, and the 10
+  minute alarm.
+- Keep the ETag unquoted: the firmware stores the header value as is.
+
+### Rolling back to dokku
+
+Delete the custom domain. `hymnboard.sonrise.io` then matches the proxied
+`*.sonrise.io` wildcard again, which leads to the dokku host, where the
+`hymnboard` app still serves that name. The boards reconnect within a minute
+or two. The dokku app has its own data, so set the lines there again.

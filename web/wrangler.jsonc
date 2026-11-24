@@ -23,9 +23,9 @@
     "traces": { "enabled": true },
     "issues": { "enabled": true },
   },
-  // No HEALTHCHECKS var here: only the self-hosted image (prod) pings
-  // healthchecks.io, so the Cloudflare deploy can't touch the boards' checks.
-  // Set "vars": { "HEALTHCHECKS": "on" } when Cloudflare becomes prod.
+  // This deploy is production (the boards' server, hymnboard.sonrise.io), so
+  // it pings the boards' healthchecks.io checks. Previews don't inherit it.
+  "vars": { "HEALTHCHECKS": "on" },
   "workers_dev": true,
   // Gives each Worker Preview (below) a URL,
   // https://<branch>-hymnboard.sonrise.workers.dev. (Durable Object Workers

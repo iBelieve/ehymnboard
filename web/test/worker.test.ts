@@ -122,7 +122,7 @@ describe("device status", () => {
     expect(state.devices[1]!.booted_at).toBeNull();
   });
 
-  // A Cloudflare deploy has no HEALTHCHECKS var, unlike the self-hosted image.
+  // Previews and tests have no HEALTHCHECKS var, unlike production.
   test.each([undefined, "", "off", "true"])(
     "pings nothing when HEALTHCHECKS is %j",
     async (healthchecks) => {
