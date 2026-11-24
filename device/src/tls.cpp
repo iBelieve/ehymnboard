@@ -59,6 +59,9 @@ static constexpr std::size_t HEAP_SAMPLE_BYTES = 1024;
 static std::size_t tls_bytes_now = 0;
 static std::size_t tls_bytes_peak = 0;
 static std::size_t heap_bytes_peak = 0;
+// Allocations mbedTLS didn't get, so a caller can tell running out of memory
+// from whatever error mbedTLS reports it as
+static unsigned tls_alloc_failures = 0;
 
 // The heap runs from the end of .bss to __HeapLimit (pico-sdk's sbrk)
 // NOLINTBEGIN(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp): the linker script's names
@@ -78,6 +81,7 @@ extern "C" void *ehymnboard_tls_calloc(std::size_t count, std::size_t size)
 {
     if (size != 0 && count > (SIZE_MAX - sizeof(AllocationHeader)) / size)
     {
+        tls_alloc_failures++;
         return nullptr;
     }
     const std::size_t bytes = count * size;
@@ -85,6 +89,7 @@ extern "C" void *ehymnboard_tls_calloc(std::size_t count, std::size_t size)
     auto *header = static_cast<AllocationHeader *>(calloc(1, sizeof(AllocationHeader) + bytes));
     if (header == nullptr)
     {
+        tls_alloc_failures++;
         printf("TLS: out of memory for %u bytes (mbedTLS has %u)\n", static_cast<unsigned>(bytes),
                static_cast<unsigned>(tls_bytes_now));
         return nullptr;
@@ -134,10 +139,11 @@ void tls_log_memory()
            static_cast<unsigned>(memory.tls_now), static_cast<unsigned>(memory.tls_peak));
 }
 
-// mbedTLS's clock (MBEDTLS_PLATFORM_MS_TIME_ALT), for session lifetimes
+// mbedTLS's clock (MBEDTLS_PLATFORM_MS_TIME_ALT), for ticket ages. 64 bits,
+// like mbedtls_ms_time_t: to_ms_since_boot()'s 32 wrap after 49 days.
 extern "C" mbedtls_ms_time_t mbedtls_ms_time()
 {
-    return static_cast<mbedtls_ms_time_t>(to_ms_since_boot(get_absolute_time()));
+    return static_cast<mbedtls_ms_time_t>(to_us_since_boot(get_absolute_time()) / 1000);
 }
 
 // --- Certificates ----------------------------------------------------------------
@@ -207,21 +213,30 @@ static int find_trusted_roots([[maybe_unused]] void *context, const mbedtls_x509
             break;
         }
         mbedtls_x509_crt_init(crt);
+        const unsigned failures_before = tls_alloc_failures;
         const int parsed = mbedtls_x509_crt_parse_der_nocopy(crt, root.der, root.length);
-        if (parsed != 0 || !same_name(&crt->subject, &child->issuer))
+        if (parsed == 0 && same_name(&crt->subject, &child->issuer))
         {
-            mbedtls_x509_crt_free(crt);
-            mbedtls_free(crt);
-            if (parsed == MBEDTLS_ERR_X509_ALLOC_FAILED)
-            {
-                result = parsed;
-                break;
-            }
+            printf("TLS: checking the server's chain against %s\n", root.name);
+            crt->next = chain;
+            chain = crt;
             continue;
         }
-        printf("TLS: checking the server's chain against %s\n", root.name);
-        crt->next = chain;
-        chain = crt;
+        mbedtls_x509_crt_free(crt);
+        mbedtls_free(crt);
+        // mbedTLS reports running out of memory for a root's key as a bad key,
+        // not as MBEDTLS_ERR_X509_ALLOC_FAILED
+        if (tls_alloc_failures != failures_before)
+        {
+            result = MBEDTLS_ERR_X509_ALLOC_FAILED;
+            break;
+        }
+        if (parsed != 0)
+        {
+            // A root this firmware can't use (a key mbedtls_config.h has no
+            // support for?), which OpenSSL, and so check-tls-roots.yml, can
+            printf("TLS: can't parse root %s (-0x%04x)\n", root.name, static_cast<unsigned>(-parsed));
+        }
     }
     if (result != 0)
     {

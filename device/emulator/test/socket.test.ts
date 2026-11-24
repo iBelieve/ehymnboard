@@ -227,6 +227,45 @@ test("a download that stops being wanted no longer counts as failing", () => {
   assert.ok(!emu.serial.includes("Image downloads failing"));
 });
 
+test("a download the state message stops wanting while it fails doesn't count as failing", () => {
+  // The new state arrives while the download is under way, so the board
+  // takes it in between the failed download and deciding what's failing
+  const { emu, at } = bootLive();
+  emu.server.override = (req) => {
+    if (req.path !== "/images/2") {
+      return undefined;
+    }
+    emu.server.setImage(2, 1);
+    return { status: 500 };
+  };
+  emu.server.setImage(2, 2);
+  emu.waitForSerial("Refreshing screen 2 failed", 10_000, at);
+  emu.run(240_000);
+  assert.equal(emu.reboots, 0);
+  assert.ok(!emu.serial.includes("Image downloads failing"));
+});
+
+test("a failed download the state message stops wanting doesn't hold up a screen it now wants", () => {
+  // The state that arrives during screen 3's failed download puts its old
+  // lines back and changes screen 1, which this round has already passed
+  const { emu, at } = bootLive();
+  emu.server.override = (req) => {
+    if (req.path !== "/images/3") {
+      return undefined;
+    }
+    emu.server.setImage(3, 1);
+    emu.server.setImage(1, 2);
+    return { status: 500 };
+  };
+  const before = emu.net.requests.length;
+  emu.server.setImage(3, 2);
+  const failed = emu.waitForSerial("Refreshing screen 3 failed", 10_000, at);
+  // Right away, not after the 15 s a download that's still failing waits
+  emu.waitForSerial("New image for screen 1", 10_000, failed);
+  const since = emu.net.requests.slice(before).map((r) => r.path);
+  assert.deepEqual(since, ["/images/3", "/images/1"], "screen 3 isn't tried again");
+});
+
 test("keeps pinging while it downloads screens one after another", () => {
   // Three downloads that each time out: the socket mustn't go quiet for
   // the whole update (a proxy closes it after a minute without traffic)

@@ -73,7 +73,7 @@ static void send_healthcheck_request(const std::string &path, const std::string 
 
     // httpc holds on to these until it calls on_healthcheck_request_completed,
     // which can be after the wait below gives up, so they outlive this call,
-    // and a new request waits for the last one to finish
+    // and a new request is skipped until the last one has finished
     static HealthcheckRequest req;
     static bool running = false;
     if (running && !req.complete)

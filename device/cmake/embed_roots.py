@@ -11,8 +11,10 @@ import re
 import sys
 from pathlib import Path
 
+# The name is the rest of its own line (DOTALL would let `.` run on into the
+# next), and not blank
 CERT = re.compile(
-    r"^# Name: (?P<name>.+?)\s*$(?P<between>.*?)"
+    r"^# Name: (?P<name>[^\n]*?\S)[^\S\n]*$(?P<between>.*?)"
     r"^-----BEGIN CERTIFICATE-----$(?P<body>.*?)^-----END CERTIFICATE-----$",
     re.MULTILINE | re.DOTALL,
 )

@@ -121,7 +121,8 @@ static bool update_screens(Board &board)
     auto &screens = board.screens;
     bool any_updated = false;
     bool any_answered = false;
-    bool any_failed = false;
+    // The screens whose download failed this time
+    std::array<bool, SCREEN_COUNT> failed{};
 
     for (std::size_t i = 0; i < SCREEN_COUNT; i++)
     {
@@ -141,7 +142,7 @@ static bool update_screens(Board &board)
         }
         else
         {
-            any_failed = true;
+            failed.at(i) = true;
         }
         // A download and a redraw take seconds: keep pinging meanwhile
         service(board);
@@ -150,7 +151,15 @@ static bool update_screens(Board &board)
     // How close TLS came to running out of memory, downloading beside the socket
     tls_log_memory();
 
-    if (any_failed)
+    // A failed download only counts while its screen still wants a new image:
+    // a state message serviced meanwhile may have made it unwanted, whatever
+    // the other screens want
+    bool still_failing = false;
+    for (std::size_t i = 0; i < SCREEN_COUNT; i++)
+    {
+        still_failing = still_failing || (failed.at(i) && screens.wanted.at(i) != screens.shown.at(i));
+    }
+    if (still_failing)
     {
         screens.retry_at_ms = now_ms() + FETCH_RETRY_MS;
         if (!screens.failing_since_ms)

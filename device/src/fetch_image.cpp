@@ -121,7 +121,7 @@ FetchImageResult fetch_image(int image, std::string &etag)
 
     // httpc holds on to these until it calls on_http_req_completed, which can
     // be after the wait below gives up, so they outlive this call, and a new
-    // request waits for the last one to finish
+    // request is refused until the last one has finished
     static FetchImageHttpRequest req;
     static bool running = false;
     if (running && !req.complete)

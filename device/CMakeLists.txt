@@ -64,8 +64,9 @@ add_subdirectory(lib/pico_fota_bootloader)
 # checked against the root CAs in certs/roots.pem (see src/tls.h)
 set(EHYMNBOARD_SERVER_HOST "hymnboard.sonrise.io" CACHE STRING
     "The server's host name, for https:// and wss://")
-# For the emulator's tests: also trust certs/test/root.pem, whose private key
-# is public (it's in this repository). A build that trusts it must never reach
+# For the emulator's tests: also trust certs/test/root.pem, under which this
+# repository has a certificate for the server's name together with its private
+# key (certs/test/server.key). A build that trusts it must never reach
 # a real board, so it needs the example OTA key, whose images real boards
 # refuse. CI builds this way.
 option(EHYMNBOARD_TEST_ROOT_CA "Also trust the emulator's test root CA (tests only)" OFF)
