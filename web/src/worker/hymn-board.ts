@@ -267,7 +267,8 @@ export class HymnBoard extends DurableObject<Env> {
    * A live board's last ping counts as seeing it.
    */
   getDevices(): (Device & { live: boolean })[] {
-    // The admin asks every few seconds, so a deploy's old sockets go soon
+    // While the admin is open it asks every few seconds, so after a deploy the
+    // old sockets go soon; with nobody there, the alarm closes them
     this.closeOutdatedSockets();
     const seen = new Map<string, number>();
     for (const ws of this.openSockets()) {
@@ -472,8 +473,11 @@ export class HymnBoard extends DurableObject<Env> {
    * but the runtime stops updating their auto-response timestamps (pings
    * are still answered): seen 2026-11-24, when the alarm took both boards'
    * live sockets for silent. Called from each event that could read those
-   * timestamps, so a deploy's old sockets go at the first one after it. A
-   * board reconnects within seconds.
+   * timestamps, so a deploy's old sockets go at the first one after it:
+   * the admin's next look, a board connecting or sending `shown`, or at the
+   * latest the alarm, within 10 minutes (board pings don't wake the object,
+   * as the auto-response answers them). Until then the old sockets still
+   * get the state. A board reconnects within seconds.
    */
   private closeOutdatedSockets(): void {
     const version = this.env.CF_VERSION_METADATA.id;
