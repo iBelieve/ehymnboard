@@ -176,8 +176,9 @@ git push dokku@dev.sonrise.io:hymnboard 02ece7f:refs/heads/master   # its deploy
 ## Cloudflare (production)
 
 Production is the Worker `hymnboard` in the Sonrise Software account, at
-`https://hymnboard.sonrise.io` (a Workers custom domain) and
-<https://hymnboard.sonrise.workers.dev>. Its Durable Object holds the lines,
+`https://hymnboard.sonrise.io` (the boards' address),
+`https://hymnboard.mluther.org` (the church's address for the admin), both
+Workers custom domains, and <https://hymnboard.sonrise.workers.dev>. Its Durable Object holds the lines,
 device status and firmware the boards use; the dokku app's are separate.
 `wrangler.jsonc` sets `HEALTHCHECKS=on`, so it pings the boards'
 healthchecks.io checks (previews don't inherit it).
@@ -260,6 +261,9 @@ still chains to a root the boards trust.
   own besides the one the custom domain makes, and its certificate is
   Cloudflare's for custom domains; `check-tls-roots.yml` checks daily that the
   boards trust it.
+- `hymnboard.mluther.org`, the address the church uses for the admin, is a
+  custom domain of the Worker too. It replaced that name's A record
+  (`5.161.55.186`, proxied: the dokku host).
 - The zone's **WebSockets** setting must stay on for the boards' sockets.
 - Every board runs the TLS firmware, so nothing uses `api.hymnboard.sonrise.io`
   any more. A board on firmware from before TLS would need that name pointed
@@ -271,7 +275,8 @@ still chains to a root the boards trust.
 
 ### Rolling back to dokku
 
-Delete the custom domain. `hymnboard.sonrise.io` then matches the proxied
+Delete both custom domains, and add `hymnboard.mluther.org`'s A record back
+(`5.161.55.186`, proxied). `hymnboard.sonrise.io` then matches the proxied
 `*.sonrise.io` wildcard again, which leads to the dokku host, where the
-`hymnboard` app still serves that name. The boards reconnect within a minute
+`hymnboard` app still serves both names. The boards reconnect within a minute
 or two. The dokku app has its own data, so set the lines there again.
