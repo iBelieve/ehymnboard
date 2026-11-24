@@ -8,6 +8,7 @@ import {
   CLOSE_SILENT,
   HEALTH_INTERVAL_MS,
   SOCKET_SILENT_MS,
+  coloOf,
 } from "../src/worker/hymn-board";
 import { type Ping, recordPings } from "./healthchecks";
 
@@ -56,10 +57,18 @@ function upgrade(query: string, headers: Record<string, string> = { Upgrade: "we
   return exports.default.fetch(new Request(`${BASE}/ws?${query}`, { headers }));
 }
 
-/** Connects as the firmware does, with its query string. */
-async function connect(deviceId = LEFT, firmware = "v1"): Promise<Board> {
+/**
+ * Connects as the firmware does, with its query string (and any headers
+ * Cloudflare adds on the way, like CF-Ray).
+ */
+async function connect(
+  deviceId = LEFT,
+  firmware = "v1",
+  headers: Record<string, string> = {},
+): Promise<Board> {
   const res = await upgrade(
     `device_id=${deviceId}&saved_state_writes=4&watchdog_caused_reboot=0&firmware_version=${firmware}&proto=1`,
+    { Upgrade: "websocket", ...headers },
   );
   expect(res.status).toBe(101);
   const board = new Board(res.webSocket!);
@@ -111,6 +120,12 @@ async function makeOutdated(
 /** Lets the object's waitUntil'd work (healthcheck pings) finish. */
 async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 20));
+}
+
+/** Spies on console.log, and gives what has been logged since. */
+function spyOnLog(): () => string[] {
+  const log = vi.spyOn(console, "log");
+  return () => log.mock.calls.map((call) => String(call[0]));
 }
 
 /** The board hangs up, and the server has dealt with it. */
@@ -248,6 +263,30 @@ describe("GET /ws", () => {
     expect(pings.filter((p) => p.url.endsWith("/log"))).toEqual([]);
   });
 
+  test("logs a replaced socket's age, where it came in and its last ping", async () => {
+    const logged = spyOnLog();
+    // Each connection through a different data center, so the replaced
+    // socket's line must show the one its own attachment kept
+    const old = await connect(LEFT, "v1", { "CF-Ray": "8e31e5ea4a4cf507-LHR" });
+    await old.next(0);
+    await old.ask("ping");
+    const replacement = await connect(LEFT, "v1", { "CF-Ray": "8e31e5ea4a4cf508-ORD" });
+    await replacement.next(0);
+    await old.closed;
+
+    const lines = logged();
+    expect(lines).toContainEqual(
+      expect.stringMatching(
+        new RegExp(
+          `^Device socket replaced: .+ \\(${LEFT}\\), up \\d+ s via LHR, last ping \\d+ s ago$`,
+        ),
+      ),
+    );
+    expect(lines).toContainEqual(
+      expect.stringMatching(new RegExp(`^Device socket connected: .+ \\(${LEFT}\\) via ORD$`)),
+    );
+  });
+
   test("a replaced socket whose board never answers the close doesn't count", async () => {
     // A board that lost power: its old socket never echoes the server's
     // close, so it stays listed as closing.
@@ -275,6 +314,22 @@ describe("GET /ws", () => {
       url: `${LEFT_PING}/log`,
       body: "Socket closed (code 1000, bye)",
     });
+  });
+
+  test("logs a closed socket's data center, and that it never pinged", async () => {
+    const logged = spyOnLog();
+    const board = await connect(LEFT, "v1", { "CF-Ray": "8e31e5ea4a4cf507-LHR" });
+    await board.next(0);
+    await hangUp(board);
+
+    // Logged once the attachment is marked gone, which must keep the colo
+    expect(logged()).toContainEqual(
+      expect.stringMatching(
+        new RegExp(
+          `^Device socket closed \\(code 1000, bye\\): .+ \\(${LEFT}\\), up \\d+ s via LHR, no ping yet$`,
+        ),
+      ),
+    );
   });
 
   test("the alarm closes a silent board's socket and logs it once", async () => {
@@ -314,10 +369,17 @@ describe("GET /ws", () => {
     await makeOutdated(LEFT);
 
     pings.length = 0;
+    const logged = spyOnLog();
     await state();
     expect((await board.closed).code).toBe(CLOSE_OUTDATED);
     await settle();
     expect(pings).toEqual([{ url: `${LEFT_PING}/log`, body: "Socket closed (server updated)" }]);
+    // Its ping time stopped with the deploy, so it isn't logged
+    expect(logged()).toContainEqual(
+      expect.stringMatching(
+        /^Device socket closed \(server updated\): .+, from an earlier deploy$/,
+      ),
+    );
 
     // The board reconnects to this deploy, and that socket stays
     const again = await connect();
@@ -400,4 +462,27 @@ test("EXTRA_DEVICE_IDS lets a test board connect", async () => {
   const board = await connect("1111111111111111");
   expect(STATE.test(await board.next(0))).toBe(true);
   expect(device(await state(), "1111111111111111")?.live).toBe(true);
+});
+
+/** A request as Cloudflare hands it on, with these headers and `cf`. */
+function cfRequest(
+  headers: Record<string, string>,
+  cf?: RequestInitCfProperties & { colo: string },
+) {
+  return new Request(BASE, { headers, cf });
+}
+
+describe("coloOf", () => {
+  test("takes Cloudflare's own colo first", () => {
+    expect(coloOf(cfRequest({ "cf-ray": "8e31e5ea4a4cf507-ORD" }, { colo: "LHR" }))).toBe("LHR");
+  });
+
+  test("falls back to the CF-Ray header's suffix, as behind Cloudflare's proxy", () => {
+    expect(coloOf(cfRequest({ "cf-ray": "8e31e5ea4a4cf507-ORD" }))).toBe("ORD");
+  });
+
+  test("is undefined without either", () => {
+    expect(coloOf(cfRequest({}))).toBeUndefined();
+    expect(coloOf(cfRequest({ "cf-ray": "8e31e5ea4a4cf507" }))).toBeUndefined();
+  });
 });
