@@ -90,6 +90,15 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
+/** As if the board connected long ago and its pings were never recorded. */
+async function makeSilent() {
+  await runInDurableObject(env.HYMN_BOARD.getByName("main"), (_, ctx) => {
+    for (const ws of ctx.getWebSockets(LEFT)) {
+      ws.serializeAttachment({ deviceId: LEFT, connectedAt: Date.now() - SOCKET_SILENT_MS });
+    }
+  });
+}
+
 /** Lets the object's waitUntil'd work (healthcheck pings) finish. */
 async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 20));
@@ -259,20 +268,22 @@ describe("GET /ws", () => {
     });
   });
 
-  test("the alarm closes a silent board's socket and logs it once", async () => {
+  test("the alarm closes a socket that neither pings nor answers the state, and logs it once", async () => {
     const board = await connect();
     await board.next(0);
     const stub = env.HYMN_BOARD.getByName("main");
-    // The board last pinged longer ago than the server waits
-    await runInDurableObject(stub, (_, ctx) => {
-      for (const ws of ctx.getWebSockets(LEFT)) {
-        ws.serializeAttachment({ deviceId: LEFT, connectedAt: Date.now() - SOCKET_SILENT_MS });
-      }
-    });
+    await makeSilent();
 
+    // The first run sends the state, and still counts the board live
     pings.length = 0;
     expect(await runDurableObjectAlarm(stub)).toBe(true);
-    // Recorded at once: a board that's gone never answers the close
+    expect(STATE.test(await board.next(1))).toBe(true);
+    expect(pings).toEqual([{ url: LEFT_PING, body: "Socket live" }]);
+
+    // Unanswered by the next run: closed, and recorded at once, since a
+    // board that's gone never answers the close
+    pings.length = 0;
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
     const s = await state();
     expect(device(s)?.live).toBe(false);
     expect(device(s)?.disconnected_at).toBeTruthy();
@@ -282,6 +293,29 @@ describe("GET /ws", () => {
     expect((await board.closed).code).toBe(CLOSE_SILENT);
     await settle();
     expect(pings).toHaveLength(1);
+  });
+
+  // On Cloudflare, a deploy stops the auto-response's timestamp for sockets
+  // from before it, though their pings are still answered
+  test("a board whose pings went unrecorded stays live while it answers the state", async () => {
+    const board = await connect();
+    await board.next(0);
+    const stub = env.HYMN_BOARD.getByName("main");
+    await makeSilent();
+    expect(device(await state())?.live).toBe(false);
+
+    for (let run = 0; run < 3; run++) {
+      pings.length = 0;
+      const seen = board.messages.length;
+      expect(await runDurableObjectAlarm(stub)).toBe(true);
+      expect(pings).toEqual([{ url: LEFT_PING, body: "Socket live" }]);
+      // The firmware answers every state message with what it shows
+      expect(STATE.test(await board.next(seen))).toBe(true);
+      board.ws.send("shown a b c");
+      await settle();
+      expect(device(await state())?.live).toBe(true);
+    }
+    expect(board.ws.readyState).toBe(WebSocket.OPEN);
   });
 
   test("the alarm pings healthchecks.io for each live board and reschedules", async () => {
