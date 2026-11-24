@@ -32,7 +32,8 @@ const HEALTHCHECK_TIMEOUT_MS = 10_000;
 /**
  * Whether this server is the one the boards' healthchecks.io checks belong
  * to: HEALTHCHECKS=on in the production Worker (wrangler.jsonc) and the
- * self-hosted image, never in previews or tests.
+ * self-hosted image, never in previews or `pnpm dev` (vite.config.ts). The
+ * Worker tests turn it on too, with fetch stubbed.
  */
 export function healthchecksOn(env: { HEALTHCHECKS?: string }): boolean {
   return env.HEALTHCHECKS === "on";

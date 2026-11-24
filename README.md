@@ -28,9 +28,9 @@ The web app and backend for the eHymnBoard project ([web/](./web/README.md)).
 - TypeScript
 - [Hono](https://hono.dev) on a Cloudflare Worker with a SQLite-backed Durable Object
 - React, Tailwind CSS and daisyUI
-- Self-hosted on [workerd](https://github.com/cloudflare/workerd) in Docker
+- In production on Cloudflare Workers, and self-hostable on [workerd](https://github.com/cloudflare/workerd) in Docker
 
-Code is deployed to a [Hetzner VPS](https://www.hetzner.com/cloud/) using [Dokku](https://dokku.com).
+Code is deployed to Cloudflare Workers by Workers Builds from `master`. A [Dokku](https://dokku.com) app on a [Hetzner VPS](https://www.hetzner.com/cloud/) runs the same build as the fallback.
 
 **PCB Designs**
 

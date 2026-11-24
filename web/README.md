@@ -41,8 +41,9 @@ connected, an alarm every 10 minutes pings each live board's
 healthchecks.io check (the boards no longer call `/device_healthy`) and
 closes sockets that stopped pinging. A socket opening and closing is logged
 to the board's check too (pings need `HEALTHCHECKS=on`, which the production
-Worker and the self-hosted image set, and previews and tests don't), and the
-admin shows each board as Live or Offline.
+Worker, the self-hosted image and the Worker tests (with `fetch` mocked) set,
+and previews and `pnpm dev` don't), and the admin shows each board as Live or
+Offline.
 
 ## Development
 
@@ -55,9 +56,12 @@ pnpm build        # dist/client (admin) and dist/hymnboard (Worker)
 ```
 
 Basic auth is off unless `BASIC_AUTH_USERNAME` and `BASIC_AUTH_PASSWORD` are
-set (for `pnpm dev`, put them in `.dev.vars`). After changing
+set (for `pnpm dev`, put them in `.dev.vars`). `pnpm dev` turns
+`wrangler.jsonc`'s `HEALTHCHECKS=on` off (in `vite.config.ts`), so local
+requests never ping the boards' real checks. After changing
 `wrangler.jsonc`, run `pnpm exec wrangler types` to regenerate
-`worker-configuration.d.ts`.
+`worker-configuration.d.ts`, with `.dev.vars` moved aside: the command reads
+it too, and would declare its secrets as always set.
 
 ## Self-hosting (dokku)
 
@@ -262,8 +266,8 @@ still chains to a root the boards trust.
   Cloudflare's for custom domains; `check-tls-roots.yml` checks daily that the
   boards trust it.
 - `hymnboard.mluther.org`, the address the church uses for the admin, is a
-  custom domain of the Worker too. It replaced that name's A record
-  (`5.161.55.186`, proxied: the dokku host).
+  custom domain of the Worker too. It replaced that name's proxied A record
+  to the dokku host (the address the `*.sonrise.io` wildcard has).
 - The zone's **WebSockets** setting must stay on for the boards' sockets.
 - Every board runs the TLS firmware, so nothing uses `api.hymnboard.sonrise.io`
   any more. A board on firmware from before TLS would need that name pointed
@@ -275,8 +279,16 @@ still chains to a root the boards trust.
 
 ### Rolling back to dokku
 
-Delete both custom domains, and add `hymnboard.mluther.org`'s A record back
-(`5.161.55.186`, proxied). `hymnboard.sonrise.io` then matches the proxied
-`*.sonrise.io` wildcard again, which leads to the dokku host, where the
-`hymnboard` app still serves both names. The boards reconnect within a minute
-or two. The dokku app has its own data, so set the lines there again.
+First publish the firmware the boards run on the dokku app (`POST /firmware`,
+as in [device/README.md](../device/README.md#releasing-an-update)), through a
+temporary domain the wildcard already reaches, such as
+`dokku domains:add hymnboard hymnboard-fallback.sonrise.io`. A board installs
+any version the server offers that differs from its own, so an older release
+left on the dokku app would downgrade every board as soon as it connects.
+
+Then delete both custom domains, and add `hymnboard.mluther.org`'s A record
+back (proxied, with the `*.sonrise.io` wildcard's address). `hymnboard.sonrise.io`
+then matches the proxied `*.sonrise.io` wildcard again, which leads to the
+dokku host, where the `hymnboard` app still serves both names. The boards
+reconnect within a minute or two. The dokku app has its own data, so set the
+lines there again.

@@ -1,7 +1,8 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // Also the Cloudflare Worker's name: Workers Builds deploys master to
-  // https://hymnboard.sonrise.workers.dev (see README.md). The build writes
+  // Also the Cloudflare Worker's name: Workers Builds deploys master to it, the
+  // production server at https://hymnboard.sonrise.io (and
+  // https://hymnboard.sonrise.workers.dev; see README.md). The build writes
   // dist/hymnboard/, which selfhost/generate-config.mjs reads.
   "name": "hymnboard",
   "main": "src/worker/index.ts",

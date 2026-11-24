@@ -122,7 +122,8 @@ describe("device status", () => {
     expect(state.devices[1]!.booted_at).toBeNull();
   });
 
-  // Previews and tests have no HEALTHCHECKS var, unlike production.
+  // Previews have no HEALTHCHECKS var and `pnpm dev` has it off, unlike
+  // production (and these tests' default, vitest.config.ts).
   test.each([undefined, "", "off", "true"])(
     "pings nothing when HEALTHCHECKS is %j",
     async (healthchecks) => {
