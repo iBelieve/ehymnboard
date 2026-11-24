@@ -2,6 +2,7 @@
 // Worker (see Dockerfile). Compatibility settings come from the build's
 // wrangler.json, so they can't drift from what Cloudflare would run.
 
+import { randomUUID } from "node:crypto";
 import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,6 +56,10 @@ ${wrangler.durable_objects.bindings
     # The self-hosted image is production's fallback, so it pings
     # healthchecks.io, as the production Worker does (wrangler.jsonc).
     (name = "HEALTHCHECKS", text = "on"),
+    # workerd has no version metadata binding, so each run of this script
+    # makes an ID (a cached Docker layer keeps the last one, which is fine: a
+    # restart closes every socket anyway).
+    (name = "CF_VERSION_METADATA", json = ${JSON.stringify(JSON.stringify({ id: randomUUID(), tag: "", timestamp: new Date().toISOString() }))}),
   ],
   durableObjectNamespaces = [
 ${classes.map((name) => `    (className = ${JSON.stringify(name)}, uniqueKey = "ehymnboard-${name}", enableSql = true),`).join("\n")}

@@ -34,6 +34,8 @@ const NO_FIRMWARE = "-";
 export const CLOSE_REPLACED = 4000;
 /** Close code for a socket that stopped pinging. */
 export const CLOSE_SILENT = 4001;
+/** Close code for a socket from before a deploy (see closeOutdatedSockets). */
+export const CLOSE_OUTDATED = 4002;
 
 /**
  * A board pings every 30 s, so a socket silent this long is dead (the board
@@ -44,11 +46,18 @@ export const SOCKET_SILENT_MS = 90_000;
 export const HEALTH_INTERVAL_MS = 10 * 60_000;
 
 /**
- * What each socket remembers through hibernation. `colo` is the Cloudflare
- * data center the board's connection came in through (see coloOf()). `gone`
- * once the socket's close is dealt with, so it's dealt with once.
+ * What each socket remembers through hibernation: `version` is the deploy
+ * that accepted it (unset before 2026-11-24), `colo` the Cloudflare data
+ * center the board's connection came in through (see coloOf()), and `gone`
+ * is set once the socket's close is dealt with, so it's dealt with once.
  */
-type SocketAttachment = { deviceId: string; connectedAt: number; colo?: string; gone?: boolean };
+type SocketAttachment = {
+  deviceId: string;
+  connectedAt: number;
+  version?: string;
+  colo?: string;
+  gone?: boolean;
+};
 
 // A board that keeps downloading the same image never kept its ETag (say, a
 // header it can't parse), so it redraws every poll. Flag it after this many
@@ -260,6 +269,9 @@ export class HymnBoard extends DurableObject<Env> {
    * A live board's last ping counts as seeing it.
    */
   getDevices(): (Device & { live: boolean })[] {
+    // While the admin is open it asks every 10 seconds, so after a deploy the
+    // old sockets go soon; with nobody there, the alarm closes them
+    this.closeOutdatedSockets();
     const seen = new Map<string, number>();
     for (const ws of this.openSockets()) {
       const attachment = attachmentOf(ws);
@@ -341,10 +353,17 @@ export class HymnBoard extends DurableObject<Env> {
       console.log(`Device socket replaced: ${name} (${deviceId}), ${this.describe(old, now)}`);
       closeQuietly(old, CLOSE_REPLACED, "replaced by a newer socket");
     }
+    // After the board's own, which is replaced, not a disconnect, whatever its deploy
+    this.closeOutdatedSockets();
 
     const { 0: client, 1: server } = new WebSocketPair();
     this.ctx.acceptWebSocket(server, [deviceId]);
-    server.serializeAttachment({ deviceId, connectedAt: now, colo } satisfies SocketAttachment);
+    server.serializeAttachment({
+      deviceId,
+      connectedAt: now,
+      version: this.env.CF_VERSION_METADATA.id,
+      colo,
+    } satisfies SocketAttachment);
 
     const at = new Date(now).toISOString();
     this.updateDevice(deviceId, {
@@ -389,6 +408,12 @@ export class HymnBoard extends DurableObject<Env> {
   }
 
   override webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
+    this.closeOutdatedSockets();
+    // One the server closed (outdated, replaced or silent) gets no answer, and
+    // a reply would throw: its board is reconnecting
+    if (ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
     const attachment = attachmentOf(ws);
     if (!attachment || typeof message !== "string") {
       return;
@@ -427,6 +452,8 @@ export class HymnBoard extends DurableObject<Env> {
    * that stopped pinging.
    */
   override async alarm(): Promise<void> {
+    // First, as these sockets' ping times would fool the check below
+    this.closeOutdatedSockets();
     const live = new Set<string>();
     for (const ws of this.openSockets()) {
       const attachment = attachmentOf(ws);
@@ -449,6 +476,27 @@ export class HymnBoard extends DurableObject<Env> {
     }
   }
 
+  /**
+   * Closes the boards' sockets that an earlier deploy accepted, so they
+   * reconnect to this one. On Cloudflare, sockets stay open across a deploy,
+   * but the runtime stops updating their auto-response timestamps (pings
+   * are still answered): seen 2026-11-24, when the alarm took both boards'
+   * live sockets for silent. Called from each event that could read those
+   * timestamps, so a deploy's old sockets go at the first one after it:
+   * the admin's next look, a board connecting or sending `shown`, or at the
+   * latest the alarm, within 10 minutes (board pings don't wake the object,
+   * as the auto-response answers them). Until then the old sockets still
+   * get the state. A board reconnects within seconds.
+   */
+  private closeOutdatedSockets(): void {
+    const version = this.env.CF_VERSION_METADATA.id;
+    const outdated = this.openSockets().filter((ws) => attachmentOf(ws)?.version !== version);
+    for (const ws of outdated) {
+      closeQuietly(ws, CLOSE_OUTDATED, "server updated");
+      this.socketGone(ws, "server updated");
+    }
+  }
+
   /** Pings the board's healthchecks.io check, when HEALTHCHECKS=on. */
   private async ping(...args: Parameters<typeof pingHealthcheck>): Promise<void> {
     if (healthchecksOn(this.env)) {
@@ -457,7 +505,7 @@ export class HymnBoard extends DurableObject<Env> {
   }
 
   /**
-   * The sockets still open. One the server closed (replaced, or silent)
+   * The sockets still open. One the server closed (replaced, silent or outdated)
    * stays listed until its board answers the close, which a board that's
    * gone never does, so it doesn't count.
    */
@@ -478,7 +526,8 @@ export class HymnBoard extends DurableObject<Env> {
   /**
    * How long the socket has been up, the data center it came in through, and
    * how long ago its last ping got here (as the runtime recorded it), for the
-   * logs: "up 634 s via LHR, last ping 32 s ago".
+   * logs: "up 634 s via LHR, last ping 32 s ago". A socket from an earlier
+   * deploy has no trustworthy ping time (see closeOutdatedSockets()).
    */
   private describe(ws: WebSocket, now: number): string {
     const attachment = attachmentOf(ws);
@@ -486,7 +535,12 @@ export class HymnBoard extends DurableObject<Env> {
       return "unknown socket";
     }
     const pinged = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime();
-    const ping = pinged === undefined ? "no ping yet" : `last ping ${seconds(now - pinged)} s ago`;
+    const ping =
+      attachment.version !== this.env.CF_VERSION_METADATA.id
+        ? "from an earlier deploy"
+        : pinged === undefined
+          ? "no ping yet"
+          : `last ping ${seconds(now - pinged)} s ago`;
     return `up ${seconds(now - attachment.connectedAt)} s via ${attachment.colo ?? "?"}, ${ping}`;
   }
 
@@ -537,6 +591,10 @@ function attachmentOf(ws: WebSocket): SocketAttachment | undefined {
     return {
       deviceId: attachment.deviceId,
       connectedAt: attachment.connectedAt,
+      version:
+        "version" in attachment && typeof attachment.version === "string"
+          ? attachment.version
+          : undefined,
       colo:
         "colo" in attachment && typeof attachment.colo === "string" ? attachment.colo : undefined,
       gone: "gone" in attachment && attachment.gone === true,
