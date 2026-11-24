@@ -14,6 +14,7 @@ import { type Ping, recordPings } from "./healthchecks";
 const LEFT = "E6614103E71F8D26";
 const RIGHT = "E661A4D41787452B";
 const LEFT_PING = "https://hc-ping.com/a717c5f0-8a83-45f9-92a7-c79a21a437b4";
+const RIGHT_PING = "https://hc-ping.com/6c7ef2cb-71b8-492e-9e11-4ddfacf29d0c";
 const AUTH = { Authorization: `Basic ${btoa("admin:secret")}` };
 const BASE = "http://api.hymnboard.sonrise.io";
 const STATE = /^state 1 ([0-9a-f]{40}) ([0-9a-f]{40}) ([0-9a-f]{40}) (\S+)$/;
@@ -92,9 +93,16 @@ afterEach(async () => {
 });
 
 /** As if the board's socket was accepted by another deploy (or none, before versions). */
-async function makeOutdated(attachment: Record<string, unknown>) {
+async function makeOutdated(
+  deviceId: string,
+  attachment: Record<string, unknown> = {
+    deviceId,
+    connectedAt: Date.now(),
+    version: "an-earlier-deploy",
+  },
+) {
   await runInDurableObject(env.HYMN_BOARD.getByName("main"), (_, ctx) => {
-    for (const ws of ctx.getWebSockets(LEFT)) {
+    for (const ws of ctx.getWebSockets(deviceId)) {
       ws.serializeAttachment(attachment);
     }
   });
@@ -303,7 +311,7 @@ describe("GET /ws", () => {
   test("the admin's next look closes a socket from an earlier deploy", async () => {
     const board = await connect();
     await board.next(0);
-    await makeOutdated({ deviceId: LEFT, connectedAt: Date.now(), version: "an-earlier-deploy" });
+    await makeOutdated(LEFT);
 
     pings.length = 0;
     await state();
@@ -322,7 +330,7 @@ describe("GET /ws", () => {
     const board = await connect();
     await board.next(0);
     // Accepted before sockets recorded their deploy, and long quiet
-    await makeOutdated({ deviceId: LEFT, connectedAt: Date.now() - SOCKET_SILENT_MS });
+    await makeOutdated(LEFT, { deviceId: LEFT, connectedAt: Date.now() - SOCKET_SILENT_MS });
 
     pings.length = 0;
     expect(await runDurableObjectAlarm(env.HYMN_BOARD.getByName("main"))).toBe(true);
@@ -334,11 +342,37 @@ describe("GET /ws", () => {
   test("a message on an earlier deploy's socket closes it unanswered", async () => {
     const board = await connect();
     await board.next(0);
-    await makeOutdated({ deviceId: LEFT, connectedAt: Date.now(), version: "an-earlier-deploy" });
+    const before = device(await state())?.shown_etags;
+    await makeOutdated(LEFT);
 
+    // The second comes once the first has closed the socket
     board.ws.send("shown a b c");
+    board.ws.send("shown d e f");
     expect((await board.closed).code).toBe(CLOSE_OUTDATED);
-    expect(device(await state())?.shown_etags).not.toBe(JSON.stringify(["a", "b", "c"]));
+    expect(device(await state())?.shown_etags).toBe(before);
+  });
+
+  test("a board reconnecting over its earlier deploy's socket replaces it", async () => {
+    const left = await connect(LEFT);
+    const right = await connect(RIGHT);
+    await Promise.all([left.next(0), right.next(0)]);
+    const before = device(await state())?.disconnected_at;
+    await makeOutdated(LEFT);
+    await makeOutdated(RIGHT);
+
+    pings.length = 0;
+    const again = await connect(LEFT);
+    await again.next(0);
+    expect((await left.closed).code).toBe(CLOSE_REPLACED);
+    expect((await right.closed).code).toBe(CLOSE_OUTDATED);
+    await settle();
+    // Only the other board's socket went away
+    expect(pings.filter((p) => p.url.endsWith("/log"))).toEqual([
+      { url: `${RIGHT_PING}/log`, body: "Socket closed (server updated)" },
+    ]);
+    const s = await state();
+    expect(device(s)).toMatchObject({ live: true, disconnected_at: before });
+    expect(device(s, RIGHT)?.live).toBe(false);
   });
 
   test("the alarm pings healthchecks.io for each live board and reschedules", async () => {

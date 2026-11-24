@@ -340,11 +340,12 @@ export class HymnBoard extends DurableObject<Env> {
     const firmwareVersion = url.searchParams.get("firmware_version") ?? undefined;
     const writes = url.searchParams.get("saved_state_writes");
     const now = Date.now();
-    this.closeOutdatedSockets();
 
     for (const old of this.openSockets(deviceId)) {
       closeQuietly(old, CLOSE_REPLACED, "replaced by a newer socket");
     }
+    // After the board's own, which is replaced, not a disconnect, whatever its deploy
+    this.closeOutdatedSockets();
 
     const { 0: client, 1: server } = new WebSocketPair();
     this.ctx.acceptWebSocket(server, [deviceId]);
@@ -397,7 +398,10 @@ export class HymnBoard extends DurableObject<Env> {
   }
 
   override webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
-    if (this.closeOutdatedSockets().includes(ws)) {
+    this.closeOutdatedSockets();
+    // One the server closed (outdated, replaced or silent) gets no answer, and
+    // a reply would throw: its board is reconnecting
+    if (ws.readyState !== WebSocket.OPEN) {
       return;
     }
     const attachment = attachmentOf(ws);
@@ -438,7 +442,7 @@ export class HymnBoard extends DurableObject<Env> {
    * that stopped pinging.
    */
   override async alarm(): Promise<void> {
-    // Before the ping times below, which these sockets' would fool
+    // First, as these sockets' ping times would fool the check below
     this.closeOutdatedSockets();
     const live = new Set<string>();
     for (const ws of this.openSockets()) {
@@ -464,21 +468,20 @@ export class HymnBoard extends DurableObject<Env> {
 
   /**
    * Closes the boards' sockets that an earlier deploy accepted, so they
-   * reconnect to this one, and returns them. On Cloudflare, sockets stay
-   * open across a deploy, but the runtime stops updating their
-   * auto-response timestamps (pings are still answered): seen 2026-11-24,
-   * when the alarm took both boards' live sockets for silent. Called from
-   * each event that could read those timestamps, so a deploy's old sockets
-   * go at the first one after it. A board reconnects within seconds.
+   * reconnect to this one. On Cloudflare, sockets stay open across a deploy,
+   * but the runtime stops updating their auto-response timestamps (pings
+   * are still answered): seen 2026-11-24, when the alarm took both boards'
+   * live sockets for silent. Called from each event that could read those
+   * timestamps, so a deploy's old sockets go at the first one after it. A
+   * board reconnects within seconds.
    */
-  private closeOutdatedSockets(): WebSocket[] {
+  private closeOutdatedSockets(): void {
     const version = this.env.CF_VERSION_METADATA.id;
     const outdated = this.openSockets().filter((ws) => attachmentOf(ws)?.version !== version);
     for (const ws of outdated) {
       closeQuietly(ws, CLOSE_OUTDATED, "server updated");
       this.socketGone(ws, "server updated");
     }
-    return outdated;
   }
 
   /** Pings the board's healthchecks.io check, when HEALTHCHECKS=on. */
@@ -489,7 +492,7 @@ export class HymnBoard extends DurableObject<Env> {
   }
 
   /**
-   * The sockets still open. One the server closed (replaced, or silent)
+   * The sockets still open. One the server closed (replaced, silent or outdated)
    * stays listed until its board answers the close, which a board that's
    * gone never does, so it doesn't count.
    */

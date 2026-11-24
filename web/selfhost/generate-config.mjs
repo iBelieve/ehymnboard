@@ -56,8 +56,9 @@ ${wrangler.durable_objects.bindings
     # The self-hosted image is production's fallback, so it pings
     # healthchecks.io, as the production Worker does (wrangler.jsonc).
     (name = "HEALTHCHECKS", text = "on"),
-    # workerd has no version metadata binding, so each build gets its own ID.
-    # (A restart closes every socket anyway.)
+    # workerd has no version metadata binding, so each run of this script
+    # makes an ID (a cached Docker layer keeps the last one, which is fine: a
+    # restart closes every socket anyway).
     (name = "CF_VERSION_METADATA", json = ${JSON.stringify(JSON.stringify({ id: randomUUID(), tag: "", timestamp: new Date().toISOString() }))}),
   ],
   durableObjectNamespaces = [
