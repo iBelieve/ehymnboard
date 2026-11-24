@@ -55,10 +55,18 @@ function upgrade(query: string, headers: Record<string, string> = { Upgrade: "we
   return exports.default.fetch(new Request(`${BASE}/ws?${query}`, { headers }));
 }
 
-/** Connects as the firmware does, with its query string. */
-async function connect(deviceId = LEFT, firmware = "v1"): Promise<Board> {
+/**
+ * Connects as the firmware does, with its query string (and any headers
+ * Cloudflare adds on the way, like CF-Ray).
+ */
+async function connect(
+  deviceId = LEFT,
+  firmware = "v1",
+  headers: Record<string, string> = {},
+): Promise<Board> {
   const res = await upgrade(
     `device_id=${deviceId}&saved_state_writes=4&watchdog_caused_reboot=0&firmware_version=${firmware}&proto=1`,
+    { Upgrade: "websocket", ...headers },
   );
   expect(res.status).toBe(101);
   const board = new Board(res.webSocket!);
@@ -233,10 +241,12 @@ describe("GET /ws", () => {
 
   test("logs how long a replaced socket lasted, where it came in and its last ping", async () => {
     const log = vi.spyOn(console, "log");
-    const old = await connect();
+    // Each connection through a different data center, so the replaced
+    // socket's line must show the one its own attachment kept
+    const old = await connect(LEFT, "v1", { "CF-Ray": "8e31e5ea4a4cf507-LHR" });
     await old.next(0);
     await old.ask("ping");
-    const replacement = await connect();
+    const replacement = await connect(LEFT, "v1", { "CF-Ray": "8e31e5ea4a4cf508-ORD" });
     await replacement.next(0);
     await old.closed;
 
@@ -244,12 +254,12 @@ describe("GET /ws", () => {
     expect(lines).toContainEqual(
       expect.stringMatching(
         new RegExp(
-          `^Device socket replaced: .+ \\(${LEFT}\\), up \\d+ s via \\S+, last ping \\d+ s ago$`,
+          `^Device socket replaced: .+ \\(${LEFT}\\), up \\d+ s via LHR, last ping \\d+ s ago$`,
         ),
       ),
     );
     expect(lines).toContainEqual(
-      expect.stringMatching(new RegExp(`^Device socket connected: .+ \\(${LEFT}\\) via \\S+$`)),
+      expect.stringMatching(new RegExp(`^Device socket connected: .+ \\(${LEFT}\\) via ORD$`)),
     );
   });
 
