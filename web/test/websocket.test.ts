@@ -122,6 +122,12 @@ async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 20));
 }
 
+/** Spies on console.log, and gives what has been logged since. */
+function spyOnLog(): () => string[] {
+  const log = vi.spyOn(console, "log");
+  return () => log.mock.calls.map((call) => String(call[0]));
+}
+
 /** The board hangs up, and the server has dealt with it. */
 async function hangUp(board: Board) {
   board.ws.close(1000, "bye");
@@ -257,8 +263,8 @@ describe("GET /ws", () => {
     expect(pings.filter((p) => p.url.endsWith("/log"))).toEqual([]);
   });
 
-  test("logs how long a replaced socket lasted, where it came in and its last ping", async () => {
-    const log = vi.spyOn(console, "log");
+  test("logs a replaced socket's age, where it came in and its last ping", async () => {
+    const logged = spyOnLog();
     // Each connection through a different data center, so the replaced
     // socket's line must show the one its own attachment kept
     const old = await connect(LEFT, "v1", { "CF-Ray": "8e31e5ea4a4cf507-LHR" });
@@ -268,7 +274,7 @@ describe("GET /ws", () => {
     await replacement.next(0);
     await old.closed;
 
-    const lines = log.mock.calls.map((call) => String(call[0]));
+    const lines = logged();
     expect(lines).toContainEqual(
       expect.stringMatching(
         new RegExp(
@@ -310,6 +316,22 @@ describe("GET /ws", () => {
     });
   });
 
+  test("logs a closed socket's data center, and that it never pinged", async () => {
+    const logged = spyOnLog();
+    const board = await connect(LEFT, "v1", { "CF-Ray": "8e31e5ea4a4cf507-LHR" });
+    await board.next(0);
+    await hangUp(board);
+
+    // Logged once the attachment is marked gone, which must keep the colo
+    expect(logged()).toContainEqual(
+      expect.stringMatching(
+        new RegExp(
+          `^Device socket closed \\(code 1000, bye\\): .+ \\(${LEFT}\\), up \\d+ s via LHR, no ping yet$`,
+        ),
+      ),
+    );
+  });
+
   test("the alarm closes a silent board's socket and logs it once", async () => {
     const board = await connect();
     await board.next(0);
@@ -347,10 +369,17 @@ describe("GET /ws", () => {
     await makeOutdated(LEFT);
 
     pings.length = 0;
+    const logged = spyOnLog();
     await state();
     expect((await board.closed).code).toBe(CLOSE_OUTDATED);
     await settle();
     expect(pings).toEqual([{ url: `${LEFT_PING}/log`, body: "Socket closed (server updated)" }]);
+    // Its ping time stopped with the deploy, so it isn't logged
+    expect(logged()).toContainEqual(
+      expect.stringMatching(
+        /^Device socket closed \(server updated\): .+, from an earlier deploy$/,
+      ),
+    );
 
     // The board reconnects to this deploy, and that socket stays
     const again = await connect();

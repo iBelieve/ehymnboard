@@ -348,7 +348,8 @@ export class HymnBoard extends DurableObject<Env> {
 
     for (const old of this.openSockets(deviceId)) {
       // Still open here means the board's old connection died without the
-      // server hearing of it: say how long it lasted, where it came in, and
+      // server hearing of it: say how long ago it opened (up to now, so that
+      // includes the board noticing and reconnecting), where it came in, and
       // when its last ping got here
       console.log(`Device socket replaced: ${name} (${deviceId}), ${this.describe(old, now)}`);
       closeQuietly(old, CLOSE_REPLACED, "replaced by a newer socket");
