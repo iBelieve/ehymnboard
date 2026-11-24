@@ -267,7 +267,7 @@ export class HymnBoard extends DurableObject<Env> {
    * A live board's last ping counts as seeing it.
    */
   getDevices(): (Device & { live: boolean })[] {
-    // While the admin is open it asks every few seconds, so after a deploy the
+    // While the admin is open it asks every 10 seconds, so after a deploy the
     // old sockets go soon; with nobody there, the alarm closes them
     this.closeOutdatedSockets();
     const seen = new Map<string, number>();
