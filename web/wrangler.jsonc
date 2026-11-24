@@ -19,6 +19,9 @@
     "bindings": [{ "name": "HYMN_BOARD", "class_name": "HymnBoard" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HymnBoard"] }],
+  // Which deploy is running: the Durable Object closes boards' sockets from an
+  // earlier one, whose ping times Cloudflare stops keeping (see hymn-board.ts)
+  "version_metadata": { "binding": "CF_VERSION_METADATA" },
   "observability": {
     "enabled": true,
     "traces": { "enabled": true },
@@ -44,6 +47,7 @@
     "durable_objects": {
       "bindings": [{ "name": "HYMN_BOARD", "class_name": "HymnBoard" }],
     },
+    "version_metadata": { "binding": "CF_VERSION_METADATA" },
     "observability": {
       "enabled": true,
       "traces": { "enabled": true },

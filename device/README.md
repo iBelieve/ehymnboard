@@ -90,6 +90,8 @@ The upgrade request carries the same query string as every other request
 (`device_id`, `saved_state_writes`, `watchdog_caused_reboot`,
 `firmware_version`) plus `proto=1`. The server only takes known board IDs
 (403 otherwise) and keeps one socket per board, closing an older one with code 4000.
+It closes a socket that stopped pinging with 4001, and one from before a server
+deploy with 4002.
 
 When the socket fails (no `pong` within 10 s, no `state` within 30 s of
 connecting, or the server closes it), the board retries after 1 s, doubling to
