@@ -70,9 +70,9 @@ The first boot starts with fresh saved state, so the screens redraw once. After 
 
 ### Talking to the server
 
-The board keeps a WebSocket open to the server (`ws://api.hymnboard.sonrise.io/ws`,
-plain HTTP on port 80 like everything else it fetches) and the server pushes
-it what to show; it doesn't poll. Images still come from `GET /images/N`, only
+The board keeps a WebSocket open to the server (`wss://hymnboard.sonrise.io/ws`,
+over TLS on port 443 like everything else it fetches; see "TLS" below) and the
+server pushes it what to show; it doesn't poll. Images still come from `GET /images/N`, only
 when one changes. The client is our own, on lwIP's raw TCP API
 (`src/ws_client.cpp`), over host-tested framing and handshake code
 (`ws_frame`, `ws_handshake`) that passes the Autobahn test suite (see
@@ -114,17 +114,58 @@ Build, then upload the encrypted image and its version:
 curl -u "$BASIC_AUTH_USERNAME:$BASIC_AUTH_PASSWORD" \
   -F image=@build/ehymnboard_fota_image_encrypted.bin \
   -F version="$(cat build/firmware_version.txt)" \
-  https://api.hymnboard.sonrise.io/firmware
+  https://hymnboard.sonrise.io/firmware
 ```
 
-Every board running a different version installs it, including boards with a newer build flashed over USB: the server pushes the new version to each connected board at once. A new firmware commits itself on the first `state` message it gets over its socket; one that reboots before that is rolled back. The devices page shows each board's firmware version and any rollback.
+Every board running a different version installs it, including boards with a newer build flashed over USB: the server pushes the new version to each connected board at once. A new firmware commits itself on the first `state` message it gets over its socket; one that reboots before that is rolled back. Before committing it also checks
+that it can make an ordinary request (`/firmware/latest`): if that fails five
+times, half a minute apart, it reboots to be rolled back. The devices page shows each board's firmware version and any rollback.
 
 Notes:
 
-- The image is served over plain HTTP, so it is AES encrypted: it contains the WiFi passphrases. The SHA-256 is inside the encrypted image, so a corrupted or tampered image fails the check.
+- The image is AES encrypted: it contains the WiFi passphrases, and firmware from before TLS downloads it over plain HTTP. The SHA-256 is inside the encrypted image, so a corrupted or tampered image fails the check.
 - Don't change the flash layout (`PFB_RESERVED_FILESYSTEM_SIZE_KB` in `CMakeLists.txt`) or the bootloader without reflashing every board over USB.
 - Losing power during the ~30 second slot swap can leave a board unbootable until it is reflashed over USB.
-- The emulator's `ota.test.ts` (see [emulator/README.md](emulator/README.md)) runs the whole flow on an emulated board, bootloader included: download, swap, commit, rollback, a power cut mid-download, and bad, cut off or stalled images.
+- The emulator's `ota.test.ts` and `ota-rejects.test.ts` (see [emulator/README.md](emulator/README.md)) run the whole flow on an emulated board, bootloader included: download, swap, commit, rollback, a power cut mid-download, and bad, cut off or stalled images.
+
+### TLS
+
+Everything the board fetches, and its WebSocket, goes over TLS 1.2 to
+`hymnboard.sonrise.io:443` (`EHYMNBOARD_SERVER_HOST` in `CMakeLists.txt`),
+through lwIP's `altcp_tls` on mbedTLS (`src/tls.cpp`, configured in
+`src/mbedtls_config.h`). The board checks the server's certificate chain and
+its name; it doesn't check dates, since it has no clock it could trust before
+the handshake. It offers only ECDHE key exchange with AES-128-GCM or
+ChaCha20-Poly1305, on P-256 or P-384, with ECDSA or RSA certificates, which
+Cloudflare's edge and Let's Encrypt both serve. Later requests resume the
+first handshake's session, so a download skips the certificate check.
+
+It trusts only the root CAs in `certs/roots.pem`: every CA Cloudflare issues
+edge certificates from, and Let's Encrypt. They stay in flash and are parsed
+only for the handshake that needs one. A server whose certificate came from
+any other CA cuts the boards off until they're flashed over USB, so
+`.github/workflows/check-tls-roots.yml` checks every day that the live
+chains still verify against that file with the board's TLS settings. To add
+a root, append it with a `# Name:` line and release firmware before the
+server switches.
+
+A full handshake beside the open socket peaks at about 45 KB of the 88 KB
+heap (the board logs `TLS: heap …` after each round of downloads). lwIP's
+TCP window holds a whole 16 KB TLS record, which mbedTLS needs before it can
+decrypt any of it.
+
+The [emulator](emulator/README.md) ends TLS at its virtual router with
+certificates from a test CA (`certs/test/`, made by `make-test-certs.sh`).
+Firmware trusts that CA only when built with `-DEHYMNBOARD_TEST_ROOT_CA=ON`,
+which CI uses. The build refuses it unless `PFB_AES_KEY` is the example key, so
+real boards refuse a test build's OTA images; but don't flash one over USB
+either (CI's `ehymnboard.uf2` artifacts are test builds): a certificate for
+the server's name under the test CA, and its private key, are in the
+repository. A test build says so on its serial output at boot.
+
+```sh
+cmake -G Ninja -B build -DEHYMNBOARD_TEST_ROOT_CA=ON   # for the emulator only
+```
 
 ### Tests
 

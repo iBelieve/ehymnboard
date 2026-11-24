@@ -29,6 +29,7 @@
 #include "pico/unique_id.h"
 #include "request_path.h"
 #include "state.h"
+#include "tls.h"
 #include "utils.h"
 #include "waveshare.h"
 #include "wifi.h"
@@ -120,7 +121,8 @@ static bool update_screens(Board &board)
     auto &screens = board.screens;
     bool any_updated = false;
     bool any_answered = false;
-    bool any_failed = false;
+    // The screens whose download failed this time
+    std::array<bool, SCREEN_COUNT> failed{};
 
     for (std::size_t i = 0; i < SCREEN_COUNT; i++)
     {
@@ -140,13 +142,24 @@ static bool update_screens(Board &board)
         }
         else
         {
-            any_failed = true;
+            failed.at(i) = true;
         }
         // A download and a redraw take seconds: keep pinging meanwhile
         service(board);
     }
 
-    if (any_failed)
+    // How close TLS came to running out of memory, downloading beside the socket
+    tls_log_memory();
+
+    // A failed download only counts while its screen still wants a new image:
+    // a state message serviced meanwhile may have made it unwanted, whatever
+    // the other screens want
+    bool still_failing = false;
+    for (std::size_t i = 0; i < SCREEN_COUNT; i++)
+    {
+        still_failing = still_failing || (failed.at(i) && screens.wanted.at(i) != screens.shown.at(i));
+    }
+    if (still_failing)
     {
         screens.retry_at_ms = now_ms() + FETCH_RETRY_MS;
         if (!screens.failing_since_ms)
@@ -183,7 +196,7 @@ static void act(ConnectionPolicy &policy, BoardLink &link, uint64_t now)
     case ConnectionPolicy::Action::CONNECT: {
         printf("WS: connecting...\n");
         const auto path = build_request_path("/ws", current_device_status()) + "&proto=1";
-        if (!link.client().connect(SERVER_HOST, SERVER_PORT, path))
+        if (!link.client().connect(SERVER_HOST, SERVER_PORT, path, server_tls_allocator()))
         {
             policy.on_closed(now);
         }
@@ -263,6 +276,9 @@ int main()
     printf("eHymnboard starting...\n");
     printf("Pico SDK version: %s\n", PICO_SDK_VERSION_STRING);
     printf("Device ID: %s\n", unique_board_id.c_str());
+#ifdef EHYMNBOARD_TEST_ROOT_CA
+    printf("WARNING: test build, trusts the emulator's test CA: don't run it on a board\n");
+#endif
 
     if (!flash_saved_state->is_valid())
     {
@@ -325,7 +341,7 @@ int main()
     );
 
     // The server pushes the board's state over a WebSocket; images still come
-    // over plain HTTP (fetch_image), only when one changes
+    // over HTTPS requests (fetch_image), only when one changes
     Board board(jitter_seed_for(unique_board_id), now_ms());
     auto &screens = board.screens;
     screens.panels = {&screen1, &screen2, &screen3};

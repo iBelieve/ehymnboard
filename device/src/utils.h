@@ -26,8 +26,14 @@
 #include "pico/stdlib.h"
 #include "request_path.h"
 
-inline constexpr const char *SERVER_HOST = "api.hymnboard.sonrise.io";
-inline constexpr uint16_t SERVER_PORT = 80;
+// Every request and the socket go to https:// and wss:// on this host (see
+// tls.h). CMake sets it (EHYMNBOARD_SERVER_HOST), so a build can talk to a
+// Worker preview instead.
+#ifndef EHYMNBOARD_SERVER_HOST
+#error "Set EHYMNBOARD_SERVER_HOST (CMakeLists.txt does)"
+#endif
+inline constexpr const char *SERVER_HOST = EHYMNBOARD_SERVER_HOST;
+inline constexpr uint16_t SERVER_PORT = 443;
 
 inline std::string unique_board_id;
 

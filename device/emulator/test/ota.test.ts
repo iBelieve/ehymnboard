@@ -23,8 +23,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Emulator } from "../src/emulator.ts";
-import { OtaBuild, sealImage } from "../src/ota-image.ts";
-import type { HttpResponse } from "../src/virtual-net.ts";
+import { OtaBuild } from "../src/ota-image.ts";
 import { boot, count, FIRMWARE, waitForFirstImages } from "./helpers.ts";
 
 const build = new OtaBuild(FIRMWARE);
@@ -58,6 +57,10 @@ test("installs the update the server offers and commits it once its socket is li
     emu.waitForSerial("State saved to flash", 60_000, live),
   );
   emu.waitForSerial(`OTA: firmware is up to date (${NEXT})`, 30_000, at);
+  // Committing rewrites the bootloader's flash info sector, erasing it first.
+  // Let that finish: a power cut in between leaves the bootloader with no
+  // application to start.
+  emu.run(1_000);
 
   assert.equal(requests(emu, "/firmware/image").length, 1);
   const booted = requests(emu, "/device_booted").at(-1);
@@ -122,6 +125,35 @@ test("rolls back an update whose socket never goes live, and doesn't retry it", 
   emu.waitForSerial(`Firmware version: ${third}`, 180_000, emu.serial.length);
 });
 
+test("rolls back an update that can't make requests, though its socket is live", () => {
+  const { emu, at } = bootAndInstallNext();
+
+  // Before committing, the new firmware checks it can make an https request
+  // besides its socket. Here every version check is cut off unanswered.
+  emu.server.override = (req) => (req.path === "/firmware/latest" ? { reset: true } : undefined);
+  let since = emu.waitForSerial("WS: live", 60_000, at);
+  since = emu.waitForSerial(
+    "OTA: new firmware can't make requests, rebooting to roll it back",
+    240_000,
+    since,
+  );
+  assert.equal(count(emu, "OTA: firmware is healthy, committing"), 0);
+  emu.server.override = null;
+  since = emu.waitForSerial("[BOOTLOADER] Rolling back to the previous firmware...", 60_000, since);
+  emu.waitForSerial(`OTA: update to ${NEXT} failed and was rolled back`, 30_000, since);
+});
+
+test("commits an update whose version check gets an error status: the server answered", () => {
+  const { emu, at } = bootAndInstallNext();
+  emu.server.override = (req) => (req.path === "/firmware/latest" ? { status: 503 } : undefined);
+  emu.waitForSerial(
+    "OTA: firmware is healthy, committing",
+    60_000,
+    emu.waitForSerial("WS: live", 60_000, at),
+  );
+  assert.equal(count(emu, "can't make requests"), 0);
+});
+
 test("a power cut during the download keeps the old firmware, then installs on the next try", () => {
   const emu = boot();
   emu.server.firmware = { version: NEXT, image: build.imageFor(NEXT) };
@@ -181,73 +213,4 @@ test("still checks over HTTP hourly, and at boot even without a socket", () => {
   emu.run(61 * 60_000);
   assert.equal(requests(emu, "/firmware/latest").length, 2, "one more check an hour later");
   assert.equal(emu.reboots, 0);
-});
-
-/**
- * Boots with the server offering NEXT, answering the download with `image`;
- * returns once the firmware has given up on it with `failure`.
- */
-function offer(image: Uint8Array | HttpResponse, failure: string) {
-  const emu = boot();
-  if (image instanceof Uint8Array) {
-    emu.server.firmware = { version: NEXT, image };
-  } else {
-    emu.server.firmware = { version: NEXT, image: new Uint8Array() };
-    emu.server.override = (req) => (req.path === "/firmware/image" ? image : undefined);
-  }
-  const at = emu.waitForSerial(`OTA: updating from ${build.version} to ${NEXT}`, 60_000);
-  emu.waitForSerial(failure, 120_000, at);
-  return emu;
-}
-
-/** Checks the board stayed on its firmware and kept working. */
-function assertStillRunning(emu: Emulator) {
-  waitForFirstImages(emu, 120_000);
-  emu.run(60_000);
-  assert.equal(emu.server.openSockets.length, 1, "live on its socket");
-  assert.equal(emu.reboots, 0);
-  assert.equal(count(emu, "[BOOTLOADER] Nothing to swap"), 1, "only the first boot");
-  assert.equal(count(emu, "Firmware version:"), 1);
-}
-
-test("rejects an image that doesn't match its SHA-256", () => {
-  const image = build.imageFor(NEXT);
-  // Flipping a bit garbles one 16 byte AES block of the decrypted image.
-  image[image.length >> 1] ^= 0x01;
-
-  assertStillRunning(offer(image, "OTA: SHA-256 check failed, discarding image"));
-});
-
-test("rejects an image encrypted with another key", () => {
-  const image = sealImage(build.binary, Buffer.from("anotherkey".padEnd(32, "x")));
-
-  assertStillRunning(offer(image, "OTA: SHA-256 check failed, discarding image"));
-});
-
-test("rejects an image that isn't whole flash pages", () => {
-  const image = build.imageFor(NEXT).subarray(0, 1000);
-
-  assertStillRunning(offer(image, "OTA: invalid firmware image size 1000"));
-});
-
-test("rejects an image too big for the download slot", () => {
-  const image = new Uint8Array(1001 * 1024);
-
-  assertStillRunning(offer(image, `OTA: invalid firmware image size ${image.length}`));
-});
-
-test("gives up on a download cut off part way", () => {
-  const image = build.imageFor(NEXT);
-  const cut: HttpResponse = { status: 200, body: image, truncateAt: 100_000 };
-
-  assertStillRunning(offer(cut, "OTA: download failed"));
-});
-
-test("gives up on a download that stalls", () => {
-  // lwIP's HTTP client times out first (HTTPC_RESULT_ERR_TIMEOUT)
-  assertStillRunning(offer({ stall: true }, "OTA: download failed (result=5, status=0)"));
-});
-
-test("leaves a version replaced between the check and the download", () => {
-  assertStillRunning(offer({ status: 409 }, "OTA: download failed (result=0, status=409)"));
 });

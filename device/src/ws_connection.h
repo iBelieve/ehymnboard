@@ -36,7 +36,7 @@ class ConnectionPolicy
     // back in time. Cloudflare and nginx close sockets idle for 60-100 s.
     static constexpr uint64_t PING_INTERVAL_MS = 30'000;
     static constexpr uint64_t PONG_TIMEOUT_MS = 10'000;
-    // DNS, TCP, the upgrade and the first state message
+    // DNS, TCP, TLS, the upgrade and the first state message
     static constexpr uint64_t CONNECT_TIMEOUT_MS = 30'000;
     // Retry delays double from the first to the last, then stay there, each
     // with +-50% jitter so boards don't all reconnect at once

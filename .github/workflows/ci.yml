@@ -278,7 +278,9 @@ jobs:
   emulator:
     needs: firmware
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Every TLS handshake is a second or so of emulated crypto, which takes
+    # longer still to emulate: the suite takes a few minutes
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: device/emulator

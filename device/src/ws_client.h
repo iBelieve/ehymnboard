@@ -60,10 +60,13 @@ class WsClient : private ws::FrameSink
     WsClient(const WsClient &) = delete;
     WsClient &operator=(const WsClient &) = delete;
 
-    // Starts connecting to ws://host:port/target. Returns false (with no
+    // Starts connecting to ws://host:port/target, or to wss:// over the
+    // connections `tls` makes. `tls` must allocate with tls_new_connection
+    // (see tls.h): any allocator is taken for mbedTLS (its sessions are
+    // remembered, and 443 is the default port). Returns false (with no
     // on_closed() to follow) if it can't start, or a connection is already
     // under way.
-    bool connect(const char *host, uint16_t port, std::string_view target);
+    bool connect(const char *host, uint16_t port, std::string_view target, altcp_allocator_t *tls = nullptr);
 
     // Queues a message. Returns false unless the socket is open.
     bool send(ws::Opcode opcode, const uint8_t *data, std::size_t length);
@@ -131,6 +134,7 @@ class WsClient : private ws::FrameSink
     State state_ = State::IDLE;
     struct altcp_pcb *pcb_ = nullptr;
     uint16_t port_ = 0;
+    altcp_allocator_t *tls_ = nullptr;
     std::string host_;
     std::string target_;
     std::string key_;

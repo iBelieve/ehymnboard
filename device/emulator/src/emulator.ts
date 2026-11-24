@@ -24,6 +24,7 @@ import { forwardTo, isUpgrade, tunnelTo } from "./backend.ts";
 import { Board, type BoardEvents } from "./board.ts";
 import type { AccessPoint } from "./fake-cyw43.ts";
 import { MockSocket } from "./mock-ws.ts";
+import { type TestCert, TlsServer } from "./tls-server.ts";
 import {
   type HttpRequest,
   type HttpResponse,
@@ -32,10 +33,13 @@ import {
   type VirtualSocket,
 } from "./virtual-net.ts";
 
-export const SERVER_HOST = "api.hymnboard.sonrise.io";
+export const SERVER_HOST = "hymnboard.sonrise.io";
 export const IMAGE_BYTES = 81600;
 
 const BOOTROM = new URL("./bootrom-b1.bin", import.meta.url);
+
+/** One TLS server (and its worker thread) for every emulator in the process. */
+let sharedTls: TlsServer | undefined;
 /** How much simulated time runs between event-loop turns while a socket is open. */
 const STREAM_SLICE_MS = 50;
 
@@ -228,6 +232,12 @@ export interface EmulatorOptions {
   /** Host names the LAN resolves, besides the hymn board server. */
   hosts?: string[];
   /**
+   * The certificate the router's TLS server shows on port 443, whatever name
+   * the board asks for (default: the right one for the name). The firmware
+   * must be built with -DEHYMNBOARD_TEST_ROOT_CA=ON to trust any of them.
+   */
+  tlsCert?: TestCert;
+  /**
    * pico_fota_bootloader's UF2, flashed first. Defaults to the one in the
    * firmware's build directory, if there is one.
    */
@@ -278,8 +288,10 @@ export class Emulator {
       http: opts.backend ? forwardTo(opts.backend) : (req) => this.server.handle(req),
       tunnel:
         opts.tunnel ?? (opts.backend ? tunnelTo(opts.backend) : (req) => this.server.tunnel(req)),
+      tls: (sharedTls ??= new TlsServer()),
       log: (msg) => log(`[net   ${stamp()}ms] ${msg}`),
     });
+    this.net.tlsCert = opts.tlsCert;
     this.board.chip.onEthernetFromHost = (frame) => this.net.receive(frame);
     this.board.chip.onLinkChange = (ap) => {
       if (!ap) {

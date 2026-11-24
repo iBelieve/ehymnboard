@@ -18,7 +18,9 @@ server's Docker image once (`server-image`); the emulator, Autobahn and e2e
 jobs download them as artifacts. The `All green` job passes only if every
 other job did and is the one required status check, so a new job needs no
 branch protection change, only a line in its `needs` (a step there fails if a
-job is missing). `check-pico-sdk.yml` is a separate weekly job.
+job is missing). `check-pico-sdk.yml` is a separate weekly job, and
+`check-tls-roots.yml` a daily one (the live server's certificate chain
+against the roots the boards trust; it also runs when they change).
 Firmware builds in CI go through `.github/actions/build-firmware`, which pins
 the Pico SDK and Arm toolchain. **The device build treats all compiler
 warnings as errors in CI** (`-Wall -Wextra` plus `-DWERROR=ON`), so fix
@@ -97,7 +99,11 @@ All checks below must pass; run them locally before committing.
   (tsc 7), `pnpm run lint` (oxlint with type-aware rules via tsrs, all
   errors) and `pnpm test`, which boots
   `../build/ehymnboard.uf2` (or `$FIRMWARE_UF2`) in rp2040js and runs the
-  scenario tests. Only erasable TypeScript syntax (no enums or parameter
+  scenario tests. The board talks TLS to the emulator's router, so build it
+  with `-DEHYMNBOARD_TEST_ROOT_CA=ON` (as CI does; it needs the example OTA
+  key) to trust the test CA in `certs/test/`. `certs/roots.pem` is what real
+  boards trust: `check-tls-roots.yml` checks the live server against it
+  daily. Only erasable TypeScript syntax (no enums or parameter
   properties); import with `.ts` extensions
 - Autobahn: the `ehymnboard_autobahn` build (an echo client on the same
   WebSocket code) runs the Autobahn fuzzingserver's sections 1-7 in the

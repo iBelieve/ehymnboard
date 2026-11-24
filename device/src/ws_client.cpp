@@ -29,6 +29,7 @@
 #include "pico/cyw43_arch.h"
 #include "pico/rand.h"
 #include "pico/time.h"
+#include "tls.h"
 #include "ws_handshake.h"
 
 // A server's response head is a few hundred bytes; anything bigger isn't one
@@ -58,7 +59,7 @@ WsClient::WsClient(uint8_t *buffer, std::size_t capacity, Listener &listener)
 {
 }
 
-bool WsClient::connect(const char *host, uint16_t port, std::string_view target)
+bool WsClient::connect(const char *host, uint16_t port, std::string_view target, altcp_allocator_t *tls)
 {
     cyw43_arch_lwip_begin();
 
@@ -70,6 +71,7 @@ bool WsClient::connect(const char *host, uint16_t port, std::string_view target)
 
     host_ = host;
     port_ = port;
+    tls_ = tls;
     target_ = std::string(target);
     head_.clear();
     clear_tx();
@@ -125,10 +127,11 @@ void WsClient::on_dns([[maybe_unused]] const char *name, const ip_addr_t *addres
 
 void WsClient::start_tcp(const ip_addr_t &address)
 {
-    pcb_ = altcp_tcp_new_ip_type(IP_GET_TYPE(&address));
+    pcb_ =
+        tls_ != nullptr ? altcp_new_ip_type(tls_, IP_GET_TYPE(&address)) : altcp_tcp_new_ip_type(IP_GET_TYPE(&address));
     if (pcb_ == nullptr)
     {
-        printf("WS: out of memory for a TCP connection\n");
+        printf("WS: out of memory for a connection\n");
         finish(false);
         return;
     }
@@ -156,9 +159,15 @@ err_t WsClient::on_connected(void *arg, [[maybe_unused]] struct altcp_pcb *pcb, 
         return self->finish(true);
     }
 
+    // Over TLS, this runs once the TLS handshake is done
+    if (self->tls_ != nullptr)
+    {
+        tls_remember_session(self->pcb_);
+    }
+
     self->state_ = State::HANDSHAKE;
-    const auto request =
-        ws::build_upgrade_request(self->host_, self->port_, self->target_, self->key_, HTTPC_CLIENT_AGENT);
+    const auto request = ws::build_upgrade_request(self->host_, self->port_, self->tls_ != nullptr, self->target_,
+                                                   self->key_, HTTPC_CLIENT_AGENT);
     self->tx_.insert(self->tx_.end(), request.begin(), request.end());
     if (!self->flush())
     {

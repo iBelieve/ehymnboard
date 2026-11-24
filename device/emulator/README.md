@@ -11,8 +11,9 @@ locally and no Wokwi account is needed.
 
 ## Run the scenario tests
 
-Build the firmware as usual (`device/src/secrets.h` copied from
-`secrets.example.h` matches the fake AP `SSID_1`), then:
+Build the firmware with `-DEHYMNBOARD_TEST_ROOT_CA=ON`, so it trusts the
+emulator's TLS server (`device/src/secrets.h` copied from `secrets.example.h`
+matches the fake AP `SSID_1`), then:
 
 ```sh
 cd device/emulator
@@ -49,9 +50,11 @@ faster than real time.
 | `server-errors.test.ts` | A connection closed mid-image, a wrong-size image, a reset connection, an unknown host                                                                                                                                                                                                                                                                                                              |
 | `panels.test.ts`        | Each screen gets exactly Waveshare's documented full-update sequence with no controller faults; a panel stuck busy makes the firmware time out and reboot                                                                                                                                                                                                                                           |
 | `epaper.test.ts`        | The panel model on its own: RAM window and address counters, gate lines, BUSY, deep sleep and fault detection                                                                                                                                                                                                                                                                                       |
+| `tls.test.ts`           | TLS to the server by name (SNI) with ECDHE, sessions resumed for downloads, an RSA certificate, a certificate for another name or from an untrusted CA refused (and recovered from), a handshake that never finishes, heap headroom                                                                                                                                                                 |
 | `recovery.test.ts`      | WiFi lost for good, the 3 minute reboot without a socket, rejoin with ETags kept in flash                                                                                                                                                                                                                                                                                                           |
 | `backend.test.ts`       | Requests and the WebSocket forwarded to a real server: its answers shown, 304s, Host kept, framing passed through as sent, a refused connection                                                                                                                                                                                                                                                     |
-| `ota.test.ts`           | OTA updates through the bootloader: installed, committed once live, kept through a power cut; rolled back and skipped; pushed over the socket; a failed check retried within 5 minutes; hourly checks; power cut mid-download; bad images                                                                                                                                                           |
+| `ota.test.ts`           | OTA updates through the bootloader: installed, committed once live, kept through a power cut; rolled back and skipped; rolled back when it can't make requests; pushed over the socket; a failed check retried within 5 minutes; hourly checks; power cut mid-download                                                                                                                              |
+| `ota-rejects.test.ts`   | OTA images refused or given up on (bad hash, wrong key, bad size, cut off, stalled, replaced) leave the board on its firmware, working                                                                                                                                                                                                                                                              |
 
 ## Run the firmware interactively
 
@@ -94,6 +97,12 @@ node src/run.ts ../build/ehymnboard.uf2 --seconds 60   # simulated seconds
   (`run`, `waitForSerial` and `waitFor` with the same arguments), which stop
   the simulated clock while the server answers; the synchronous methods
   throw if a request is waiting.
+- `tlsCert` (an option, or `net.tlsCert`) makes the TLS server show one test
+  certificate whatever name the board asks for: `server-rsa`, `wrong-host`
+  (another name) or `untrusted` (a CA the board doesn't trust).
+  `net.tlsStall` accepts TLS connections but never answers their handshake.
+  Each request in `net.requests` has `tls`: the name the board asked for
+  (SNI), whether it resumed a session, and the cipher.
 - `powerCycle()` unplugs the board and plugs it back in. `dropLink()` takes the AP away. `aps` (an option) lists the networks in
   range, each `{ ssid, password?, bssid?, rssi?, channel? }`.
 
@@ -126,7 +135,13 @@ The emulator's source is in `src/` and its tests are in `test/`.
   `cyw43_spi_transfer()` are answered directly (the fast path); otherwise, or
   with `pioBus: true`, PIO is stepped in lockstep with the CPU.
 - `virtual-net.ts` is the LAN behind the AP: the router at 10.0.0.1 answers
-  ARP, DHCP and DNS and serves HTTP on port 80 from a small TCP stack.
+  ARP, DHCP and DNS and serves HTTP on port 80 from a small TCP stack, and
+  HTTPS on port 443, where it ends the board's TLS as Cloudflare's edge does.
+  `tls-server.ts` is that TLS server: Node's own (OpenSSL), run in a worker
+  thread (`tls-worker.ts`) that the emulator waits on, so the simulated clock
+  doesn't see it. Its certificates come from a test CA (`../certs/test/`),
+  which the firmware trusts only when built with
+  `-DEHYMNBOARD_TEST_ROOT_CA=ON`.
   `backend.ts` forwards that HTTP to a real server when `backend` is set.
 - `bootrom-b1.bin` is the RP2040 B1 bootrom (BSD-3-Clause, from
   raspberrypi/pico-bootrom via the rp2040js demo).

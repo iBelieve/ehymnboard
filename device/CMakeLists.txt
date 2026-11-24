@@ -38,8 +38,9 @@ pico_sdk_init()
 # firmware doesn't commit itself. See README.md ("OTA updates").
 #
 # The OTA image is AES encrypted (it contains the WiFi passphrases from
-# secrets.h and is served over plain HTTP), so builds need a key. Put it in
-# secrets.cmake (see secrets.example.cmake) or pass -DPFB_AES_KEY=...
+# secrets.h, and firmware from before TLS downloads it over plain HTTP), so
+# builds need a key. Put it in secrets.cmake (see secrets.example.cmake) or
+# pass -DPFB_AES_KEY=...
 include(${CMAKE_CURRENT_LIST_DIR}/secrets.cmake OPTIONAL)
 if (NOT PFB_AES_KEY)
     message(FATAL_ERROR "PFB_AES_KEY is not set: copy secrets.example.cmake to secrets.cmake and set a key")
@@ -59,6 +60,51 @@ if (NOT Python_EXECUTABLE AND EXISTS ${CMAKE_CURRENT_LIST_DIR}/.venv/bin/python)
 endif()
 add_subdirectory(lib/pico_fota_bootloader)
 
+# TLS: every request and the socket go to https:// and wss:// on this host,
+# checked against the root CAs in certs/roots.pem (see src/tls.h)
+set(EHYMNBOARD_SERVER_HOST "hymnboard.sonrise.io" CACHE STRING
+    "The server's host name, for https:// and wss://")
+# For the emulator's tests: also trust certs/test/root.pem, under which this
+# repository has a certificate for the server's name together with its private
+# key (certs/test/server.key). A build that trusts it must never reach
+# a real board, so it needs the example OTA key, whose images real boards
+# refuse. CI builds this way.
+option(EHYMNBOARD_TEST_ROOT_CA "Also trust the emulator's test root CA (tests only)" OFF)
+set(TLS_ROOT_FILES ${CMAKE_CURRENT_LIST_DIR}/certs/roots.pem)
+if (EHYMNBOARD_TEST_ROOT_CA)
+    if (NOT PFB_AES_KEY STREQUAL "CHANGEME")
+        message(FATAL_ERROR "EHYMNBOARD_TEST_ROOT_CA is for test builds, which need the example OTA key "
+            "(PFB_AES_KEY CHANGEME): a board must never trust the test CA")
+    endif()
+    message(WARNING "EHYMNBOARD_TEST_ROOT_CA: this build trusts the test CA; don't install it on a board")
+    list(APPEND TLS_ROOT_FILES ${CMAKE_CURRENT_LIST_DIR}/certs/test/root.pem)
+endif()
+find_package(Python COMPONENTS Interpreter REQUIRED)
+set(TLS_ROOTS_HEADER ${CMAKE_CURRENT_BINARY_DIR}/generated/tls_roots.h)
+add_custom_command(
+    OUTPUT ${TLS_ROOTS_HEADER}
+    COMMAND ${Python_EXECUTABLE} -I ${CMAKE_CURRENT_LIST_DIR}/cmake/embed_roots.py ${TLS_ROOTS_HEADER}
+        ${TLS_ROOT_FILES}
+    DEPENDS ${CMAKE_CURRENT_LIST_DIR}/cmake/embed_roots.py ${TLS_ROOT_FILES}
+    COMMENT "Embedding the TLS root CAs"
+)
+add_custom_target(ehymnboard_tls_roots DEPENDS ${TLS_ROOTS_HEADER})
+
+# With altcp on (for TLS), pico_lwip_http also builds lwIP's proxy-connect
+# code, which -Wextra warns about. It's not ours, and nothing here uses it.
+set_source_files_properties(${PICO_LWIP_PATH}/src/apps/http/altcp_proxyconnect.c
+    PROPERTIES COMPILE_OPTIONS -Wno-missing-field-initializers)
+
+# What both firmware images need for TLS
+function(ehymnboard_use_tls target)
+    add_dependencies(${target} ehymnboard_tls_roots)
+    target_compile_definitions(${target} PRIVATE EHYMNBOARD_SERVER_HOST="${EHYMNBOARD_SERVER_HOST}")
+    target_link_libraries(${target} pico_lwip_mbedtls pico_mbedtls)
+    if (EHYMNBOARD_TEST_ROOT_CA)
+        target_compile_definitions(${target} PRIVATE EHYMNBOARD_TEST_ROOT_CA=1)
+    endif()
+endfunction()
+
 # Add executable. Default name is the project name, version 0.1
 
 add_executable(ehymnboard
@@ -74,6 +120,7 @@ add_executable(ehymnboard
         src/request_path.cpp
         src/saved_state.cpp
         src/state.cpp
+        src/tls.cpp
         src/utils.cpp
         src/waveshare.cpp
         src/wifi.cpp
@@ -101,6 +148,7 @@ add_custom_target(ehymnboard_firmware_version
 )
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/generated)
 add_dependencies(ehymnboard ehymnboard_firmware_version)
+ehymnboard_use_tls(ehymnboard)
 
 # Modify the below lines to enable/disable output over UART/USB
 pico_enable_stdio_uart(ehymnboard 0)
@@ -153,12 +201,14 @@ add_executable(ehymnboard_autobahn
         src/request_path.cpp
         src/saved_state.cpp
         src/state.cpp
+        src/tls.cpp
         src/utils.cpp
         src/wifi.cpp
         src/ws_client.cpp
         src/ws_frame.cpp
         src/ws_handshake.cpp
 )
+ehymnboard_use_tls(ehymnboard_autobahn)
 add_dependencies(ehymnboard_autobahn ehymnboard_firmware_version)
 pico_enable_stdio_uart(ehymnboard_autobahn 0)
 pico_enable_stdio_usb(ehymnboard_autobahn 1)
