@@ -44,10 +44,11 @@ export const SOCKET_SILENT_MS = 90_000;
 export const HEALTH_INTERVAL_MS = 10 * 60_000;
 
 /**
- * What each socket remembers through hibernation. `gone` once the socket's
- * close is dealt with, so it's dealt with once.
+ * What each socket remembers through hibernation. `colo` is the Cloudflare
+ * data center the board's connection came in through (see coloOf()). `gone`
+ * once the socket's close is dealt with, so it's dealt with once.
  */
-type SocketAttachment = { deviceId: string; connectedAt: number; gone?: boolean };
+type SocketAttachment = { deviceId: string; connectedAt: number; colo?: string; gone?: boolean };
 
 // A board that keeps downloading the same image never kept its ETag (say, a
 // header it can't parse), so it redraws every poll. Flag it after this many
@@ -330,14 +331,20 @@ export class HymnBoard extends DurableObject<Env> {
     const firmwareVersion = url.searchParams.get("firmware_version") ?? undefined;
     const writes = url.searchParams.get("saved_state_writes");
     const now = Date.now();
+    const colo = coloOf(request);
+    const name = getDeviceName(deviceId);
 
     for (const old of this.openSockets(deviceId)) {
+      // Still open here means the board's old connection died without the
+      // server hearing of it: say how long it lasted, where it came in, and
+      // when its last ping got here
+      console.log(`Device socket replaced: ${name} (${deviceId}), ${this.describe(old, now)}`);
       closeQuietly(old, CLOSE_REPLACED, "replaced by a newer socket");
     }
 
     const { 0: client, 1: server } = new WebSocketPair();
     this.ctx.acceptWebSocket(server, [deviceId]);
-    server.serializeAttachment({ deviceId, connectedAt: now } satisfies SocketAttachment);
+    server.serializeAttachment({ deviceId, connectedAt: now, colo } satisfies SocketAttachment);
 
     const at = new Date(now).toISOString();
     this.updateDevice(deviceId, {
@@ -346,7 +353,7 @@ export class HymnBoard extends DurableObject<Env> {
       firmware_version: firmwareVersion,
       saved_state_writes: writes !== null && /^\d+$/.test(writes) ? Number(writes) : undefined,
     });
-    console.log(`Device socket connected: ${getDeviceName(deviceId)} (${deviceId})`);
+    console.log(`Device socket connected: ${name} (${deviceId}) via ${colo ?? "?"}`);
     this.ctx.waitUntil(this.ping(deviceId, "", "Socket connected"));
 
     server.send(await this.stateMessage());
@@ -468,6 +475,21 @@ export class HymnBoard extends DurableObject<Env> {
     return Math.max(pinged, attachment.connectedAt);
   }
 
+  /**
+   * How long the socket has been up, the data center it came in through, and
+   * how long ago its last ping got here (as the runtime recorded it), for the
+   * logs: "up 634 s via LHR, last ping 32 s ago".
+   */
+  private describe(ws: WebSocket, now: number): string {
+    const attachment = attachmentOf(ws);
+    if (!attachment) {
+      return "unknown socket";
+    }
+    const pinged = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime();
+    const ping = pinged === undefined ? "no ping yet" : `last ping ${seconds(now - pinged)} s ago`;
+    return `up ${seconds(now - attachment.connectedAt)} s via ${attachment.colo ?? "?"}, ${ping}`;
+  }
+
   private socketGone(ws: WebSocket, why: string): void {
     const attachment = attachmentOf(ws);
     if (!attachment || attachment.gone) {
@@ -480,7 +502,9 @@ export class HymnBoard extends DurableObject<Env> {
     }
     const { deviceId } = attachment;
     const name = getDeviceName(deviceId);
-    console.log(`Device socket closed (${why}): ${name} (${deviceId})`);
+    console.log(
+      `Device socket closed (${why}): ${name} (${deviceId}), ${this.describe(ws, Date.now())}`,
+    );
     if (this.openSockets(deviceId).some((other) => other !== ws)) {
       // A newer socket replaced it: the board never went away
       return;
@@ -513,10 +537,32 @@ function attachmentOf(ws: WebSocket): SocketAttachment | undefined {
     return {
       deviceId: attachment.deviceId,
       connectedAt: attachment.connectedAt,
+      colo:
+        "colo" in attachment && typeof attachment.colo === "string" ? attachment.colo : undefined,
       gone: "gone" in attachment && attachment.gone === true,
     };
   }
   return undefined;
+}
+
+/** Milliseconds as whole seconds, for the logs. */
+function seconds(ms: number): number {
+  return Math.round(ms / 1000);
+}
+
+/**
+ * The Cloudflare data center a request came in through: `request.cf` on
+ * Cloudflare, or the end of its CF-Ray header ("8e31e5ea4a4cf507-ORD") behind
+ * Cloudflare's proxy elsewhere, as on dokku. Undefined without either.
+ */
+export function coloOf(request: Request): string | undefined {
+  const cf: unknown = request.cf;
+  if (typeof cf === "object" && cf !== null && "colo" in cf) {
+    if (typeof cf.colo === "string" && cf.colo !== "") {
+      return cf.colo;
+    }
+  }
+  return /-([A-Z]{3})$/.exec(request.headers.get("cf-ray") ?? "")?.[1];
 }
 
 /** Closes a socket, ignoring one that's already closed or a code it can't send. */

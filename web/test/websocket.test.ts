@@ -7,6 +7,7 @@ import {
   CLOSE_SILENT,
   HEALTH_INTERVAL_MS,
   SOCKET_SILENT_MS,
+  coloOf,
 } from "../src/worker/hymn-board";
 import { type Ping, recordPings } from "./healthchecks";
 
@@ -230,6 +231,28 @@ describe("GET /ws", () => {
     expect(pings.filter((p) => p.url.endsWith("/log"))).toEqual([]);
   });
 
+  test("logs how long a replaced socket lasted, where it came in and its last ping", async () => {
+    const log = vi.spyOn(console, "log");
+    const old = await connect();
+    await old.next(0);
+    await old.ask("ping");
+    const replacement = await connect();
+    await replacement.next(0);
+    await old.closed;
+
+    const lines = log.mock.calls.map((call) => String(call[0]));
+    expect(lines).toContainEqual(
+      expect.stringMatching(
+        new RegExp(
+          `^Device socket replaced: .+ \\(${LEFT}\\), up \\d+ s via \\S+, last ping \\d+ s ago$`,
+        ),
+      ),
+    );
+    expect(lines).toContainEqual(
+      expect.stringMatching(new RegExp(`^Device socket connected: .+ \\(${LEFT}\\) via \\S+$`)),
+    );
+  });
+
   test("a replaced socket whose board never answers the close doesn't count", async () => {
     // A board that lost power: its old socket never echoes the server's
     // close, so it stays listed as closing.
@@ -309,4 +332,27 @@ test("EXTRA_DEVICE_IDS lets a test board connect", async () => {
   const board = await connect("1111111111111111");
   expect(STATE.test(await board.next(0))).toBe(true);
   expect(device(await state(), "1111111111111111")?.live).toBe(true);
+});
+
+/** A request as Cloudflare hands it on, with these headers and `cf`. */
+function cfRequest(
+  headers: Record<string, string>,
+  cf?: RequestInitCfProperties & { colo: string },
+) {
+  return new Request(BASE, { headers, cf });
+}
+
+describe("coloOf", () => {
+  test("takes Cloudflare's own colo first", () => {
+    expect(coloOf(cfRequest({ "cf-ray": "8e31e5ea4a4cf507-ORD" }, { colo: "LHR" }))).toBe("LHR");
+  });
+
+  test("falls back to the CF-Ray header's suffix, as behind Cloudflare's proxy", () => {
+    expect(coloOf(cfRequest({ "cf-ray": "8e31e5ea4a4cf507-ORD" }))).toBe("ORD");
+  });
+
+  test("is undefined without either", () => {
+    expect(coloOf(cfRequest({}))).toBeUndefined();
+    expect(coloOf(cfRequest({ "cf-ray": "8e31e5ea4a4cf507" }))).toBeUndefined();
+  });
 });
