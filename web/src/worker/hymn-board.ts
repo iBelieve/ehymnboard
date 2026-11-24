@@ -22,8 +22,7 @@ const DEVICE_FIELDS = new Set([
 
 // The board protocol over the WebSocket (see device/src/board_messages.h):
 // the server sends "state 1 <etag1> <etag2> <etag3> <firmware or ->" when the
-// socket opens, whenever any of it changes, and from the alarm every 10
-// minutes, to hear the board answer (see alarm()); the board sends "ping" every
+// socket opens and whenever any of it changes; the board sends "ping" every
 // 30 s (answered with "pong" by the runtime, without waking this object) and
 // "shown <etag1> <etag2> <etag3>" with what its panels show, after a state
 // it already shows and after each update (even one some screens failed).
@@ -33,8 +32,10 @@ const PONG = "pong";
 const NO_FIRMWARE = "-";
 /** Close code for a socket that a newer one from the same board replaced. */
 export const CLOSE_REPLACED = 4000;
-/** Close code for a socket that stopped pinging and didn't answer the alarm's state. */
+/** Close code for a socket that stopped pinging. */
 export const CLOSE_SILENT = 4001;
+/** Close code for a socket from before a deploy (see closeOutdatedSockets). */
+export const CLOSE_OUTDATED = 4002;
 
 /**
  * A board pings every 30 s, so a socket silent this long is dead (the board
@@ -45,17 +46,14 @@ export const SOCKET_SILENT_MS = 90_000;
 export const HEALTH_INTERVAL_MS = 10 * 60_000;
 
 /**
- * What each socket remembers through hibernation. `heardAt` is when the
- * object last got a message on it (pings answered by the auto-response
- * aren't messages), and `probedAt` when the alarm last sent it the state,
- * which a board answers with "shown". `gone` once the socket's close is
- * dealt with, so it's dealt with once.
+ * What each socket remembers through hibernation: `version` is the deploy
+ * that accepted it (unset before 2026-11-24), and `gone` is set once the
+ * socket's close is dealt with, so it's dealt with once.
  */
 type SocketAttachment = {
   deviceId: string;
   connectedAt: number;
-  heardAt?: number;
-  probedAt?: number;
+  version?: string;
   gone?: boolean;
 };
 
@@ -266,15 +264,16 @@ export class HymnBoard extends DurableObject<Env> {
 
   /**
    * Every board the server has heard from, with whether its socket is live.
-   * A live board's last ping or message counts as seeing it.
+   * A live board's last ping counts as seeing it.
    */
   getDevices(): (Device & { live: boolean })[] {
+    // The admin asks every few seconds, so a deploy's old sockets go soon
+    this.closeOutdatedSockets();
     const seen = new Map<string, number>();
-    const now = Date.now();
     for (const ws of this.openSockets()) {
       const attachment = attachmentOf(ws);
       const at = this.lastHeardFrom(ws);
-      if (attachment && at !== undefined && this.isLive(ws, now)) {
+      if (attachment && at !== undefined && Date.now() - at < SOCKET_SILENT_MS) {
         seen.set(attachment.deviceId, Math.max(at, seen.get(attachment.deviceId) ?? 0));
       }
     }
@@ -341,6 +340,7 @@ export class HymnBoard extends DurableObject<Env> {
     const firmwareVersion = url.searchParams.get("firmware_version") ?? undefined;
     const writes = url.searchParams.get("saved_state_writes");
     const now = Date.now();
+    this.closeOutdatedSockets();
 
     for (const old of this.openSockets(deviceId)) {
       closeQuietly(old, CLOSE_REPLACED, "replaced by a newer socket");
@@ -348,7 +348,11 @@ export class HymnBoard extends DurableObject<Env> {
 
     const { 0: client, 1: server } = new WebSocketPair();
     this.ctx.acceptWebSocket(server, [deviceId]);
-    server.serializeAttachment({ deviceId, connectedAt: now } satisfies SocketAttachment);
+    server.serializeAttachment({
+      deviceId,
+      connectedAt: now,
+      version: this.env.CF_VERSION_METADATA.id,
+    } satisfies SocketAttachment);
 
     const at = new Date(now).toISOString();
     this.updateDevice(deviceId, {
@@ -393,14 +397,14 @@ export class HymnBoard extends DurableObject<Env> {
   }
 
   override webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
+    if (this.closeOutdatedSockets().includes(ws)) {
+      return;
+    }
     const attachment = attachmentOf(ws);
     if (!attachment || typeof message !== "string") {
       return;
     }
-    // Answers the alarm's probe (see alarm())
-    const now = Date.now();
-    ws.serializeAttachment({ ...attachment, heardAt: now } satisfies SocketAttachment);
-    const at = new Date(now).toISOString();
+    const at = new Date().toISOString();
     // Normally answered by the auto-response; here only if it raced the setup
     if (message === PING) {
       ws.send(PONG);
@@ -431,42 +435,22 @@ export class HymnBoard extends DurableObject<Env> {
   /**
    * Every 10 minutes while any board is connected: pings healthchecks.io for
    * each live board (the board itself no longer does), and closes sockets
-   * that went quiet.
-   *
-   * Quiet takes two things, because the auto-response's timestamp isn't
-   * enough on its own: on Cloudflare, after a restart (a deploy), it stops
-   * moving for sockets from before it, though their pings are still
-   * answered (seen 2026-11-24, when this closed both boards' live sockets).
-   * So each run also sends the state to every socket that hasn't pinged
-   * lately, which a board answers with "shown", and a socket is closed only
-   * once it has neither pinged lately nor answered the last run's state,
-   * given time to (a retried run comes seconds after the one it retries). A
-   * board that's gone is closed by the second run after it went. Sockets
-   * whose pings are recorded get no state, so a board that can't keep an
-   * ETag isn't made to redraw every run.
+   * that stopped pinging.
    */
   override async alarm(): Promise<void> {
+    // Before the ping times below, which these sockets' would fool
+    this.closeOutdatedSockets();
     const live = new Set<string>();
-    const now = Date.now();
-    const probe = await this.stateMessage();
     for (const ws of this.openSockets()) {
       const attachment = attachmentOf(ws);
-      if (!attachment || (!this.isLive(ws, now) && unansweredProbe(attachment, now))) {
+      const at = this.lastHeardFrom(ws);
+      if (!attachment || at === undefined || Date.now() - at >= SOCKET_SILENT_MS) {
         closeQuietly(ws, CLOSE_SILENT, "no ping");
         // A board that's gone never answers the close, so don't wait for it
         this.socketGone(ws, "no ping");
         continue;
       }
       live.add(attachment.deviceId);
-      if (this.pingedLately(ws, now)) {
-        continue;
-      }
-      try {
-        ws.serializeAttachment({ ...attachment, probedAt: now } satisfies SocketAttachment);
-        ws.send(probe);
-      } catch {
-        // Closing; the next run deals with it
-      }
     }
     const at = new Date().toISOString();
     for (const deviceId of live) {
@@ -476,6 +460,25 @@ export class HymnBoard extends DurableObject<Env> {
     if (this.openSockets().length > 0) {
       await this.ctx.storage.setAlarm(Date.now() + HEALTH_INTERVAL_MS);
     }
+  }
+
+  /**
+   * Closes the boards' sockets that an earlier deploy accepted, so they
+   * reconnect to this one, and returns them. On Cloudflare, sockets stay
+   * open across a deploy, but the runtime stops updating their
+   * auto-response timestamps (pings are still answered): seen 2026-11-24,
+   * when the alarm took both boards' live sockets for silent. Called from
+   * each event that could read those timestamps, so a deploy's old sockets
+   * go at the first one after it. A board reconnects within seconds.
+   */
+  private closeOutdatedSockets(): WebSocket[] {
+    const version = this.env.CF_VERSION_METADATA.id;
+    const outdated = this.openSockets().filter((ws) => attachmentOf(ws)?.version !== version);
+    for (const ws of outdated) {
+      closeQuietly(ws, CLOSE_OUTDATED, "server updated");
+      this.socketGone(ws, "server updated");
+    }
+    return outdated;
   }
 
   /** Pings the board's healthchecks.io check, when HEALTHCHECKS=on. */
@@ -501,35 +504,7 @@ export class HymnBoard extends DurableObject<Env> {
       return undefined;
     }
     const pinged = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() ?? 0;
-    return Math.max(pinged, attachment.heardAt ?? 0, attachment.connectedAt);
-  }
-
-  /**
-   * Whether the board on this socket pinged lately, or answered the alarm's
-   * last state (the alarm runs about every HEALTH_INTERVAL_MS, so a live
-   * board's answer is never much older than that).
-   */
-  private isLive(ws: WebSocket, now: number): boolean {
-    const attachment = attachmentOf(ws);
-    if (!attachment) {
-      return false;
-    }
-    if (this.pingedLately(ws, now)) {
-      return true;
-    }
-    const { heardAt, probedAt } = attachment;
-    return (
-      heardAt !== undefined &&
-      probedAt !== undefined &&
-      heardAt >= probedAt &&
-      now - heardAt < HEALTH_INTERVAL_MS + SOCKET_SILENT_MS
-    );
-  }
-
-  /** Whether the board on this socket was heard from (or connected) lately. */
-  private pingedLately(ws: WebSocket, now: number): boolean {
-    const at = this.lastHeardFrom(ws);
-    return at !== undefined && now - at < SOCKET_SILENT_MS;
+    return Math.max(pinged, attachment.connectedAt);
   }
 
   private socketGone(ws: WebSocket, why: string): void {
@@ -564,19 +539,6 @@ export class HymnBoard extends DurableObject<Env> {
   }
 }
 
-function numberField(value: object, key: string): number | undefined {
-  const field: unknown = key in value ? Reflect.get(value, key) : undefined;
-  return typeof field === "number" ? field : undefined;
-}
-
-/**
- * The alarm sent this socket the state long enough ago for a live board to
- * have answered, and nothing came back since.
- */
-function unansweredProbe({ heardAt, probedAt }: SocketAttachment, now: number): boolean {
-  return probedAt !== undefined && (heardAt ?? 0) < probedAt && now - probedAt >= SOCKET_SILENT_MS;
-}
-
 function attachmentOf(ws: WebSocket): SocketAttachment | undefined {
   const attachment: unknown = ws.deserializeAttachment();
   if (
@@ -590,8 +552,10 @@ function attachmentOf(ws: WebSocket): SocketAttachment | undefined {
     return {
       deviceId: attachment.deviceId,
       connectedAt: attachment.connectedAt,
-      heardAt: numberField(attachment, "heardAt"),
-      probedAt: numberField(attachment, "probedAt"),
+      version:
+        "version" in attachment && typeof attachment.version === "string"
+          ? attachment.version
+          : undefined,
       gone: "gone" in attachment && attachment.gone === true,
     };
   }

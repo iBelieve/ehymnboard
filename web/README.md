@@ -38,11 +38,11 @@ attachment. Applying lines or uploading firmware sends every board the new
 otherwise), plus any in `EXTRA_DEVICE_IDS` (comma separated, for the e2e
 tests' emulated board; leave it unset in production). While any board is
 connected, an alarm every 10 minutes pings each live board's
-healthchecks.io check (the boards no longer call `/device_healthy`), sends
-each socket the `state` (a board answers with `shown`), and closes sockets
-that neither pinged lately nor answered the last run's `state`. The pings'
-auto-response timestamp alone isn't enough: on Cloudflare, it stops moving
-for sockets from before a deploy. A socket opening and closing is logged
+healthchecks.io check (the boards no longer call `/device_healthy`) and
+closes sockets that stopped pinging. After a deploy, the first request or
+message closes the boards' sockets from before it (code 4002), and they
+reconnect: on Cloudflare those sockets stay open, but their ping times stop
+updating. A socket opening and closing is logged
 to the board's check too (pings need `HEALTHCHECKS=on`, which the production
 Worker, the self-hosted image and the Worker tests (with `fetch` mocked) set,
 and previews and `pnpm dev` don't), and the admin shows each board as Live or
