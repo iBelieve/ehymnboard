@@ -36,7 +36,7 @@ jobs:
   # Repository-wide checks, run from the root: Prettier over the whole
   # repository (.prettierignore lists what it leaves out), jscpd's copy-paste
   # check over the code (.jscpd.json), and the check that any dependency a
-  # change adds or changes is the newest release (scripts/).
+  # change adds or changes is the newest release (latest-or-bust).
   repo:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -49,15 +49,14 @@ jobs:
 
       # Installs the pnpm from the root package.json's packageManager and
       # Node.js from .node-version, then only the root's own dev
-      # dependencies (Prettier, jscpd, npm-check-updates, and oxlint for the
-      # schema that .oxlintrc.base.json points at) and scripts/, which
-      # check-new-deps runs, not the other packages.
+      # dependencies (Prettier, jscpd, latest-or-bust, and oxlint for the
+      # schema that .oxlintrc.base.json points at), not the packages'.
       - uses: pnpm/setup@v3
         with:
           install: false
 
       - name: Install
-        run: pnpm install --frozen-lockfile --filter ehymnboard --filter ehymnboard-scripts
+        run: pnpm install --frozen-lockfile --filter ehymnboard
 
       - name: Check formatting
         run: pnpm run format:check
@@ -77,9 +76,8 @@ jobs:
         run: pnpm run check-new-deps HEAD^
 
   # Type checks and lints every TypeScript package in the workspace (web/,
-  # e2e/, device/emulator/, scripts/), each with its own tsconfig and
-  # .oxlintrc.json, and runs scripts/' tests. The other packages' tests run
-  # in their own jobs below.
+  # e2e/, device/emulator/), each with its own tsconfig and .oxlintrc.json.
+  # Their tests run in their own jobs below.
   typescript:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -101,10 +99,6 @@ jobs:
       - name: Lint
         if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm run lint
-
-      - name: Test scripts/
-        if: (success() || failure()) && steps.setup.outcome == 'success'
-        run: pnpm --filter ehymnboard-scripts run test
 
   actionlint:
     runs-on: ubuntu-latest

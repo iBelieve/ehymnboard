@@ -1,6 +1,7 @@
-// npm-check-updates settings. scripts/src/check-new-deps.ts uses them to fail
-// a change that adds a dependency, or changes its version, to anything older
-// than the newest release pnpm's minimumReleaseAge lets us install.
+// npm-check-updates settings. latest-or-bust (`pnpm run check-new-deps`) uses
+// them to fail a change that adds a dependency, or changes its version, to
+// anything older than the newest release pnpm's minimumReleaseAge lets us
+// install.
 //
 // To hold a dependency back on purpose, add it to `reject` with a comment
 // saying why, for example:
