@@ -64,8 +64,9 @@ All checks below must pass; run them locally before committing.
   compares with where the branch left `origin/master` (CI runs it on pull
   requests, against their base) and asks npm-check-updates about only those
   dependencies, so add a dependency at its latest version. To hold one back
-  on purpose, add it to `reject` in `.ncurc.cjs` with a comment saying why.
-  CI skips Dependabot's PRs
+  on purpose, exempt it in `latest-or-bust.json` at the root with the reason
+  why (see latest-or-bust's README; there's no file while nothing is
+  exempt). CI skips Dependabot's PRs
 
 ### device/
 
