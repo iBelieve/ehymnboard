@@ -29,8 +29,8 @@
 // byte stream. Breaking a rule from the manual (a command while BUSY is high,
 // a short parameter list, a write while unpowered) is recorded in `faults`.
 
-export const WIDTH = 960;
-export const HEIGHT = 680;
+const WIDTH = 960;
+const HEIGHT = 680;
 export const ROW_BYTES = WIDTH / 8;
 export const RAM_BYTES = ROW_BYTES * HEIGHT; // 81600
 
@@ -77,7 +77,7 @@ const UPDATE_DISPLAY = 0x04;
 const hex = (n: number) => `0x${n.toString(16).padStart(2, "0")}`;
 const word10 = (lo: number, hi: number) => lo | ((hi & 0x03) << 8);
 
-interface Registers {
+export interface Registers {
   gates: number;
   entryMode: number;
   xStart: number;
@@ -91,7 +91,7 @@ interface Registers {
 }
 
 /** A command collecting its data bytes. */
-interface PendingCommand {
+export interface PendingCommand {
   code: number;
   name: string;
   length: number;

@@ -21,14 +21,14 @@
 import zlib from "node:zlib";
 
 export const WIDTH = 960;
-export const HEIGHT = 680;
+const HEIGHT = 680;
 
 /** Each screen shows two lines: the first in its top band, the second in its bottom band. */
 const LINE_BAND = Math.round(HEIGHT * 0.45);
 export const TOP = { from: 0, to: LINE_BAND };
 export const BOTTOM = { from: HEIGHT - LINE_BAND, to: HEIGHT };
 
-export function pixel(frame: Uint8Array, x: number, y: number) {
+function pixel(frame: Uint8Array, x: number, y: number) {
   const i = y * WIDTH + x;
   return (frame[i >> 3] >> (7 - (i & 7))) & 1;
 }

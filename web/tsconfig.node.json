@@ -4,12 +4,18 @@
     "composite": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "lib": ["ES2023"],
+    // For selfhost/assets.js, which workerd runs as is (it's checked through
+    // its JSDoc types).
+    "allowJs": true,
+    "checkJs": true,
     "types": ["node", "vite/client"]
   },
   "include": [
     "*.config.ts",
     "test/render.test.ts",
     "test/prettyDate.test.ts",
+    "test/selfhost-assets.test.ts",
+    "selfhost/assets.js",
     "src/shared",
     "src/client/prettyDate.ts"
   ]

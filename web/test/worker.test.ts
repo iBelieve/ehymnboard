@@ -1,12 +1,12 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
-import { env, exports } from "cloudflare:workers";
+import { DurableObject, env, exports } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { BoardState } from "../src/shared/api";
 import { getFont } from "../src/shared/font";
 import { renderScreen } from "../src/shared/render";
 import { SCREEN_BYTES } from "../src/shared/screen";
 import { type Ping, recordPings } from "./healthchecks";
-import worker from "../src/worker/index";
+import worker, { HymnBoard } from "../src/worker/index";
 
 const LEFT = "E6614103E71F8D26";
 const AUTH = { Authorization: `Basic ${btoa("admin:secret")}` };
@@ -39,6 +39,10 @@ afterEach(() => {
 async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
+
+test("the Worker exports the Durable Object class wrangler.jsonc binds", () => {
+  expect(Object.getPrototypeOf(HymnBoard)).toBe(DurableObject);
+});
 
 test("GET /ok", async () => {
   expect((await get("/ok")).status).toBe(204);

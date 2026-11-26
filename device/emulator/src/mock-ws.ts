@@ -26,19 +26,19 @@ import type { VirtualSocket } from "./virtual-net.ts";
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
-export const OP_TEXT = 0x1;
-export const OP_CLOSE = 0x8;
-export const OP_PING = 0x9;
-export const OP_PONG = 0xa;
+const OP_TEXT = 0x1;
+const OP_CLOSE = 0x8;
+const OP_PING = 0x9;
+const OP_PONG = 0xa;
 
-export function acceptFor(key: string) {
+function acceptFor(key: string) {
   return createHash("sha1")
     .update(key + GUID)
     .digest("base64");
 }
 
 /** An unmasked server frame. */
-export function serverFrame(opcode: number, payload: Uint8Array, fin = true) {
+function serverFrame(opcode: number, payload: Uint8Array, fin = true) {
   const n = payload.length;
   const head = n < 126 ? 2 : n < 0x10000 ? 4 : 10;
   const out = new Uint8Array(head + n);
@@ -57,7 +57,7 @@ export function serverFrame(opcode: number, payload: Uint8Array, fin = true) {
   return out;
 }
 
-export function closePayload(code: number, reason = "") {
+function closePayload(code: number, reason = "") {
   const text = new TextEncoder().encode(reason);
   const out = new Uint8Array(2 + text.length);
   out[0] = code >> 8;

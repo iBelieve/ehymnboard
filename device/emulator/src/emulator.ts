@@ -68,7 +68,7 @@ export function testImage(screen: number, version: number) {
 }
 
 /** A firmware update the server offers: its version and encrypted OTA image. */
-export interface FirmwareUpdate {
+interface FirmwareUpdate {
   version: string;
   image: Uint8Array;
 }
@@ -82,7 +82,7 @@ export const CLOSE_REPLACED = 4000;
  * and, once `firmware` is set, an OTA update. `override` lets a test answer
  * a request itself.
  */
-export class MockServer {
+class MockServer {
   images = new Map(
     [1, 2, 3].map((s): [number, { etag: string; body: Uint8Array }] => [
       s,

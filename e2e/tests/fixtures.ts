@@ -38,7 +38,7 @@ export const FIRMWARE =
   process.env.FIRMWARE_UF2 ??
   path.join(import.meta.dirname, "..", "..", "device", "build", "ehymnboard.uf2");
 
-export const LINE_COUNT = 6;
+const LINE_COUNT = 6;
 
 /** Publishes a firmware release the way a release is published (`POST /firmware`). */
 export async function publishRelease(
@@ -75,6 +75,7 @@ function buildRelease() {
  * order, Apply and Clear buttons, a line per board and a picture of the
  * board. Nothing depends on how the page is built.
  */
+// fallow-ignore-next-line unused-export -- the type of the `admin` fixture each test gets
 export class AdminPage {
   readonly page: Page;
 

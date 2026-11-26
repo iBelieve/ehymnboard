@@ -16,6 +16,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+// fallow-ignore-file coverage-gaps -- a command line for trying a build by hand; the tests drive Emulator directly
 // Boots a firmware UF2 on the emulated board, with the fake AP, LAN and
 // server, and prints the firmware's serial output and emulator events.
 //

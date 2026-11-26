@@ -22,7 +22,7 @@ const FIRMWARE_VERSION_PATTERN = /^[0-9A-Za-z._-]{1,47}$/;
 
 const MAX_LINE_LENGTH = 100;
 
-type AppEnv = { Bindings: Env };
+export type AppEnv = { Bindings: Env };
 type AppContext = Context<AppEnv>;
 
 const app = new Hono<AppEnv>();

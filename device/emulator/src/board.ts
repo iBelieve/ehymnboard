@@ -24,7 +24,7 @@ import { elfSymbols } from "./elf.ts";
 import { EPaperPanel } from "./epaper.ts";
 import { type AccessPoint, FakeCYW43 } from "./fake-cyw43.ts";
 
-type SimulationClock = Simulator["clock"]; // not exported by rp2040js
+export type SimulationClock = Simulator["clock"]; // not exported by rp2040js
 
 /**
  * rp2040js internals the board reaches into: its types mark these private.
@@ -43,12 +43,14 @@ interface WatchdogInternals {
   onWatchdogTrigger: () => void;
 }
 
+// The bootrom; romHook stands in for some of its functions.
+const ROM_END = 0x4000;
 const FLASH_BASE = 0x10000000;
 const WATCHDOG_BASE = 0x40058;
 const GSPI_NANOS_PER_BYTE = 8 * 32; // ~31 MHz bus clock
 
 // Pins from main.cpp for screens 1-3
-interface PanelPins {
+export interface PanelPins {
   id: number;
   power: number;
   cs: number;
@@ -391,41 +393,54 @@ export class Board {
    */
   step(instructions: number, end = Infinity) {
     const { mcu, clock } = this;
-    const { core } = mcu;
     const cycleNanos = 1e9 / (mcu.clocks.sysFreq || 125_000_000);
-    const romEnd = 0x4000;
     for (let i = 0; i < instructions && !this.pendingReboot && clock.nanos < end; i++) {
       // PIO only matters while the WiFi chip is selected; skipping it the
       // rest of the time lets sleeps jump straight to the next timer alarm.
       const busActive = this.chip.csActive;
-      let cycles;
-      if (!core.waiting) {
-        if (core.PC < romEnd && this.romHook(core.PC)) {
-          continue;
-        }
-        if (core.PC === this.spiTransfer) {
-          this.spiTransferHook();
-          continue;
-        }
-        cycles = core.executeInstruction();
-      } else if (busActive) {
-        cycles = 8;
-      } else {
-        // Asleep: jump to the next alarm, but no further than `end`.
-        if (!clockInternals(clock).nextAlarm) {
-          throw new Error(`CPU asleep at ${hex(core.PC)} with no timer alarm to wake it`);
-        }
-        clock.tick(Math.min(clock.nanosToNextAlarm, end - clock.nanos));
+      const cycles = this.#execute(busActive, end);
+      if (cycles === 0) {
         continue;
       }
       clock.tick(cycles * cycleNanos);
       if (busActive) {
-        for (const pio of mcu.pio) {
-          if (!pio.stopped) {
-            for (let c = 0; c < cycles; c++) {
-              pio.step();
-            }
-          }
+        this.#stepPio(cycles);
+      }
+    }
+  }
+
+  /**
+   * Runs the next instruction, or a hook in its place, and returns the cycles
+   * it took; 0 for a hook, or a sleep that has already moved the clock on.
+   */
+  #execute(busActive: boolean, end: number): number {
+    const { core } = this.mcu;
+    if (core.waiting) {
+      if (busActive) {
+        return 8;
+      }
+      // Asleep: jump to the next alarm, but no further than `end`.
+      if (!clockInternals(this.clock).nextAlarm) {
+        throw new Error(`CPU asleep at ${hex(core.PC)} with no timer alarm to wake it`);
+      }
+      this.clock.tick(Math.min(this.clock.nanosToNextAlarm, end - this.clock.nanos));
+      return 0;
+    }
+    if (core.PC < ROM_END && this.romHook(core.PC)) {
+      return 0;
+    }
+    if (core.PC === this.spiTransfer) {
+      this.spiTransferHook();
+      return 0;
+    }
+    return core.executeInstruction();
+  }
+
+  #stepPio(cycles: number) {
+    for (const pio of this.mcu.pio) {
+      if (!pio.stopped) {
+        for (let c = 0; c < cycles; c++) {
+          pio.step();
         }
       }
     }
