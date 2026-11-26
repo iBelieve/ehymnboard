@@ -11,6 +11,9 @@
     "test/render.test.ts",
     "test/prettyDate.test.ts",
     "src/shared",
-    "src/client/prettyDate.ts"
+    "src/client/prettyDate.ts",
+    "test/firmware.test.ts",
+    "test/bundle.ts",
+    "src/worker/firmware.ts"
   ]
 }

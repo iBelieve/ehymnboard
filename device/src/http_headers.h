@@ -22,6 +22,7 @@
 // they're unit tested on the host (see test/).
 
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -52,6 +53,10 @@ bool is_safe_etag(std::string_view etag);
 // a raw header block like find_etag's, without surrounding whitespace. Empty
 // if there's no such header, or if the block ends before that line does.
 std::optional<std::string_view> find_header(std::string_view headers, std::string_view name);
+
+// The Content-Length header's value (matched case-insensitively, as lwIP's
+// HTTP client doesn't), if it's all digits and fits in 32 bits
+std::optional<uint32_t> find_content_length(std::string_view headers);
 
 // Whether a comma-separated header value (such as Connection's) holds `token`,
 // matched case-insensitively.

@@ -158,3 +158,27 @@ RC_GTEST_PROP(FindEtag, OnlyReturnsEtagsTheBoardCanKeep, (const std::string &hea
     // Whatever the server sends, the result fits SavedState and is URL-safe.
     RC_ASSERT(is_safe(find_etag(headers)));
 }
+
+TEST(FindContentLength, MatchesTheHeaderInAnyCase)
+{
+    EXPECT_EQ(find_content_length("HTTP/1.1 200 OK\r\nContent-Length: 609280\r\n\r\n"), 609280U);
+    EXPECT_EQ(find_content_length("HTTP/1.1 200 OK\r\ncontent-length: 256\r\n\r\n"), 256U);
+    EXPECT_EQ(find_content_length("HTTP/1.1 200 OK\r\nCONTENT-LENGTH:0\r\n\r\n"), 0U);
+}
+
+TEST(FindContentLength, RejectsAnythingButAWholeNumberThatFits)
+{
+    EXPECT_FALSE(find_content_length("HTTP/1.1 200 OK\r\n\r\n").has_value());
+    EXPECT_FALSE(find_content_length("HTTP/1.1 200 OK\r\nContent-Length: \r\n\r\n").has_value());
+    EXPECT_FALSE(find_content_length("HTTP/1.1 200 OK\r\nContent-Length: -1\r\n\r\n").has_value());
+    EXPECT_FALSE(find_content_length("HTTP/1.1 200 OK\r\nContent-Length: 12 34\r\n\r\n").has_value());
+    EXPECT_FALSE(find_content_length("HTTP/1.1 200 OK\r\nContent-Length: 4294967296\r\n\r\n").has_value());
+    EXPECT_FALSE(find_content_length("HTTP/1.1 200 OK\r\nContent-Length: 99999999999\r\n\r\n").has_value());
+    EXPECT_EQ(find_content_length("HTTP/1.1 200 OK\r\nContent-Length: 4294967295\r\n\r\n"), 4294967295U);
+}
+
+RC_GTEST_PROP(FindContentLength, ReadsBackAnyLength, (uint32_t length))
+{
+    const auto headers = "HTTP/1.1 200 OK\r\ncontent-length: " + std::to_string(length) + "\r\n\r\n";
+    RC_ASSERT(find_content_length(headers) == std::optional<uint32_t>(length));
+}

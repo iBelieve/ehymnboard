@@ -44,10 +44,12 @@ add_executable(host_tests
     test_request_path.cpp
     test_saved_state.cpp
     test_board_messages.cpp
+    test_boot_control.cpp
     test_ws_connection.cpp
     test_ws_frame.cpp
     test_ws_handshake.cpp
     ${FIRMWARE_SRC}/board_messages.cpp
+    ${FIRMWARE_SRC}/boot_control.cpp
     ${FIRMWARE_SRC}/http_headers.cpp
     ${FIRMWARE_SRC}/request_path.cpp
     ${FIRMWARE_SRC}/saved_state.cpp

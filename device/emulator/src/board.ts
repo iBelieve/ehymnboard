@@ -110,6 +110,13 @@ export interface BoardOptions {
   log?: (msg: string) => void;
 }
 
+/** A bootrom flash erase or program, at an offset in flash. */
+export interface FlashOp {
+  kind: "erase" | "program";
+  offset: number;
+  length: number;
+}
+
 export interface BoardEvents {
   display: { screen: number; frame: Uint8Array; updateControl: number };
   serial: string;
@@ -140,6 +147,8 @@ export class Board {
   flashWrites = 0;
   /** REASON for the watchdog reset run() should do next, or 0. */
   pendingReboot = 0;
+  /** A power cut armed with cutPowerDuring(), or a cut that run() should power back on from. */
+  #powerCut?: { left: number; filter: (op: FlashOp) => boolean; done: boolean };
   // Set by powerOn()
   clock!: SimulationClock;
   mcu!: RP2040;
@@ -292,7 +301,31 @@ export class Board {
    */
   powerCycle() {
     this.pendingReboot = 0;
+    this.#powerCut = undefined;
     this.powerOn(0);
+  }
+
+  /**
+   * Cuts the power part way through the `nth` flash operation from now that
+   * `filter` picks (only the first sixteenth of an erase's range is erased,
+   * or of a program's bytes written: of a boot record's page, half the
+   * record), then turns it back on, as powerCycle() does. Returns whether the
+   * cut has happened yet.
+   */
+  cutPowerDuring(nth: number, filter: (op: FlashOp) => boolean = () => true) {
+    const cut = { left: nth, filter, done: false };
+    this.#powerCut = cut;
+    return () => cut.done;
+  }
+
+  /** Whether the flash operation about to run is the one to cut short. */
+  #cutsShort(op: FlashOp) {
+    const cut = this.#powerCut;
+    if (!cut || cut.done || !cut.filter(op) || --cut.left > 0) {
+      return false;
+    }
+    cut.done = true;
+    return true;
   }
 
   /** Connects the panels to a new RP2040's pins and SPI0. */
@@ -323,15 +356,20 @@ export class Board {
   romHook(pc: number) {
     const { core } = this.mcu;
     const r = core.registers;
-    if (pc === this.romErase) {
-      this.flash.fill(0xff, r[0], r[0] + r[1]);
-    } else if (pc === this.romProgram) {
-      for (let i = 0; i < r[2]; i++) {
+    if (pc !== this.romErase && pc !== this.romProgram) {
+      return false;
+    }
+    const kind = pc === this.romErase ? "erase" : "program";
+    const length = kind === "erase" ? r[1] : r[2];
+    const short = this.#cutsShort({ kind, offset: r[0], length });
+    const done = short ? length >> 4 : length;
+    if (kind === "erase") {
+      this.flash.fill(0xff, r[0], r[0] + done);
+    } else {
+      for (let i = 0; i < done; i++) {
         this.flash[r[0] + i] &= this.mcu.readUint8(r[1] + i);
       }
       this.flashWrites++;
-    } else {
-      return false;
     }
     this.mcu.flash.set(
       this.flash.subarray(r[0], r[0] + (pc === this.romErase ? r[1] : r[2])),
@@ -372,7 +410,11 @@ export class Board {
   run(ms: number, stop: () => boolean = () => false) {
     const end = this.clock.nanos + ms * 1e6;
     while (this.clock.nanos < end) {
-      if (this.pendingReboot) {
+      if (this.#powerCut?.done) {
+        this.#powerCut = undefined;
+        this.pendingReboot = 0;
+        this.powerOn(0);
+      } else if (this.pendingReboot) {
         const reason = this.pendingReboot;
         this.pendingReboot = 0;
         this.powerOn(reason);
@@ -394,7 +436,11 @@ export class Board {
     const { core } = mcu;
     const cycleNanos = 1e9 / (mcu.clocks.sysFreq || 125_000_000);
     const romEnd = 0x4000;
-    for (let i = 0; i < instructions && !this.pendingReboot && clock.nanos < end; i++) {
+    for (
+      let i = 0;
+      i < instructions && !this.pendingReboot && !this.#powerCut?.done && clock.nanos < end;
+      i++
+    ) {
       // PIO only matters while the WiFi chip is selected; skipping it the
       // rest of the time lets sleeps jump straight to the next timer alarm.
       const busActive = this.chip.csActive;

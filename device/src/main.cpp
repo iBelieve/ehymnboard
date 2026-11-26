@@ -213,6 +213,7 @@ static void act(ConnectionPolicy &policy, BoardLink &link, uint64_t now)
         break;
     case ConnectionPolicy::Action::REBOOT:
         printf("No live socket for >3 minutes, rebooting to recover\n");
+        ota_before_offline_reboot();
         reset_pico();
         break;
     case ConnectionPolicy::Action::NONE:

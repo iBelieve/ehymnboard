@@ -24,7 +24,11 @@ The device protocol keeps the Flask server's endpoints byte for byte:
 `GET /images/{1,2,3}` returns the raw 81,600-byte buffer with a bare SHA-1
 `ETag` (or 304 for a matching `?etag=`), plus `/device_booted`,
 `/device_healthy` (for firmware from before the WebSocket), `/ok`, and the
-OTA endpoints `/firmware/latest` and `/firmware/image`.
+OTA endpoints `/firmware/latest` and `/firmware/image`. A release is
+uploaded as a bundle of two images, one for each slot of the boards' A/B
+bootloader, and `/firmware/image?slot=b` (or `a`) serves one of them; without
+`slot` it serves slot A's, as boards on pico_fota_bootloader expect (see
+`src/worker/firmware.ts`).
 
 Boards also keep a WebSocket open at `GET /ws` (the messages are in
 [device/README.md](../device/README.md#talking-to-the-server)), so the

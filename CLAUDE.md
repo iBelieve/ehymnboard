@@ -75,8 +75,9 @@ All checks below must pass; run them locally before committing.
   (CI checks with `--dry-run --Werror`; clang-format is a uv dev dependency)
 - Build: configure with `-DWERROR=ON` and build; needs pico-sdk 2.3.1 and
   arm-none-eabi-gcc 15.2.Rel1 (the VS Code Pico extension installs both under
-  `~/.pico-sdk`), the `lib/pico_fota_bootloader` submodule, `uv sync` (the
-  OTA image encryption uses pycryptodome from the uv env) and
+  `~/.pico-sdk`), the `lib/pico_fota_bootloader` submodule (built only for
+  the emulator's test of moving boards off it), `uv sync` (the OTA image
+  encryption uses pycryptodome from the uv env) and
   `secrets.cmake` (copy `secrets.example.cmake`, as CI does)
 - clang-tidy: `uv run clang-tidy` (a uv dev dependency), config in
   `device/.clang-tidy`, all findings are errors; runs against the build's
@@ -88,6 +89,13 @@ All checks below must pass; run them locally before committing.
   with GoogleTest + RapidCheck under ASan/UBSan:
   `cmake -S test -B build-test -G Ninja -DCOVERAGE=ON && ninja -C build-test && ctest --test-dir build-test`.
   New pure source files go in both `CMakeLists.txt` and `test/CMakeLists.txt`.
+- OTA: an A/B bootloader of this project's own (`src/bootloader_main.cpp`;
+  the boot record logic, `src/boot_control.*`, is host tested with simulated
+  power cuts) runs the firmware in place from slot A or B, so the firmware is
+  linked twice (`ehymnboard` for A, `ehymnboard_b`) and a release is the
+  bundle `ehymnboard_ota_bundle.bin`. The firmware also carries the
+  bootloader, to replace pico_fota_bootloader on boards still on it
+  (`src/bootloader_install.h`). See `device/README.md`
 - Coverage and CRAP: `uv run gcovr --root . --filter 'src/' --object-directory build-test --exclude-throw-branches --cobertura build-test/coverage.xml --fail-under-line 90`
   then `uv run python ../tools/crap.py --coverage build-test/coverage.xml <host-tested src files>`
 - Complexity: `uv run lizard --CCN 15 --length 150 --arguments 7 --warnings_only src test`
@@ -123,8 +131,10 @@ All checks below must pass; run them locally before committing.
   with `pnpm exec wrangler types`
 - Don't change the device endpoints' paths, query parameters or response
   bytes, or the `/ws` messages (`state`, `ping`/`pong`, `shown`, close
-  codes): the firmware hard-codes them. The rasterizer is compared against
-  the old Flask server's output in `test/render.test.ts`
+  codes): the firmware hard-codes them. `/firmware/image` without `slot`
+  must keep serving slot A's image (a single upload's whole image): boards
+  still on pico_fota_bootloader send no `slot`. The rasterizer is compared
+  against the old Flask server's output in `test/render.test.ts`
 - Docker: the image builds from the repository root, for the workspace's
   lockfile: `docker build -f web/Dockerfile .` (`.dockerignore` at the root
   sends only the root files and `web/`). CI builds it, and dokku builds it the

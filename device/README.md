@@ -34,39 +34,65 @@ Then cd into the build directory and run:
 ninja
 ```
 
-To flash the Pico over USB:
+To flash the Pico over USB, hold BOOTSEL while plugging it in, then load the
+bootloader and the firmware (the bootloader's UF2 also clears the boot
+record, so the bootloader starts the firmware just loaded into slot A):
 
 ```sh
-picotool load -xf ehymnboard.elf
+picotool load build/ehymnboard_bootloader.uf2
+picotool load -x build/ehymnboard.uf2
 ```
 
 ### OTA Updates
 
-Boards update themselves over the air using [pico_fota_bootloader](https://github.com/JZimnol/pico_fota_bootloader) (the RP2040 has no built-in A/B boot support). Flash is laid out as:
+Boards update themselves over the air through an A/B bootloader of this
+project's own (`src/bootloader_main.cpp`; the RP2040 has no built-in A/B boot
+support and can't remap flash). The firmware runs in place from either of two
+slots, so it's built twice, linked once for each. Flash is laid out as:
 
-| Region                               | Size    |
-| ------------------------------------ | ------- |
-| Bootloader                           | 36 KB   |
-| Bootloader flags                     | 4 KB    |
-| Application slot (running firmware)  | 1000 KB |
-| Download slot                        | 1000 KB |
-| Reserved (last sector: `SavedState`) | 8 KB    |
+| Region                                  | Offset     | Size    |
+| --------------------------------------- | ---------- | ------- |
+| boot2 and the stub that starts the rest | `0x0`      | 4 KB    |
+| A/B bootloader, its marker at the end   | `0x1000`   | 28 KB   |
+| Boot record, two copies                 | `0x8000`   | 8 KB    |
+| Slot A                                  | `0xA000`   | 1000 KB |
+| Slot B                                  | `0x104000` | 1000 KB |
+| Reserved (last sector: `SavedState`)    | `0x1FE000` | 8 KB    |
 
-Whenever the server pushes a new version, and hourly besides, a board asks the server (`/firmware/latest`) whether it should run a different firmware version. If so, it downloads the image into the download slot, checks its SHA-256, and reboots. The bootloader then swaps the two slots (about 30 seconds) and starts the new firmware. Once the new firmware successfully talks to the server, it commits itself; if it reboots before that (crash, watchdog, or no network for 3 minutes), the bootloader swaps the old firmware back and the board won't retry that version.
+Whenever the server pushes a new version, and hourly besides, a board asks the server (`/firmware/latest`) whether it should run a different firmware version. If so, it downloads the image for the slot it isn't running from (`/firmware/image?slot=b`, say) straight into that slot, checks its SHA-256 and that it was built for that slot, writes a new boot record putting it on trial, and reboots. The bootloader starts it with the watchdog armed. Once the new firmware's socket is live and it can make an ordinary request, it commits itself. Until then each boot uses up one of its 3 trial boots; after the last, the bootloader starts the old firmware again, which is still in the other slot, and the board won't retry that version. Nothing is ever copied between slots, so a rollback is instant.
+
+The boot record (`src/boot_control.h`) says which slot runs, whether it's on trial, and each slot's image size and CRC-32. It's written to whichever of its two sectors doesn't hold the newest copy, with a sequence number and a CRC, so a power cut while writing it leaves the previous one in force. What each failure does:
+
+| What fails                                              | What happens                                                                                                             |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Power cut or failed download while writing the slot     | The other slot is untouched and still active; the board downloads the update again                                       |
+| Power cut while any boot record is written              | The previous record stands: the update is installed again, or the trial goes on                                          |
+| Power cut or reboot during a trial boot                 | It counts as one of the 3 trial boots, so a good update survives one or two                                              |
+| New firmware crashes, hangs or never gets its socket up | Watchdog or the 3 minute reboot, 3 times, then the old firmware                                                          |
+| New firmware's socket works but its requests don't      | It gives up its trial at once: the old firmware on the next boot                                                         |
+| A slot's image doesn't match its CRC                    | The bootloader starts the other slot                                                                                     |
+| An image for the wrong slot, wrong key or corrupted     | Refused before installing                                                                                                |
+| The old firmware can't get online after a rollback      | The network was probably down for the new one too: after 3 minutes it forgets the rollback and the update is tried again |
+
+The bootloader itself is never rewritten by an update, so nothing an update does can stop the board booting.
+
+#### Moving off pico_fota_bootloader
+
+Boards from before the A/B bootloader run [pico_fota_bootloader](https://github.com/JZimnol/pico_fota_bootloader), which kept its application in slot A and its download slot where slot B is. They move over the air, with no USB: they download slot A's image as before (no `slot` in the request) and pico_fota_bootloader swaps it in. Once that firmware is healthy, instead of committing to pico_fota_bootloader it replaces it (`src/bootloader_install.h`): it rewrites flash's first sector with the stub, erases the boot record sectors, writes the bootloader and then its marker. A power cut after the first sector is rewritten restarts the firmware in slot A, which finishes the job; a power cut while that one sector is rewritten (about 50 ms, once per board) leaves the board needing USB. If the new firmware fails before it's healthy, pico_fota_bootloader rolls it back as before. pico_fota_bootloader's own slot swap took about 30 seconds during which a power cut could leave the board unbootable; that's gone after the move.
 
 The firmware version is the short commit hash (plus `-dirty` and a timestamp for uncommitted changes), so commit before building a release.
 
 #### One-time setup (per board, over USB)
 
-A board needs the bootloader before it can take OTA updates. Hold BOOTSEL while plugging it in, then erase the old firmware (otherwise the bootloader may try to run its leftovers) and load the bootloader and the firmware:
+A new board needs the bootloader before it can take OTA updates. Hold BOOTSEL while plugging it in, then erase the flash (so nothing left over looks like firmware) and load the bootloader and the firmware:
 
 ```sh
 picotool erase
-picotool load build/lib/pico_fota_bootloader/pico_fota_bootloader.uf2
+picotool load build/ehymnboard_bootloader.uf2
 picotool load -x build/ehymnboard.uf2
 ```
 
-The first boot starts with fresh saved state, so the screens redraw once. After this, `picotool load -x build/ehymnboard.uf2` (in BOOTSEL mode) still works for flashing over USB.
+The first boot starts with fresh saved state, so the screens redraw once.
 
 ### Talking to the server
 
@@ -110,25 +136,22 @@ malloc or free runs.
 
 #### Releasing an update
 
-Build, then upload the encrypted image and its version:
+Build, then upload the OTA bundle (both slots' encrypted images, `ehymnboard_ota_bundle.bin`) and its version:
 
 ```sh
 curl -u "$BASIC_AUTH_USERNAME:$BASIC_AUTH_PASSWORD" \
-  -F image=@build/ehymnboard_fota_image_encrypted.bin \
+  -F image=@build/ehymnboard_ota_bundle.bin \
   -F version="$(cat build/firmware_version.txt)" \
   https://hymnboard.sonrise.io/firmware
 ```
 
-Every board running a different version installs it, including boards with a newer build flashed over USB: the server pushes the new version to each connected board at once. A new firmware commits itself on the first `state` message it gets over its socket; one that reboots before that is rolled back. Before committing it also checks
-that it can make an ordinary request (`/firmware/latest`): if that fails five
-times, half a minute apart, it reboots to be rolled back. The devices page shows each board's firmware version and any rollback.
+Every board running a different version installs it, including boards with a newer build flashed over USB: the server pushes the new version to each connected board at once. The server sends each board the image for its other slot, and slot A's to a board on pico_fota_bootloader. A single image (`ehymnboard_fota_image_encrypted.bin`, slot A's) still uploads, for a build from before the A/B bootloader; boards on the A/B bootloader in slot A can't install it. A new firmware commits itself on the first `state` message it gets over its socket. Before committing it also checks that it can make an ordinary request (`/firmware/latest`): if that fails five times, half a minute apart, it gives up its trial and reboots to be rolled back. The devices page shows each board's firmware version and any rollback.
 
 Notes:
 
 - The image is AES encrypted: it contains the WiFi passphrases, and firmware from before TLS downloads it over plain HTTP. The SHA-256 is inside the encrypted image, so a corrupted or tampered image fails the check.
-- Don't change the flash layout (`PFB_RESERVED_FILESYSTEM_SIZE_KB` in `CMakeLists.txt`) or the bootloader without reflashing every board over USB.
-- Losing power during the ~30 second slot swap can leave a board unbootable until it is reflashed over USB.
-- The emulator's `ota.test.ts` and `ota-rejects.test.ts` (see [emulator/README.md](emulator/README.md)) run the whole flow on an emulated board, bootloader included: download, swap, commit, rollback, a power cut mid-download, and bad, cut off or stalled images.
+- Don't change the flash layout (`boot_control.h` and the `EHB_*` variables in `CMakeLists.txt`) or the stub without a plan for moving every board over the air, as for pico_fota_bootloader.
+- The emulator runs the whole flow on an emulated board, bootloader included (see [emulator/README.md](emulator/README.md)): `ota.test.ts` (install, commit, trial boots, rollback, retry after an outage), `ota-rejects.test.ts` (bad, wrong-slot, cut off or stalled images), `power-cuts.test.ts` (a power cut during each boot record write) and `migration.test.ts` (moving off pico_fota_bootloader, with a power cut during each of its flash writes). The host tests (`test/test_boot_control.cpp`) check the bootloader's decisions through random updates with power cuts anywhere.
 
 ### TLS
 
@@ -172,8 +195,8 @@ cmake -G Ninja -B build -DEHYMNBOARD_TEST_ROOT_CA=ON   # for the emulator only
 ### Tests
 
 The hardware-independent parts of the firmware (HTTP header parsing, request
-paths, saved state, WebSocket framing and handshake, the board messages and
-the connection's retry and ping policy) are unit and property tested on your
+paths, saved state, WebSocket framing and handshake, the board messages, the
+connection's retry and ping policy and the bootloader's boot record) are unit and property tested on your
 computer, no Pico needed. Builds with the host compiler under AddressSanitizer and
 UndefinedBehaviorSanitizer:
 

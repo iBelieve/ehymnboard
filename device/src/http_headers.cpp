@@ -113,6 +113,29 @@ std::optional<std::string_view> find_header(std::string_view headers, std::strin
     return std::nullopt;
 }
 
+std::optional<uint32_t> find_content_length(std::string_view headers)
+{
+    const auto value = find_header(headers, "Content-Length");
+    if (!value || value->empty() || value->size() > 10)
+    {
+        return std::nullopt;
+    }
+    uint64_t length = 0;
+    for (const char digit : *value)
+    {
+        if (digit < '0' || digit > '9')
+        {
+            return std::nullopt;
+        }
+        length = length * 10 + static_cast<uint64_t>(digit - '0');
+    }
+    if (length > UINT32_MAX)
+    {
+        return std::nullopt;
+    }
+    return static_cast<uint32_t>(length);
+}
+
 bool header_has_token(std::string_view value, std::string_view token)
 {
     while (!value.empty())

@@ -20,12 +20,11 @@
 
 #include <string>
 
-// Over-the-air firmware updates, using pico_fota_bootloader. The bootloader
-// sits at the start of flash, followed by an application slot (the running
-// firmware) and a download slot. An update is downloaded into the download
-// slot and verified, then on reboot the bootloader swaps the two slots. If the
-// new firmware reboots before it reaches the server (see ota_loop()), the
-// bootloader swaps them back.
+// Over-the-air firmware updates, with the A/B bootloader (see boot_control.h
+// and ota_slots.h). The firmware runs in place from slot A or B; an update is
+// downloaded into the other slot and verified, then the bootloader starts it
+// on trial. If the new firmware doesn't commit (see ota_loop()) within its
+// trial boots, the bootloader goes back to the slot it came from.
 //
 // The server decides which firmware a board should run: any board whose
 // version differs from the one uploaded to the server installs it.
@@ -37,6 +36,12 @@ inline std::string ota_boot_version;
 
 // Records what the bootloader did on this boot. Call early in main().
 void ota_handle_boot();
+
+// Call before rebooting for want of a live socket. A rollback during a
+// network outage may not be the new firmware's fault: if this boot came back
+// from one and never got online either, the rejected version is forgotten,
+// so it's tried again.
+void ota_before_offline_reboot();
 
 // Called on every main loop iteration. Once the board's WebSocket is live
 // (`live`) and an https:// request has worked too, tells the bootloader that
