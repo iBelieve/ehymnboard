@@ -66,13 +66,13 @@ All checks below must pass; run them locally before committing.
   `// fallow-ignore-next-line <rule> -- why` comment (a reason is required).
   `pnpm run health` fails on a function with cyclomatic complexity over 20,
   cognitive complexity over 15 or a CRAP score of 30 or more, and on a
-  source file or export no test reaches. It's three runs: `health:static`
-  (coverage gaps, and e2e/ and scripts/ with estimated coverage),
-  `health:web` (after `pnpm run test:coverage` in `web/`) and
-  `health:emulator` (after `pnpm run test:coverage` in `device/emulator/`,
-  which needs the firmware build). No baseline: split the function, or for
-  CRAP, test it. Vitest never measures its own test files, so `web/test/`
-  has no CRAP check (its complexity still counts)
+  source file or export no test reaches. It's two runs: `health:static`
+  (coverage gaps, and every package but web/, with estimated coverage) and
+  `health:web` (with the coverage `pnpm run test:coverage` in `web/`
+  writes). No baseline: split the function, or for CRAP, test it. No CRAP
+  check (complexity still counts) for `web/test/`, as Vitest never measures
+  its own test files, or for `device/emulator/`, whose scenario tests run
+  about 13 times slower under V8 coverage
 - New dependencies: `pnpm run check-new-deps` fails if a dependency the
   branch adds, or whose version it changes (in any `package.json` or the
   catalog), isn't the newest release that `minimumReleaseAge` allows. It
@@ -122,11 +122,8 @@ All checks below must pass; run them locally before committing.
   key) to trust the test CA in `certs/test/`. `certs/roots.pem` is what real
   boards trust: `check-tls-roots.yml` checks the live server against it
   daily. Only erasable TypeScript syntax (no enums or parameter
-  properties); import with `.ts` extensions. `pnpm run test:coverage` runs
-  the scenario tests with V8 coverage (`coverage/`), for
-  `pnpm run health:emulator` at the root (CI's emulator job runs both). The
-  emulator isn't mutation tested: each mutant would rerun minutes of
-  emulated firmware
+  properties); import with `.ts` extensions. The emulator isn't mutation
+  tested: each mutant would rerun minutes of emulated firmware
 - Autobahn: the `ehymnboard_autobahn` build (an echo client on the same
   WebSocket code) runs the Autobahn fuzzingserver's sections 1-7 in the
   emulator: start the container as CI's `autobahn` job does, then

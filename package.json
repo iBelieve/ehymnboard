@@ -9,10 +9,9 @@
     "format:check": "prettier --check .",
     "dupes": "jscpd device tools web e2e scripts",
     "fallow": "fallow dead-code && fallow dupes --fail-on-issues",
-    "health": "pnpm run health:static && pnpm run health:web && pnpm run health:emulator",
-    "health:static": "fallow health --coverage-gaps && fallow health --complexity --workspace '!ehymnboard-web' --workspace '!ehymnboard-emulator'",
+    "health": "pnpm run health:static && pnpm run health:web",
+    "health:static": "fallow health --coverage-gaps && fallow health --complexity --workspace '!ehymnboard-web'",
     "health:web": "fallow health --complexity --workspace ehymnboard-web --coverage web/coverage",
-    "health:emulator": "fallow health --complexity --workspace ehymnboard-emulator --coverage device/emulator/coverage",
     "check-new-deps": "node scripts/src/check-new-deps.ts"
   },
   "packageManager": "pnpm@12.21.0",

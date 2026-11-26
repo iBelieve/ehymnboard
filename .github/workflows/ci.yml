@@ -79,9 +79,7 @@ jobs:
   # Type checks and lints every TypeScript package in the workspace (web/,
   # e2e/, device/emulator/, scripts/), each with its own tsconfig and
   # .oxlintrc.json, runs Fallow over them (.fallowrc.jsonc) and runs
-  # scripts/' tests. The other packages' tests run in their own jobs below,
-  # which check the complexity and CRAP scores of their code from the tests'
-  # coverage.
+  # scripts/' tests. The other packages' tests run in their own jobs below.
   typescript:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -111,7 +109,8 @@ jobs:
         run: pnpm run fallow
 
       # Source files and exports no test reaches, and the complexity of the
-      # packages whose coverage no job measures (e2e/, scripts/).
+      # packages other than web/ (whose CRAP scores need its tests' coverage:
+      # the web job checks it).
       - name: Coverage gaps and complexity
         if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm run health:static
@@ -361,14 +360,8 @@ jobs:
           cache: true
           require-lockfile: true
 
-      - id: test
-        name: Run scenario tests
-        run: pnpm run test:coverage
-
-      # Fallow, with the scenario tests' V8 coverage (device/emulator/coverage).
-      - name: Complexity and CRAP scores
-        if: (success() || failure()) && steps.test.outcome == 'success'
-        run: pnpm -w run health:emulator
+      - name: Run scenario tests
+        run: pnpm test
 
   # The firmware's WebSocket client against the Autobahn test suite's
   # fuzzingserver (sections 1-7), running in the emulator as the

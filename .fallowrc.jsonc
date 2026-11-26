@@ -38,6 +38,14 @@
       "files": ["web/test/**"],
       "rules": { "complexity-crap": "off" },
     },
+    {
+      // The emulator is test tooling, run by its scenario tests. V8 coverage
+      // makes those (emulating the firmware instruction by instruction) about
+      // 13 times slower, so it isn't measured, and CRAP scores from estimated
+      // coverage would be guesses. Its complexity still counts.
+      "files": ["device/emulator/**"],
+      "rules": { "complexity-crap": "off" },
+    },
   ],
   "rules": {
     "unused-dev-dependencies": "error",

@@ -5,7 +5,6 @@
   "scripts": {
     "start": "node src/run.ts",
     "test": "node --test 'test/*.test.ts'",
-    "test:coverage": "rm -rf coverage && NODE_V8_COVERAGE=coverage node --test 'test/*.test.ts'",
     "typecheck": "tsc -p .",
     "lint": "oxlint"
   },
