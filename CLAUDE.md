@@ -66,7 +66,8 @@ All checks below must pass; run them locally before committing.
   dependencies, so add a dependency at its latest version. To hold one back
   on purpose, exempt it in `latest-or-bust.json` at the root with the reason
   why (see latest-or-bust's README; there's no file while nothing is
-  exempt). CI skips Dependabot's PRs
+  exempt). On GitHub Actions it passes runs that aren't pull requests, and
+  Dependabot's and Renovate's PRs
 
 ### device/
 

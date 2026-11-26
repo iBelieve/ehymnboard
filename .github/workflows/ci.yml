@@ -42,10 +42,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-        with:
-          # The new-dependency check compares a pull request's merge commit
-          # with HEAD^, its base.
-          fetch-depth: 2
 
       # Installs the pnpm from the root package.json's packageManager and
       # Node.js from .node-version, then only the root's own dev
@@ -65,15 +61,14 @@ jobs:
         if: success() || failure()
         run: pnpm run dupes
 
-      # Pull requests only, against their base (HEAD^, the merge commit's
-      # first parent): on master the change has already been checked. Not
-      # Dependabot's: its grouped minor-and-patch PRs don't move a dependency
-      # to a new major version even when one is out, so they'd fail this.
+      # On a pull request, latest-or-bust compares with its base (fetching
+      # that commit into the shallow clone). Other runs, such as pushes to
+      # master (already checked as a pull request), and Dependabot's pull
+      # requests (its grouped minor-and-patch ones don't move a dependency to
+      # a new major version) pass with a note.
       - name: Check that new dependencies are the newest release
-        if: >-
-          (success() || failure()) && github.event_name == 'pull_request' &&
-          github.event.pull_request.user.login != 'dependabot[bot]'
-        run: pnpm run check-new-deps HEAD^
+        if: success() || failure()
+        run: pnpm run check-new-deps
 
   # Type checks and lints every TypeScript package in the workspace (web/,
   # e2e/, device/emulator/), each with its own tsconfig and .oxlintrc.json.
