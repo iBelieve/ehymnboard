@@ -290,6 +290,12 @@ app.all("/api/auth/*", (c) => accounts(c.env).fetch(c.req.raw));
 app.get("/api/setup", async (c) => c.json({ needed: await accounts(c.env).needsSetup() }));
 
 app.post("/api/setup", async (c) => {
+  const stub = accounts(c.env);
+  // Once there's an account the setup password does nothing, so don't tell
+  // anyone guessing it whether a guess was right.
+  if (!(await stub.needsSetup())) {
+    return c.text("An account already exists\n", 409);
+  }
   const body: unknown = await c.req.json().catch(() => undefined);
   const { setupPassword, name, email, password } = isRecord(body) ? body : {};
   if (!(await isSetupPassword(c.env, setupPassword))) {
@@ -298,7 +304,10 @@ app.post("/api/setup", async (c) => {
   if (typeof name !== "string" || typeof email !== "string" || typeof password !== "string") {
     return c.text("Expected { setupPassword, name, email, password }\n", 400);
   }
-  const created = await accounts(c.env).createFirstAccount({ name, email, password });
+  const created = await stub.createFirstAccount({ name, email, password });
+  if (typeof created === "string") {
+    return c.text(`${created}\n`, 400);
+  }
   return created ? c.body(null, 201) : c.text("An account already exists\n", 409);
 });
 

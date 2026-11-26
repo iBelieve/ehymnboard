@@ -320,9 +320,11 @@ still chains to a root the boards trust.
 First publish the firmware the boards run on the dokku app (`POST /firmware`,
 as in [device/README.md](../device/README.md#releasing-an-update)), through a
 temporary domain the wildcard already reaches, such as
-`dokku domains:add hymnboard hymnboard-fallback.sonrise.io`. A board installs
-any version the server offers that differs from its own, so an older release
-left on the dokku app would downgrade every board as soon as it connects.
+`dokku domains:add hymnboard hymnboard-fallback.sonrise.io`. The dokku app has
+its own accounts: create its first one there with its `SETUP_PASSWORD`, then
+an API key on its Accounts page for the upload. A board installs any version
+the server offers that differs from its own, so an older release left on the
+dokku app would downgrade every board as soon as it connects.
 
 Then delete both custom domains, and add `hymnboard.mluther.org`'s A record
 back (proxied, with the `*.sonrise.io` wildcard's address). `hymnboard.sonrise.io`

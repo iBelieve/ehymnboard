@@ -34,6 +34,11 @@ test("setup creates the first account, an admin, then refuses another", async ()
   expect(await (await get("/api/setup")).json()).toEqual({ needed: true });
   expect((await post("/api/setup", { ...ADMIN, setupPassword: "wrong" })).status).toBe(403);
   expect((await post("/api/setup", { ...ADMIN })).status).toBe(403);
+  // An account Better Auth refuses is a 400, and setup stays open.
+  const refused = { ...ADMIN, setupPassword: "setup-secret" };
+  expect((await post("/api/setup", { ...refused, email: "admin@localhost" })).status).toBe(400);
+  expect((await post("/api/setup", { ...refused, password: "short" })).status).toBe(400);
+  expect(await (await get("/api/setup")).json()).toEqual({ needed: true });
 
   const headers = await signInAsAdmin();
   expect(await (await get("/api/setup")).json()).toEqual({ needed: false });
@@ -42,6 +47,32 @@ test("setup creates the first account, an admin, then refuses another", async ()
 
   const again = { ...ADMIN, email: "second@example.com", setupPassword: "setup-secret" };
   expect((await post("/api/setup", again)).status).toBe(409);
+  // Not a way to check guesses at the setup password any more
+  expect((await post("/api/setup", { ...again, setupPassword: "wrong" })).status).toBe(409);
+});
+
+/** The admin signing in from a page at `origin`. */
+function signInFrom(origin: string) {
+  return post(
+    "/api/auth/sign-in/email",
+    { email: ADMIN.email, password: ADMIN.password },
+    { Origin: origin, "Sec-Fetch-Site": "same-origin", "CF-Connecting-IP": "203.0.113.9" },
+  );
+}
+
+test("signs in over https when the server sees http (behind a proxy that ends TLS)", async () => {
+  await signInAsAdmin();
+  expect((await signInFrom(BASE.replace(/^http:/, "https:"))).status).toBe(200);
+  expect((await signInFrom("https://elsewhere.example")).status).toBe(403);
+});
+
+test("an admin can't add an account with a short password", async () => {
+  const res = await post(
+    "/api/auth/admin/create-user",
+    { name: "Someone", email: "short@example.com", password: "short", role: "user" },
+    await signInAsAdmin(),
+  );
+  expect(res.status).toBe(400);
 });
 
 test("a wrong password doesn't sign in", async () => {
@@ -112,4 +143,27 @@ test("an admin's API key uploads firmware, and only that", async () => {
     await post("/api/auth/api-key/create", { name: "x" }, user)
   ).json<{ key: string }>();
   expect((await upload({ "X-Api-Key": userKey.key })).status).toBe(403);
+});
+
+test("a banned admin's API key stops working", async () => {
+  const email = "banned-admin@example.com";
+  const password = "a fine admin password";
+  const admin = await signInAsAdmin();
+  const created = await post(
+    "/api/auth/admin/create-user",
+    { name: "Former admin", email, password, role: "admin" },
+    admin,
+  );
+  const { user } = await created.json<{ user: { id: string } }>();
+  const keyRes = await post(
+    "/api/auth/api-key/create",
+    { name: "curl" },
+    await signIn(email, password),
+  );
+  const { key } = await keyRes.json<{ key: string }>();
+  expect((await upload({ "X-Api-Key": key })).status).toBe(201);
+
+  const ban = await post("/api/auth/admin/ban-user", { userId: user.id }, admin);
+  expect(ban.status, await ban.clone().text()).toBe(200);
+  expect((await upload({ "X-Api-Key": key })).status).toBe(401);
 });

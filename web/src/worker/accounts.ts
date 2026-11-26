@@ -13,9 +13,16 @@ export type FirstAccount = { name: string; email: string; password: string };
  * above all, never load it.
  */
 async function createAuth(sql: SqlStorage, secret: string) {
-  const [{ apiKey }, { betterAuth }, { admin }, { DurableObjectDialect }] = await Promise.all([
+  const [
+    { apiKey },
+    { betterAuth },
+    { APIError, createAuthMiddleware },
+    { admin },
+    { DurableObjectDialect },
+  ] = await Promise.all([
     import("@better-auth/api-key"),
     import("better-auth"),
+    import("better-auth/api"),
     import("better-auth/plugins"),
     import("./durable-object-dialect"),
   ]);
@@ -25,6 +32,11 @@ async function createAuth(sql: SqlStorage, secret: string) {
     // on several hosts (hymnboard.sonrise.io, hymnboard.mluther.org,
     // workers.dev, previews, localhost). Nothing here redirects or emails a
     // link, which is what a fixed one is for.
+    // The request's own host over https is trusted too: the self-hosted
+    // image, behind a proxy that ends TLS (dokku's nginx, behind
+    // Cloudflare), sees http:// URLs while the browser's Origin is https://,
+    // and Better Auth refuses a sign-in from an Origin it doesn't trust.
+    trustedOrigins: (request) => (request ? [`https://${new URL(request.url).host}`] : []),
     database: { dialect: new DurableObjectDialect(sql), type: "sqlite", transaction: false },
     // Admins add accounts (the admin plugin's createUser); nobody signs up.
     emailAndPassword: { enabled: true, disableSignUp: true },
@@ -45,6 +57,31 @@ async function createAuth(sql: SqlStorage, secret: string) {
       useSecureCookies: true,
     },
     telemetry: { enabled: false },
+    hooks: {
+      // Better Auth checks a new password's length everywhere but in the
+      // admin plugin's createUser, which makes the first account and the
+      // ones admins add.
+      before: createAuthMiddleware((ctx) => {
+        const body: unknown = ctx.body;
+        const password =
+          typeof body === "object" && body !== null && "password" in body
+            ? body.password
+            : undefined;
+        const min = ctx.context.password.config.minPasswordLength;
+        if (
+          ctx.path === "/admin/create-user" &&
+          typeof password === "string" &&
+          password.length < min
+        ) {
+          return Promise.reject(
+            new APIError("BAD_REQUEST", {
+              message: `Password too short: at least ${min} characters`,
+            }),
+          );
+        }
+        return Promise.resolve();
+      }),
+    },
   });
 }
 
@@ -73,7 +110,11 @@ export class Accounts extends DurableObject<Env> {
     if (!secret || secret.length < MIN_SECRET_LENGTH) {
       throw new Error(`BETTER_AUTH_SECRET must be set, at least ${MIN_SECRET_LENGTH} characters`);
     }
-    this.#auth ??= createAuth(this.#sql, secret);
+    // A failed load (an import, say) is tried again by the next request.
+    this.#auth ??= createAuth(this.#sql, secret).catch((error: unknown) => {
+      this.#auth = undefined;
+      throw error;
+    });
     return this.#auth;
   }
 
@@ -85,7 +126,14 @@ export class Accounts extends DurableObject<Env> {
   /** Who's signed in with this request's session cookie, if anyone. */
   async viewer(cookie: string): Promise<Viewer | null> {
     const auth = await this.#betterAuth();
-    const session = await auth.api.getSession({ headers: new Headers({ cookie }) });
+    // Without refreshing: a refresh here would extend the session but not
+    // the browser's cookie, whose Set-Cookie has nowhere to go, and the
+    // admin page's own /api/auth/get-session would then find nothing to
+    // refresh. That one, through fetch(), refreshes both.
+    const session = await auth.api.getSession({
+      headers: new Headers({ cookie }),
+      query: { disableRefresh: true },
+    });
     return session && toViewer(session.user);
   }
 
@@ -97,9 +145,15 @@ export class Accounts extends DurableObject<Env> {
       return null;
     }
     const user = this.#sql
-      .exec<UserRow>(`SELECT "id", "name", "email", "role" FROM "user" WHERE "id" = ?`, userId)
+      .exec<UserRow & { banned: number | null; banExpires: string | null }>(
+        `SELECT "id", "name", "email", "role", "banned", "banExpires" FROM "user" WHERE "id" = ?`,
+        userId,
+      )
       .toArray()[0];
-    return user ? toViewer(user) : null;
+    // A banned account can't sign in, so its keys don't work either.
+    const banned =
+      !!user?.banned && (user.banExpires === null || new Date(user.banExpires) > new Date());
+    return user && !banned ? toViewer(user) : null;
   }
 
   /** True until the first account exists. */
@@ -109,17 +163,23 @@ export class Accounts extends DurableObject<Env> {
 
   /**
    * Creates the first account, an admin, if there's none yet. The Worker
-   * checks the setup password first. False if an account already exists.
+   * checks the setup password first. False if an account already exists, or
+   * why Better Auth refused the account (an invalid email, say).
    */
-  createFirstAccount(account: FirstAccount): Promise<boolean> {
-    // One at a time, so two setups at once can't both see no accounts.
+  createFirstAccount(account: FirstAccount): Promise<boolean | string> {
+    // One at a time, so two setups at once can't both see no accounts. A
+    // throw in here would reset the object, so a refusal is returned instead.
     return this.ctx.blockConcurrencyWhile(async () => {
       if (!this.needsSetup()) {
         return false;
       }
-      const auth = await this.#betterAuth();
-      await auth.api.createUser({ body: { ...account, role: "admin" } });
-      return true;
+      try {
+        const auth = await this.#betterAuth();
+        await auth.api.createUser({ body: { ...account, role: "admin" } });
+        return true;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
     });
   }
 }

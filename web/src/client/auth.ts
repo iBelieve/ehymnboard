@@ -5,6 +5,7 @@
 import { apiKeyClient } from "@better-auth/api-key/client";
 import { adminClient } from "better-auth/client/plugins";
 import { createAuthClient } from "better-auth/react";
+import { useState } from "react";
 import type { Viewer } from "../shared/api";
 
 const client = createAuthClient({ plugins: [adminClient(), apiKeyClient()] });
@@ -33,12 +34,19 @@ function toRole(role: string | null | undefined): Role {
 }
 
 /**
- * Who's signed in: undefined while that's being checked, null for nobody.
- * Signing in or out updates it.
+ * Who's signed in: undefined while that's first being checked, null for
+ * nobody. Signing in or out updates it.
  */
 export function useViewer(): Viewer | null | undefined {
   const { data, isPending } = client.useSession();
-  if (isPending) {
+  // Better Auth is pending again on every later check while nobody's signed
+  // in (on coming back to the tab, say). Only the first check counts, so the
+  // sign-in form isn't swapped out, and emptied, meanwhile.
+  const [answered, setAnswered] = useState(false);
+  if (!isPending && !answered) {
+    setAnswered(true);
+  }
+  if (isPending && !answered) {
     return undefined;
   }
   if (!data) {
@@ -89,8 +97,10 @@ export async function removeAccount(userId: string): Promise<void> {
   unwrap(await client.admin.removeUser({ userId }));
 }
 
+/** Sets someone's password, and signs them out everywhere, as changing your own does elsewhere. */
 export async function setAccountPassword(userId: string, newPassword: string): Promise<void> {
   unwrap(await client.admin.setUserPassword({ userId, newPassword }));
+  unwrap(await client.admin.revokeUserSessions({ userId }));
 }
 
 export async function listApiKeys(): Promise<ApiKey[]> {

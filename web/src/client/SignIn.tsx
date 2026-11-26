@@ -102,7 +102,7 @@ export function SignIn() {
         <div className="rounded-2xl bg-white p-6 shadow-lg">
           {loadError && <div className="text-error text-sm">{loadError}</div>}
           {setupNeeded === false && <SignInForm />}
-          {setupNeeded === true && <SetupForm />}
+          {setupNeeded === true && <SetupForm onExists={() => setSetupNeeded(false)} />}
         </div>
       </div>
     </div>
@@ -126,7 +126,8 @@ function SignInForm() {
   );
 }
 
-function SetupForm() {
+/** `onExists` once an account turns out to exist already (made by an earlier try, say). */
+function SetupForm({ onExists }: { onExists: () => void }) {
   const [setupPassword, setSetupPassword] = useState("");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -135,7 +136,10 @@ function SetupForm() {
     <ActionForm
       submit="Create account"
       onSubmit={async () => {
-        await createFirstAccount({ setupPassword, name, email, password });
+        if (!(await createFirstAccount({ setupPassword, name, email, password }))) {
+          onExists();
+          return;
+        }
         await signIn(email, password);
       }}
     >

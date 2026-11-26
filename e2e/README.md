@@ -57,7 +57,8 @@ E2E_BASE_URL=http://localhost:8000 E2E_SETUP_PASSWORD=e2e-setup pnpm test
 ```
 
 To start the server for this, run its Docker image, as CI does (built from
-the repository root), or `pnpm dev` in `web/` (both listen on port 8000):
+the repository root), or `pnpm dev` in `web/` (both listen on port 8000;
+`pnpm dev`'s setup password is `dev`, so pass `E2E_SETUP_PASSWORD=dev`):
 
 ```sh
 docker build -t hymnboard -f web/Dockerfile . && docker run --rm -p 8000:8000 \

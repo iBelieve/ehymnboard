@@ -43,18 +43,24 @@ export async function fetchSetupNeeded(): Promise<boolean> {
   return (await json<{ needed: boolean }>(await fetch("/api/setup"))).needed;
 }
 
-/** Creates the first account, an admin, with the deploy's SETUP_PASSWORD. */
+/**
+ * Creates the first account, an admin, with the deploy's SETUP_PASSWORD.
+ * False if an account already exists.
+ */
 export async function createFirstAccount(account: {
   setupPassword: string;
   name: string;
   email: string;
   password: string;
-}): Promise<void> {
-  await check(
-    await fetch("/api/setup", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(account),
-    }),
-  );
+}): Promise<boolean> {
+  const res = await fetch("/api/setup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(account),
+  });
+  if (res.status === 409) {
+    return false;
+  }
+  await check(res);
+  return true;
 }

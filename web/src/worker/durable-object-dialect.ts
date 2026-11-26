@@ -87,7 +87,10 @@ class DurableObjectConnection implements DatabaseConnection {
     const cursor = this.#sql.exec(query.sql, ...query.parameters);
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- rows are the query's
     const rows = cursor.toArray() as R[];
-    return Promise.resolve({ rows, numAffectedRows: BigInt(cursor.rowsWritten) });
+    // SQLite's own count, as D1's meta.changes is: the cursor's rowsWritten
+    // also counts each index entry written.
+    const { changes } = this.#sql.exec<{ changes: number }>("SELECT changes() AS changes").one();
+    return Promise.resolve({ rows, numAffectedRows: BigInt(changes) });
   }
 
   // Better Auth never streams
