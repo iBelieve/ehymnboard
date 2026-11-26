@@ -1,6 +1,7 @@
 // happy-dom has no canvas, which BoardPreview draws each screen on. This one
-// keeps the pixels it's given, and its data URL says how many are white, so a
-// test can tell which image a screen shows.
+// keeps the pixels it's given, and its data URL says how many are white and
+// which is the first (-1 for none), so a test can tell which image a screen
+// shows and in what order its bits were read.
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
@@ -23,10 +24,14 @@ HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement) {
 HTMLCanvasElement.prototype.toDataURL = function (this: HTMLCanvasElement) {
   const data = pixels.get(this) ?? new Uint8ClampedArray();
   let white = 0;
+  let first = -1;
   for (let i = 0; i < data.length; i += 4) {
-    if (data[i] === 255 && data[i + 1] === 255 && data[i + 2] === 255) white++;
+    if (data[i] === 255 && data[i + 1] === 255 && data[i + 2] === 255) {
+      if (white === 0) first = i / 4;
+      white++;
+    }
   }
-  return `data:test,${white}`;
+  return `data:test,${white},${first}`;
 };
 
 afterEach(() => {

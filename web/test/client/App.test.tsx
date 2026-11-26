@@ -154,19 +154,21 @@ test("polling stops when the page goes away", async () => {
 
 test("the preview shows the bits the boards download", async () => {
   await loaded();
-  await waitFor(() => expect(images()).toEqual(["data:test,8", "data:test,16", "data:test,24"]));
+  await waitFor(() =>
+    expect(images()).toEqual(["data:test,8,0", "data:test,16,0", "data:test,24,0"]),
+  );
   expect(server.count("GET", "/api/screens/1")).toBe(1);
 });
 
 test("editing previews the draft, and Apply saves it", async () => {
   const user = userEvent.setup();
   await loaded();
-  await waitFor(() => expect(images()[0]).toBe("data:test,8"));
+  await waitFor(() => expect(images()[0]).toBe("data:test,8,0"));
   await user.clear(inputs()[0]!);
   await user.type(inputs()[0]!, " 321 ");
   screen.getByText("Previewing unsaved changes");
   // Rendered in the browser, not the stored bits.
-  expect(images()[0]).not.toBe("data:test,8");
+  expect(images()[0]).not.toBe("data:test,8,0");
 
   await user.click(button("Apply"));
   await waitFor(() => expect(values()[0]).toBe("321"));
@@ -216,11 +218,11 @@ test("a failed screen download says why, and is tried again", async () => {
   await loaded();
   await screen.findByText("Error: 500 oops");
   fail = false;
-  // The next poll clears the error; a new state then retries the screen.
-  server.state = { ...server.state, devices: [] };
+  // The next poll clears the error, and its state (a new object, though the
+  // etags are the same) retries the screen.
   await act(() => vi.advanceTimersByTimeAsync(10_000));
   await waitFor(() => expect(screen.queryByText("Error: 500 oops")).toBeNull());
-  await waitFor(() => expect(images()[1]).toBe("data:test,16"));
+  await waitFor(() => expect(images()[1]).toBe("data:test,16,0"));
 });
 
 test("polling follows lines changed elsewhere, unless they're being edited", async () => {
@@ -270,7 +272,7 @@ test("bits newer than the state are kept, and not fetched again", async () => {
   await loaded();
   await waitFor(() => expect(server.count("GET", "/api/screens/3")).toBe(1));
   // Not the state's etag, so the saved lines are rendered instead.
-  await waitFor(() => expect(images()[1]).toBe("data:test,16"));
-  expect(images()[0]).not.toBe("data:test,64");
+  await waitFor(() => expect(images()[1]).toBe("data:test,16,0"));
+  expect(images()[0]).not.toBe("data:test,64,0");
   expect(server.count("GET", "/api/screens/1")).toBe(1);
 });

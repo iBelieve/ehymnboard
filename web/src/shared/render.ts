@@ -135,9 +135,17 @@ type Crossing = { x: number; dir: number };
  */
 function fillPath(buffer: Uint8Array, polygons: Point[][]) {
   const edges = polygons.flatMap(edgesOf);
-  const ys = edges.flatMap((e) => [e.y0, e.y1]);
-  const firstRow = Math.max(0, Math.floor(Math.min(...ys)));
-  const lastRow = Math.min(SCREEN_HEIGHT - 1, Math.ceil(Math.max(...ys)));
+  // A loop, not Math.min(...ys): a long line of intricate glyphs ("@" x 100)
+  // has more edges than a call can take arguments. Each edge points down, so
+  // y0 is its top and y1 its bottom.
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const e of edges) {
+    minY = Math.min(minY, e.y0);
+    maxY = Math.max(maxY, e.y1);
+  }
+  const firstRow = Math.max(0, Math.floor(minY));
+  const lastRow = Math.min(SCREEN_HEIGHT - 1, Math.ceil(maxY));
 
   for (let row = firstRow; row <= lastRow; row++) {
     fillRow(buffer, row, crossingsAt(edges, row + 0.5));
@@ -170,7 +178,10 @@ function crossingsAt(edges: Edge[], y: number): Crossing[] {
       crossings.push({ x: e.x0 + ((y - e.y0) / (e.y1 - e.y0)) * (e.x1 - e.x0), dir: e.dir });
     }
   }
-  return crossings.toSorted((a, b) => a.x - b.x);
+  // In place: the array is this row's own, and the admin's preview runs this
+  // in browsers older than Array#toSorted.
+  crossings.sort((a, b) => a.x - b.x);
+  return crossings;
 }
 
 /** Sets the pixels of a row between crossings where the winding number isn't zero. */

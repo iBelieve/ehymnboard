@@ -13,8 +13,8 @@ COPY --link web/package.json web/
 
 # Install the pnpm version pinned in the root package.json's packageManager
 # field, then web/'s dependencies. pnpm also installs the root's own dev tools
-# (Prettier, jscpd, latest-or-bust, oxlint); they stay in this build stage, not
-# the image.
+# (Prettier, jscpd, latest-or-bust, oxlint, Fallow); they stay in this build
+# stage, not the image.
 RUN npm install -g "$(node -p 'require("./package.json").packageManager')" \
     && pnpm install --frozen-lockfile --filter ehymnboard-web
 

@@ -654,6 +654,13 @@ export class VirtualNetwork {
       this.sendTcpRaw(src, h.dstPort, h.srcPort, 0, (h.seq + 1) >>> 0, TCP_RST | TCP_ACK, 0);
       return;
     }
+    // A SYN for a connection the router still has (the board sending it
+    // again, or reusing the port): the new one replaces it, so close the old
+    // one's TLS session and tunnel rather than leave them open.
+    const old = this.connections.get(key);
+    if (old) {
+      this.#forget(old);
+    }
     const tls = h.dstPort === 443;
     const c: Connection = {
       key,

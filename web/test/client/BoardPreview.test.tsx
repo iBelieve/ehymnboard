@@ -12,7 +12,12 @@ test("each screen's bits become an image, most significant bit first", () => {
     <BoardPreview screens={[one, lastPixel, new Uint8Array(SCREEN_BYTES).fill(0xff)]} />,
   );
   const hrefs = [...container.querySelectorAll("image")].map((image) => image.getAttribute("href"));
-  expect(hrefs).toEqual(["data:test,1", "data:test,1", `data:test,${SCREEN_BYTES * 8}`]);
+  // The first pixel, the last pixel (bit 0 of the last byte), and every pixel.
+  expect(hrefs).toEqual([
+    "data:test,1,0",
+    `data:test,1,${SCREEN_BYTES * 8 - 1}`,
+    `data:test,${SCREEN_BYTES * 8},0`,
+  ]);
 });
 
 test("a screen with no bits yet is drawn black", () => {
@@ -20,6 +25,6 @@ test("a screen with no bits yet is drawn black", () => {
     <BoardPreview screens={[undefined, new Uint8Array(SCREEN_BYTES), undefined]} />,
   );
   expect(container.querySelectorAll("image")).toHaveLength(1);
-  // The two blank screens, then the three dividers.
+  // The two blank screens (the dividers are the board's brown).
   expect(container.querySelectorAll('rect[fill="#000"]')).toHaveLength(2);
 });

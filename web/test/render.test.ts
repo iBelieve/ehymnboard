@@ -79,6 +79,12 @@ describe("matches the Flask server's rendering", () => {
   });
 });
 
+test("a long line of intricate glyphs renders", () => {
+  // Over 100,000 edges: more than a function call can take as arguments.
+  const buffer = renderScreen(getFont(), "@".repeat(100), "8".repeat(100));
+  expect(buffer.some((byte) => byte !== 0)).toBe(true);
+});
+
 test("blank lines render a blank screen", () => {
   expect(renderScreen(getFont(), "", "").every((byte) => byte === 0)).toBe(true);
 });
