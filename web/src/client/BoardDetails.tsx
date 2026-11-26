@@ -183,9 +183,9 @@ function Sparkline({
 
   return (
     <figure className="m-0">
-      <figcaption className="flex justify-between text-sm">
+      <figcaption className="flex justify-between gap-2 text-sm">
         <span className="text-gray-600">{title}</span>
-        <span>{format(shown?.value ?? latest.value)}</span>
+        <span className="whitespace-nowrap">{format(shown?.value ?? latest.value)}</span>
       </figcaption>
       <svg
         viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
