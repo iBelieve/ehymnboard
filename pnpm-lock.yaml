@@ -216,9 +216,9 @@ importers:
       jscpd:
         specifier: 5.4.3
         version: 5.4.3
-      npm-check-updates:
-        specifier: 23.1.1
-        version: 23.1.1
+      latest-or-bust:
+        specifier: 0.2.0
+        version: 0.2.0
       oxlint:
         specifier: 'catalog:'
         version: 1.94.0
@@ -256,25 +256,6 @@ importers:
       ehymnboard-emulator:
         specifier: workspace:*
         version: link:../device/emulator
-      oxlint:
-        specifier: 'catalog:'
-        version: 1.94.0
-      tsrs:
-        specifier: 'catalog:'
-        version: 7.1.0-beta.tsrs4
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-
-  scripts:
-    dependencies:
-      yaml:
-        specifier: 2.9.1
-        version: 2.9.1
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 26.6.6
       oxlint:
         specifier: 'catalog:'
         version: 1.94.0
@@ -1843,6 +1824,11 @@ packages:
     resolution: {integrity: sha512-o+NO+8WrRiQEE4/7nwRJhN1HWpVmJm511pBHUxPLtp0BUISzlBplORYSmTclCnJvQq2tKu/sgl3xVpkc7ZWuQQ==}
     engines: {node: '>=6'}
 
+  latest-or-bust@0.2.0:
+    resolution: {integrity: sha512-AaUpYuMcZ6Ii7Vx7a9hJCFrw6RZNYlPOoCtfmgdG3CW0ViDUcQIJIL0b3caNNkXlZ9I5Wk8BVVsP3iDJLvXwtQ==}
+    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
+    hasBin: true
+
   lightningcss-android-arm64@1.33.0:
     resolution: {integrity: sha512-gEpRTalKdosp4Bb8qWtc2iOgE5SeIHlpS1up9bFq2wAyYhl1UdTObYiHe98zEM9SQvSoqQZ1IQD0JNpg3Ml5pg==}
     engines: {node: '>= 12.0.0'}
@@ -2078,6 +2064,10 @@ packages:
     peerDependenciesMeta:
       '@types/node':
         optional: true
+
+  smol-toml@1.9.1:
+    resolution: {integrity: sha512-j7WyPdf0CJoutMzMoPLF/bVXHtKZIT9Rb4eGeEbWw8X2t5oirjPgpL+OpaENZrILYaXqYwnVH+qgUwVbl+pUJQ==}
+    engines: {node: '>= 18'}
 
   source-map-js@1.2.4:
     resolution: {integrity: sha512-J7ZjMvHd9O1fcT/5V09QWaaSl2BbWx3F6O08spde82Namf9UB0GxRVIPiNbVsdKkoizHiSpTodo3vp2bAy91MA==}
@@ -3379,6 +3369,12 @@ snapshots:
 
   kleur@4.1.5: {}
 
+  latest-or-bust@0.2.0:
+    dependencies:
+      npm-check-updates: 23.1.1
+      smol-toml: 1.9.1
+      yaml: 2.9.1
+
   lightningcss-android-arm64@1.33.0:
     optional: true
 
@@ -3609,6 +3605,8 @@ snapshots:
       '@img/sharp-win32-ia32': 0.35.5
       '@img/sharp-win32-x64': 0.35.5
       '@types/node': 26.6.6
+
+  smol-toml@1.9.1: {}
 
   source-map-js@1.2.4: {}
 

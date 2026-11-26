@@ -7,9 +7,8 @@ master by Workers Builds), and self-hostable on workerd via a Docker image
 deployed with dokku, which serves as the fallback (see `web/README.md`). It
 replaced a Flask app (`server/`, last at commit 02ece7f) and keeps its device
 protocol byte-for-byte. `hardware/` is the KiCad design
-(no CI). `web/`, `e2e/`, `device/emulator/` and `scripts/` (repository
-tooling) are one pnpm workspace, rooted at the repository root (see "pnpm
-workspace" below).
+(no CI). `web/`, `e2e/` and `device/emulator/` are one pnpm workspace,
+rooted at the repository root (see "pnpm workspace" below).
 
 ## CI
 
@@ -55,8 +54,8 @@ All checks below must pass; run them locally before committing.
   well as the TypeScript. `.prettierignore` lists what's left out: generated
   files, the submodule, vendored code and `device/.vscode/` (the Pico
   extension writes it). C++ is clang-format's and Python ruff's (`device/`)
-- Duplicate code: `pnpm run dupes` (jscpd over `device/`, `tools/`, `web/`,
-  `e2e/` and `scripts/`, config in `.jscpd.json`, zero tolerance)
+- Duplicate code: `pnpm run dupes` (jscpd over `device/`, `tools/`, `web/`
+  and `e2e/`, config in `.jscpd.json`, zero tolerance)
 - Fallow (config in `.fallowrc.jsonc`), over the workspace's TypeScript:
   `pnpm run fallow` (dead code, type-aware through `fallow-type-aware`, then
   its own duplicate check) fails on unused files, exports, class members and
@@ -73,16 +72,18 @@ All checks below must pass; run them locally before committing.
   check (complexity still counts) for `web/test/`, as Vitest never measures
   its own test files, or for `device/emulator/`, whose scenario tests run
   about 13 times slower under V8 coverage
-- New dependencies: `pnpm run check-new-deps` fails if a dependency the
-  branch adds, or whose version it changes (in any `package.json` or the
-  catalog), isn't the newest release that `minimumReleaseAge` allows. It
+- New dependencies: `pnpm run check-new-deps` runs
+  [latest-or-bust](https://github.com/iBelieve/latest-or-bust), which fails
+  if a dependency the branch adds, or whose version it changes (in any
+  `package.json` or the catalog), isn't the newest release that
+  `minimumReleaseAge` allows, including an upgrade that stops short of it. It
   compares with where the branch left `origin/master` (CI runs it on pull
-  requests, against their base) and
-  asks npm-check-updates about only those dependencies, so add a dependency
-  at its latest version. To hold one back on purpose, add it to `reject` in
-  `.ncurc.cjs` with a comment saying why. CI skips Dependabot's PRs
-- `scripts/` (TypeScript run directly by Node, like the emulator):
-  `pnpm run typecheck`, `pnpm run lint` and `pnpm test` there
+  requests, against their base) and asks npm-check-updates about only those
+  dependencies, so add a dependency at its latest version. To hold one back
+  on purpose, exempt it in `latest-or-bust.json` at the root with the reason
+  why (see latest-or-bust's README; there's no file while nothing is
+  exempt). On GitHub Actions it passes runs that aren't pull requests, and
+  Dependabot's and Renovate's PRs
 
 ### device/
 
