@@ -57,6 +57,28 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE devices ADD COLUMN disconnected_at TEXT;
   ALTER TABLE devices ADD COLUMN shown_etags TEXT;
   `,
+  // 3: what boards say about their health (see diagnostics.ts). The latest
+  // signal and uptime, why the last socket ended and the board last reset
+  // (JSON: SocketDrop and ResetInfo), its last heap and counters (JSON:
+  // BoardHealth), and each hourly report for 30 days, for trends.
+  `
+  ALTER TABLE devices ADD COLUMN rssi INTEGER;
+  ALTER TABLE devices ADD COLUMN uptime_s INTEGER;
+  ALTER TABLE devices ADD COLUMN uptime_at TEXT;
+  ALTER TABLE devices ADD COLUMN last_drop TEXT;
+  ALTER TABLE devices ADD COLUMN last_reset TEXT;
+  ALTER TABLE devices ADD COLUMN health TEXT;
+  ALTER TABLE devices ADD COLUMN health_at TEXT;
+  CREATE TABLE device_health (
+    device_id TEXT NOT NULL,
+    at TEXT NOT NULL,
+    rssi INTEGER,
+    uptime_s INTEGER,
+    health TEXT NOT NULL,
+    PRIMARY KEY (device_id, at)
+  );
+  CREATE INDEX device_health_at ON device_health (at);
+  `,
 ];
 
 /**

@@ -18,6 +18,7 @@
 
 #include "board_link.h"
 #include "board_messages.h"
+#include "diagnostics_board.h"
 #include "fetch_image.h"
 #include "firmware_version.h"
 #include "healthchecks.h"
@@ -58,11 +59,15 @@ static FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std:
     long_watchdog_update();
 
     printf("Refreshing screen %d\n", screen_id);
-    const auto ret = fetch_image(screen_id, etag);
+    const auto ret = [&] {
+        const PhaseScope phase(Phase::IMAGE_DOWNLOAD);
+        return fetch_image(screen_id, etag);
+    }();
 
     if (ret == FetchImageResult::NEW_IMAGE)
     {
         printf("New image for screen %d\n", screen_id);
+        const PhaseScope phase(Phase::PANEL);
         screen.init();
         screen.display(image_buffer);
         screen.shutdown();
@@ -143,6 +148,7 @@ static bool update_screens(Board &board)
         else
         {
             failed.at(i) = true;
+            diag_count_image_fail();
         }
         // A download and a redraw take seconds: keep pinging meanwhile
         service(board);
@@ -180,6 +186,7 @@ static bool update_screens(Board &board)
         printf("- Screen 3 Etag: %s\n", screens.shown[2].c_str());
 
         SavedState new_state(flash_saved_state, screens.shown[0], screens.shown[1], screens.shown[2]);
+        const PhaseScope phase(Phase::FLASH_SAVE);
         new_state.save();
 
         printf("State saved to flash, %d total writes.\n", new_state.write_count);
@@ -191,13 +198,17 @@ static bool update_screens(Board &board)
 // Carries out what the connection policy asks for
 static void act(ConnectionPolicy &policy, BoardLink &link, uint64_t now)
 {
+    auto &sockets = diag_sockets();
     switch (policy.poll(now))
     {
     case ConnectionPolicy::Action::CONNECT: {
         printf("WS: connecting...\n");
-        const auto path = build_request_path("/ws", current_device_status()) + "&proto=1";
+        // With why the last socket ended, for the server to log and show
+        const auto path = build_request_path("/ws", current_device_status()) + "&proto=1" + sockets.connect_query() +
+                          link_query(diag_health());
         if (!link.client().connect(SERVER_HOST, SERVER_PORT, path, server_tls_allocator()))
         {
+            sockets.on_end({SocketEnd::DNS_FAILED, 0}, now);
             policy.on_closed(now);
         }
         break;
@@ -208,12 +219,15 @@ static void act(ConnectionPolicy &policy, BoardLink &link, uint64_t now)
     case ConnectionPolicy::Action::ABORT:
         printf("WS: socket is dead, dropping it\n");
         link.client().abort();
+        sockets.on_end(
+            {policy.state() == ConnectionPolicy::State::LIVE ? SocketEnd::PONG_TIMEOUT : SocketEnd::CONNECT_TIMEOUT, 0},
+            now);
         policy.on_closed(now);
         printf("WS: retrying in %llums\n", policy.retry_at() - now);
         break;
     case ConnectionPolicy::Action::REBOOT:
         printf("No live socket for >3 minutes, rebooting to recover\n");
-        reset_pico();
+        reset_pico(ResetReason::NO_SOCKET);
         break;
     case ConnectionPolicy::Action::NONE:
         break;
@@ -234,6 +248,7 @@ static void service(Board &board)
         {
             printf("WS: live\n");
             policy.on_live(now);
+            diag_sockets().on_live(now);
         }
         screens.wanted = events.state->etags;
         screens.retry_at_ms = now;
@@ -251,8 +266,13 @@ static void service(Board &board)
     {
         policy.on_pong();
     }
+    if (events.diag)
+    {
+        board.link.client().send_text(format_diag_message(diag_health()));
+    }
     if (events.closed)
     {
+        diag_sockets().on_end(*events.closed, now);
         policy.on_closed(now);
         printf("WS: socket closed, retrying in %llums\n", policy.retry_at() - now);
     }
@@ -276,6 +296,7 @@ int main()
     printf("eHymnboard starting...\n");
     printf("Pico SDK version: %s\n", PICO_SDK_VERSION_STRING);
     printf("Device ID: %s\n", unique_board_id.c_str());
+    diag_read_reset();
 #ifdef EHYMNBOARD_TEST_ROOT_CA
     printf("WARNING: test build, trusts the emulator's test CA: don't run it on a board\n");
 #endif
@@ -303,9 +324,14 @@ int main()
 
     ota_handle_boot();
 
-    setup_wifi();
-
-    report_device_booted();
+    {
+        const PhaseScope phase(Phase::WIFI);
+        setup_wifi();
+    }
+    {
+        const PhaseScope phase(Phase::BOOT_REPORT);
+        report_device_booted();
+    }
 
     SPI spi(spi0, SPI_1MHZ,
             2, // SCK pin
@@ -352,9 +378,11 @@ int main()
     printf("Screen 2 Etag: %s\n", screens.shown[1].c_str());
     printf("Screen 3 Etag: %s\n", screens.shown[2].c_str());
 
+    const PhaseScope running(Phase::RUNNING);
     while (true)
     {
         long_watchdog_update();
+        diag_poll_wifi();
         service(board);
 
         const auto now = now_ms();
@@ -369,7 +397,7 @@ int main()
         if (screens.failing_since_ms && now_ms() - *screens.failing_since_ms >= DOWNLOADS_FAILING_REBOOT_MS)
         {
             printf("Image downloads failing for >3 minutes, rebooting to recover\n");
-            reset_pico();
+            reset_pico(ResetReason::DOWNLOADS_FAILING);
         }
 
         ota_loop(board.policy.state() == ConnectionPolicy::State::LIVE, board.offered_version);

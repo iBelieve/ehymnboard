@@ -75,7 +75,7 @@ class EchoListener : public WsClient::Listener
         }
     }
 
-    void on_closed() override
+    void on_closed([[maybe_unused]] const SocketEndInfo &end) override
     {
         closed = true;
     }

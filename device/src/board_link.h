@@ -37,7 +37,10 @@ class BoardLink : private WsClient::Listener
         // The latest state message, if any arrived
         std::optional<BoardState> state;
         bool pong = false;
-        bool closed = false;
+        // The server asked for a diagnostics snapshot
+        bool diag = false;
+        // The socket closed, and why
+        std::optional<SocketEndInfo> closed;
     };
 
     BoardLink();
@@ -53,7 +56,7 @@ class BoardLink : private WsClient::Listener
   private:
     void on_open() override;
     void on_message(ws::Opcode opcode, const uint8_t *data, std::size_t length) override;
-    void on_closed() override;
+    void on_closed(const SocketEndInfo &end) override;
 
     std::array<uint8_t, MAX_BOARD_MESSAGE> buffer_{};
     WsClient client_;

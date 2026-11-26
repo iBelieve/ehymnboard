@@ -9,7 +9,7 @@ import {
   healthchecksOn,
   pingHealthcheck,
 } from "./devices";
-
+import { bootColumns, describeReset, parseReset } from "./diagnostics";
 import { STUCK_ETAG_DOWNLOADS } from "./hymn-board";
 
 export { HymnBoard } from "./hymn-board";
@@ -141,6 +141,10 @@ app.get("/device_booted", async (c) => {
   const { device_id, saved_state_writes } = deviceStatus(c);
   const watchdogCausedReboot = c.req.query("watchdog_caused_reboot") === "1";
   const firmwareVersion = c.req.query("firmware_version");
+  const params = (key: string) => c.req.query(key);
+  // Why it reset, from firmware that says (see diagnostics.ts)
+  const reset = parseReset(params);
+  const why = reset ? ` (reset: ${describeReset(reset)})` : "";
   let otaStatus = c.req.query("ota_status");
   let otaVersion = c.req.query("ota_version");
   let otaAt: string | undefined;
@@ -165,11 +169,13 @@ app.get("/device_booted", async (c) => {
   // Installing an update (and the reboot that triggers a rollback) reboots
   // through the watchdog, which the OTA status above already reports.
   if (watchdogCausedReboot && !otaStatus) {
-    console.log(`Device reboot caused by watchdog: ${name} (${device_id})`);
-    ping(c, device_id, "/failure", "Watchdog caused reboot");
+    console.log(`Device reboot caused by watchdog: ${name} (${device_id})${why}`);
+    ping(c, device_id, "/failure", `Watchdog caused reboot${why}`);
   } else if (!otaStatus) {
-    console.log(`Device booted: ${name} (${device_id})`);
-    ping(c, device_id, "/log", "Device booted");
+    console.log(`Device booted: ${name} (${device_id})${why}`);
+    ping(c, device_id, "/log", `Device booted${why}`);
+  } else if (reset) {
+    console.log(`Device booted after an update: ${name} (${device_id})${why}`);
   }
 
   if (device_id) {
@@ -182,6 +188,7 @@ app.get("/device_booted", async (c) => {
       ota_status: otaStatus,
       ota_version: otaVersion,
       ota_at: otaAt,
+      ...bootColumns(params, now),
     });
   } else {
     console.log("Warning: Ignoring device update without a device_id");
@@ -217,7 +224,10 @@ app.get("/firmware/latest", async (c) => {
   const stub = board(c.env);
 
   if (deviceId) {
-    await stub.updateDevice(deviceId, { firmware_version: version });
+    // With the board's hourly health report, from firmware that sends one
+    // (a plain object: Hono's query() can't be sent over RPC)
+    const query = Object.fromEntries(new URL(c.req.url).searchParams);
+    await stub.recordHealth(deviceId, version, query);
   }
 
   const info = await stub.getFirmwareInfo();
@@ -282,6 +292,24 @@ app.put("/api/lines", requireAuth, async (c) => {
     return c.text("Expected { lines: [six strings] }", 400);
   }
   await board(c.env).setLines(trimLines(lines));
+  return c.json(await getState(c.env));
+});
+
+// A board's hourly health reports from the last week, for the Details panel.
+app.get("/api/devices/:id/health", requireAuth, async (c) =>
+  c.json(await board(c.env).getHealthHistory(c.req.param("id"))),
+);
+
+// "Refresh now": asks a connected board for its health, then answers with
+// the state, which has it. Wakes the Durable Object only when clicked.
+app.post("/api/devices/:id/diagnostics", requireAuth, async (c) => {
+  const result = await board(c.env).requestDiagnostics(c.req.param("id"));
+  if (result === "offline") {
+    return c.text("The board isn't connected\n", 409);
+  }
+  if (result === "timeout") {
+    return c.text("The board didn't answer (its firmware may be too old)\n", 504);
+  }
   return c.json(await getState(c.env));
 });
 

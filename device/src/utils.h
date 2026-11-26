@@ -22,6 +22,7 @@
 
 #include <string>
 
+#include "diagnostics.h"
 #include "hardware/watchdog.h"
 #include "pico/stdlib.h"
 #include "request_path.h"
@@ -42,5 +43,6 @@ std::string get_unique_board_id();
 // This board's ID, flash write count and why it last booted.
 DeviceStatus current_device_status();
 
-void reset_pico();
+// Records why (see diagnostics_board.h), waits 30 s, then reboots
+[[noreturn]] void reset_pico(ResetReason reason, uint32_t detail = 0);
 void stall_spin();

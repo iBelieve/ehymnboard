@@ -26,6 +26,15 @@ The device protocol keeps the Flask server's endpoints byte for byte:
 `/device_healthy` (for firmware from before the WebSocket), `/ok`, and the
 OTA endpoints `/firmware/latest` and `/firmware/image`.
 
+Newer firmware adds optional diagnostics to `/ws`, `/device_booted` and
+`/firmware/latest` (see
+[device/README.md](../device/README.md#diagnostics)), which
+`src/worker/diagnostics.ts` checks and the Durable Object keeps on the board's
+row, with an hourly history in `device_health` that its alarm prunes after 30
+days. They cost no extra requests or wakes. The admin's Details panel shows
+them, and its "Refresh now" asks a connected board over its socket
+(`POST /api/devices/:id/diagnostics`).
+
 Boards also keep a WebSocket open at `GET /ws` (the messages are in
 [device/README.md](../device/README.md#talking-to-the-server)), so the
 server pushes each change instead of the boards polling. The `HymnBoard`

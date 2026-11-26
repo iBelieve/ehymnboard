@@ -259,7 +259,7 @@ jobs:
       - name: Check CRAP scores
         run: >
           uv run python ../tools/crap.py --coverage build-test/coverage.xml
-          src/board_messages.cpp src/http_headers.cpp src/request_path.cpp
+          src/board_messages.cpp src/diagnostics.cpp src/http_headers.cpp src/request_path.cpp
           src/saved_state.cpp src/ws_connection.cpp src/ws_frame.cpp src/ws_handshake.cpp
 
   # Boots the built firmware in rp2040js with a fake WiFi chip, access point,

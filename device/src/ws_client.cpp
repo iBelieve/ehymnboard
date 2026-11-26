@@ -76,6 +76,8 @@ bool WsClient::connect(const char *host, uint16_t port, std::string_view target,
     head_.clear();
     clear_tx();
     close_sent_ = false;
+    close_received_ = -1;
+    protocol_error_ = -1;
     abort_requested_ = false;
     decoder_.reset();
 
@@ -119,7 +121,7 @@ void WsClient::on_dns([[maybe_unused]] const char *name, const ip_addr_t *addres
     if (address == nullptr)
     {
         printf("WS: DNS lookup of %s failed\n", self->host_.c_str());
-        self->finish(false);
+        self->finish(false, {SocketEnd::DNS_FAILED, 0});
         return;
     }
     self->start_tcp(*address);
@@ -132,7 +134,7 @@ void WsClient::start_tcp(const ip_addr_t &address)
     if (pcb_ == nullptr)
     {
         printf("WS: out of memory for a connection\n");
-        finish(false);
+        finish(false, {SocketEnd::NO_MEMORY, 0});
         return;
     }
 
@@ -147,7 +149,7 @@ void WsClient::start_tcp(const ip_addr_t &address)
     if (err != ERR_OK)
     {
         printf("WS: connect failed to start: %d\n", err);
-        finish(true);
+        finish(true, {SocketEnd::CONNECT_ERROR, err});
     }
 }
 
@@ -156,7 +158,7 @@ err_t WsClient::on_connected(void *arg, [[maybe_unused]] struct altcp_pcb *pcb, 
     auto *self = static_cast<WsClient *>(arg);
     if (err != ERR_OK)
     {
-        return self->finish(true);
+        return self->finish(true, {SocketEnd::CONNECT_ERROR, err});
     }
 
     // Over TLS, this runs once the TLS handshake is done
@@ -171,7 +173,7 @@ err_t WsClient::on_connected(void *arg, [[maybe_unused]] struct altcp_pcb *pcb, 
     self->tx_.insert(self->tx_.end(), request.begin(), request.end());
     if (!self->flush())
     {
-        return self->finish(true);
+        return self->finish(true, {SocketEnd::WRITE_FAILED, 0});
     }
     return ERR_OK;
 }
@@ -187,7 +189,7 @@ err_t WsClient::on_recv(void *arg, struct altcp_pcb *pcb, struct pbuf *p, err_t 
         {
             pbuf_free(p);
         }
-        return self->finish(false);
+        return self->finish(false, self->closed_by_server());
     }
 
     for (const struct pbuf *q = p; q != nullptr && !self->abort_requested_; q = q->next)
@@ -199,11 +201,11 @@ err_t WsClient::on_recv(void *arg, struct altcp_pcb *pcb, struct pbuf *p, err_t 
 
     if (self->abort_requested_)
     {
-        return self->finish(true);
+        return self->finish(true, self->abort_reason_);
     }
     if (!self->flush())
     {
-        return self->finish(true);
+        return self->finish(true, {SocketEnd::WRITE_FAILED, 0});
     }
     return ERR_OK;
 }
@@ -232,7 +234,7 @@ void WsClient::receive_handshake(const uint8_t *data, std::size_t length)
         if (head_.size() > MAX_RESPONSE_HEAD)
         {
             printf("WS: response head too long\n");
-            abort_requested_ = true;
+            request_abort({SocketEnd::HANDSHAKE_REFUSED, 0});
         }
         return;
     }
@@ -241,8 +243,9 @@ void WsClient::receive_handshake(const uint8_t *data, std::size_t length)
     const auto result = ws::check_upgrade_response(std::string_view(head_).substr(0, head_length), key_);
     if (result != ws::HandshakeResult::OK)
     {
-        printf("WS: upgrade refused (status %d, result %d)\n", ws::response_status(head_), static_cast<int>(result));
-        abort_requested_ = true;
+        const int status = ws::response_status(head_);
+        printf("WS: upgrade refused (status %d, result %d)\n", status, static_cast<int>(result));
+        request_abort({SocketEnd::HANDSHAKE_REFUSED, status});
         return;
     }
 
@@ -264,7 +267,7 @@ err_t WsClient::on_sent(void *arg, [[maybe_unused]] struct altcp_pcb *pcb, [[may
     auto *self = static_cast<WsClient *>(arg);
     if (!self->flush())
     {
-        return self->finish(true);
+        return self->finish(true, {SocketEnd::WRITE_FAILED, 0});
     }
     return ERR_OK;
 }
@@ -274,16 +277,16 @@ err_t WsClient::on_poll(void *arg, [[maybe_unused]] struct altcp_pcb *pcb)
     auto *self = static_cast<WsClient *>(arg);
     if (self->abort_requested_)
     {
-        return self->finish(true);
+        return self->finish(true, self->abort_reason_);
     }
     if (self->state_ == State::CLOSING && static_cast<int32_t>(now_ms() - self->closing_deadline_ms_) >= 0)
     {
         printf("WS: server didn't close the connection, dropping it\n");
-        return self->finish(true);
+        return self->finish(true, self->closed_by_server());
     }
     if (!self->flush())
     {
-        return self->finish(true);
+        return self->finish(true, {SocketEnd::WRITE_FAILED, 0});
     }
     return ERR_OK;
 }
@@ -294,7 +297,9 @@ void WsClient::on_err(void *arg, err_t err)
     auto *self = static_cast<WsClient *>(arg);
     printf("WS: connection error %d\n", err);
     self->pcb_ = nullptr;
-    self->finish(false);
+    // Over TLS, the handshake happens before on_connected too
+    const bool connecting = self->state_ == State::RESOLVING || self->state_ == State::CONNECTING;
+    self->finish(false, {connecting ? SocketEnd::CONNECT_ERROR : SocketEnd::TCP_ERROR, err});
 }
 
 // --- Frames ------------------------------------------------------------------
@@ -324,6 +329,11 @@ void WsClient::on_pong([[maybe_unused]] const uint8_t *data, [[maybe_unused]] st
 void WsClient::on_close(uint16_t code, [[maybe_unused]] const uint8_t *reason, [[maybe_unused]] std::size_t length)
 {
     printf("WS: server closed the socket (%u)\n", code);
+    // Unless it's the answer to the board's own close
+    if (!close_sent_)
+    {
+        close_received_ = code;
+    }
     // Echo the code back, then wait for the server to close the TCP connection
     start_closing(code);
 }
@@ -331,6 +341,10 @@ void WsClient::on_close(uint16_t code, [[maybe_unused]] const uint8_t *reason, [
 void WsClient::on_error(uint16_t close_code)
 {
     printf("WS: protocol error, closing with %u\n", close_code);
+    if (!close_sent_)
+    {
+        protocol_error_ = close_code;
+    }
     start_closing(close_code);
 }
 
@@ -406,7 +420,7 @@ bool WsClient::send(ws::Opcode opcode, const uint8_t *data, std::size_t length)
         {
             // Dropped on the next lwIP callback: this may be running inside
             // one, where the pcb can't be freed yet
-            abort_requested_ = true;
+            request_abort({SocketEnd::WRITE_FAILED, 0});
         }
     }
     cyw43_arch_lwip_end();
@@ -429,7 +443,7 @@ void WsClient::close(uint16_t code)
     else if (state_ != State::IDLE && state_ != State::CLOSING)
     {
         // Not open yet: nothing to close politely
-        finish(true);
+        finish(true, {SocketEnd::CLOSED_LOCALLY, code});
     }
     cyw43_arch_lwip_end();
 }
@@ -468,7 +482,38 @@ void WsClient::detach()
     altcp_poll(pcb_, nullptr, 0);
 }
 
-err_t WsClient::finish(bool abort_pcb)
+void WsClient::request_abort(const SocketEndInfo &end)
+{
+    if (!abort_requested_)
+    {
+        abort_requested_ = true;
+        abort_reason_ = end;
+    }
+}
+
+SocketEndInfo WsClient::closed_by_server() const
+{
+    if (protocol_error_ >= 0)
+    {
+        return {SocketEnd::PROTOCOL_ERROR, protocol_error_};
+    }
+    if (close_received_ >= 0)
+    {
+        return {SocketEnd::SERVER_CLOSED, close_received_};
+    }
+    if (state_ == State::HANDSHAKE)
+    {
+        // Closed before answering the upgrade
+        return {SocketEnd::HANDSHAKE_REFUSED, 0};
+    }
+    if (close_sent_)
+    {
+        return {SocketEnd::CLOSED_LOCALLY, 0};
+    }
+    return {SocketEnd::SERVER_DROPPED, 0};
+}
+
+err_t WsClient::finish(bool abort_pcb, const SocketEndInfo &end)
 {
     err_t result = ERR_OK;
     if (pcb_ != nullptr)
@@ -487,7 +532,7 @@ err_t WsClient::finish(bool abort_pcb)
     clear_tx();
     if (was_connecting)
     {
-        listener_.on_closed();
+        listener_.on_closed(end);
     }
     return result;
 }

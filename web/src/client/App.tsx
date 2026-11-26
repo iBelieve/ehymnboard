@@ -128,7 +128,13 @@ export function App() {
       <div className="z-10 flex flex-col">
         <h1 className="font-display text-5xl tracking-wide text-white max-lg:mb-8">Hymn Board</h1>
 
-        {state && <DeviceList devices={state.devices} firmware={state.firmware} />}
+        {state && (
+          <DeviceList
+            devices={state.devices}
+            firmware={state.firmware}
+            onState={(next) => applyState(next, false)}
+          />
+        )}
 
         <div className="flex flex-grow flex-col items-center justify-center">
           {/* Relative so the unsaved-changes note can sit under the card

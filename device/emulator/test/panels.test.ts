@@ -19,7 +19,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { REFRESH_MS } from "../src/epaper.ts";
-import { assertNoPanelFaults, boot } from "./helpers.ts";
+import { assertNoPanelFaults, boot, bootReports } from "./helpers.ts";
 
 // What Waveshare's own driver sends for one full update: init() then
 // display() in RaspberryPi_JetsonNano/python/lib/waveshare_epd/epd13in3k.py
@@ -76,4 +76,10 @@ test("a panel stuck busy makes the firmware give up after 30 s and reboot", () =
   emu.waitFor("the stuck panel to be switched off", () => !emu.board.panels[1].powered, 1_000);
   emu.waitFor("a watchdog reset", () => emu.reboots >= 1, 60_000);
   emu.waitForSerial("Rebooted due to watchdog timeout!", 15_000, at);
+  // And the next boot tells the server which panel it was
+  emu.waitFor("the boot report", () => bootReports(emu).length >= 2, 30_000);
+  const report = bootReports(emu)[1].query;
+  assert.equal(report.reset, "panel_busy");
+  assert.equal(report.reset_phase, "panel");
+  assert.equal(report.reset_detail, "2");
 });

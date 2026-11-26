@@ -128,6 +128,7 @@ TlsMemory tls_memory()
         .heap_peak = heap_bytes_peak,
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast): two linker symbols' addresses
         .heap_size = reinterpret_cast<std::uintptr_t>(&__HeapLimit) - reinterpret_cast<std::uintptr_t>(&__end__),
+        .alloc_failures = tls_alloc_failures,
     };
 }
 

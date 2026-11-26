@@ -108,6 +108,29 @@ lwIP and its callbacks run in a low-priority interrupt, and both they and the
 main loop allocate, so `malloc_lock.cpp` turns interrupts off while newlib's
 malloc or free runs.
 
+#### Diagnostics
+
+A board reports on its own health only on requests it makes anyway, as extra
+query parameters the server can ignore (`diagnostics.h` has the names):
+
+- Each `/ws` connect: uptime, signal (RSSI), why the last live socket ended
+  (no `pong`, a TCP error, the server's close code, ...) and how long it had
+  been up, and how many attempts failed since and why the last one did.
+- `/device_booted`: why it reset. Before a reboot it chooses itself (no
+  socket for 3 minutes, failing downloads, a panel stuck busy, a failed
+  flash save, an OTA install or rollback, the main loop stuck for 60 s) and
+  on a crash (the hard fault handler records the faulting PC and LR), it
+  writes the reason, what it was doing and its uptime to the watchdog's
+  scratch registers 0 to 3, which survive the watchdog reset (no flash
+  wear). Otherwise the reset was power-on, the RUN pin, the debugger or a
+  plain watchdog timeout.
+- The hourly `/firmware/latest`: free and lowest free heap, and counters
+  since boot (dropped sockets, failed connects, unanswered pings, failed
+  downloads, WiFi link drops, TLS allocations that failed).
+
+The admin's "Refresh now" sends `diag` over the socket, and the board answers
+with the hourly report's fields as `diag uptime=... rssi=...`.
+
 #### Releasing an update
 
 Build, then upload the encrypted image and its version:

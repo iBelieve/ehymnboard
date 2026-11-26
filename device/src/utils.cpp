@@ -18,6 +18,7 @@
 
 #include "utils.h"
 
+#include "diagnostics_board.h"
 #include "firmware_version.h"
 #include "pico/unique_id.h"
 #include "state.h"
@@ -36,9 +37,10 @@ DeviceStatus current_device_status()
     return DeviceStatus{unique_board_id, flash_saved_state->write_count, watchdog_caused_reboot(), FIRMWARE_VERSION};
 }
 
-void reset_pico()
+void reset_pico(ResetReason reason, uint32_t detail)
 {
-    printf("Rebooting in 30 seconds...\n");
+    diag_record_reset(reason, detail);
+    printf("Rebooting in 30 seconds (%s)...\n", reset_reason_name(reason));
 
     sleep_ms(30 * 1000);
 

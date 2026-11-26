@@ -486,3 +486,103 @@ describe("coloOf", () => {
     expect(coloOf(cfRequest({ "cf-ray": "8e31e5ea4a4cf507" }))).toBeUndefined();
   });
 });
+
+describe("diagnostics", () => {
+  test("a connect says why the board's last socket ended, for the admin and the logs", async () => {
+    const logged = spyOnLog();
+    const res = await upgrade(
+      `device_id=${RIGHT}&saved_state_writes=4&watchdog_caused_reboot=0&firmware_version=v1&proto=1` +
+        "&drop=pong_timeout&drop_detail=0&drop_up=3600&fails=2&fail=tcp_error&fail_detail=-14&uptime=7300&rssi=-63",
+    );
+    expect(res.status).toBe(101);
+    sockets.push(new Board(res.webSocket!));
+    await settle();
+
+    const right = device(await state(), RIGHT);
+    expect(right).toMatchObject({
+      rssi: -63,
+      uptime_s: 7300,
+      last_drop: {
+        reason: "pong_timeout",
+        detail: 0,
+        up_s: 3600,
+        fails: 2,
+        fail: "tcp_error",
+        fail_detail: -14,
+      },
+    });
+    expect(right?.last_drop?.at).toBe(right?.connected_at);
+    const why =
+      "last socket ended: pong_timeout after 3600 s; 2 failed attempts, the last tcp_error (-14)";
+    expect(logged().some((line) => line.includes(`via ?: ${why}`))).toBe(true);
+    expect(pings.find((p) => p.url === RIGHT_PING)?.body).toBe(`Socket connected: ${why}`);
+  });
+
+  test("Refresh now asks the board over its socket and shows its answer", async () => {
+    const board = await connect();
+    await board.next(0);
+    const seen = board.messages.length;
+    const refreshed = exports.default.fetch(
+      new Request(`${BASE}/api/devices/${LEFT}/diagnostics`, { method: "POST", headers: AUTH }),
+    );
+    expect(await board.next(seen)).toBe("diag");
+    board.ws.send(
+      "diag uptime=500 rssi=-58 heap_free=100000 heap_min=50000 drops=1 connect_fails=0 pong_timeouts=1 image_fails=0 wifi_drops=0 tls_oom=0",
+    );
+
+    const res = await refreshed;
+    expect(res.status).toBe(200);
+    const left = device(await res.json<BoardState>());
+    expect(left).toMatchObject({
+      rssi: -58,
+      uptime_s: 500,
+      health: { heap_free: 100000, heap_min: 50000, drops: 1, pong_timeouts: 1 },
+    });
+    expect(left?.health_at).toBeTruthy();
+    // An answer isn't an hourly report, so it's not in the history
+    const history = await exports.default.fetch(
+      new Request(`${BASE}/api/devices/${LEFT}/health`, { headers: AUTH }),
+    );
+    expect(await history.json()).toEqual([]);
+  });
+
+  test("Refresh now needs a connected board that answers", async () => {
+    const offline = await exports.default.fetch(
+      new Request(`${BASE}/api/devices/${RIGHT}/diagnostics`, { method: "POST", headers: AUTH }),
+    );
+    expect(offline.status).toBe(409);
+    expect(
+      (
+        await exports.default.fetch(
+          new Request(`${BASE}/api/devices/${RIGHT}/diagnostics`, { method: "POST" }),
+        )
+      ).status,
+    ).toBe(401);
+
+    // Firmware from before diagnostics ignores "diag"
+    await (await connect()).next(0);
+    const stub = env.HYMN_BOARD.getByName("main");
+    expect(await stub.requestDiagnostics(LEFT, 50)).toBe("timeout");
+  });
+
+  test("the alarm keeps 30 days of hourly reports", async () => {
+    await connect();
+    const stub = env.HYMN_BOARD.getByName("main");
+    const old = new Date(Date.now() - 31 * 86_400_000).toISOString();
+    const recent = new Date(Date.now() - 29 * 86_400_000).toISOString();
+    await runInDurableObject(stub, (_, ctx) => {
+      for (const at of [old, recent]) {
+        ctx.storage.sql.exec(
+          "INSERT INTO device_health (device_id, at, rssi, uptime_s, health) VALUES (?, ?, -60, 1, '{}')",
+          LEFT,
+          at,
+        );
+      }
+    });
+    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    await runInDurableObject(stub, (_, ctx) => {
+      const left = ctx.storage.sql.exec<{ at: string }>("SELECT at FROM device_health").toArray();
+      expect(left.map((row) => row.at)).toEqual([recent]);
+    });
+  });
+});

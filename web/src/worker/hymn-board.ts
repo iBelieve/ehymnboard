@@ -2,8 +2,23 @@ import { DurableObject } from "cloudflare:workers";
 import { getFont } from "../shared/font";
 import { renderScreen } from "../shared/render";
 import { EMPTY_LINES, isLines, linesForScreen, SCREEN_COUNT, type Lines } from "../shared/screen";
-import type { Device, DeviceStatusParams, FirmwareInfo } from "../shared/api";
+import type {
+  BoardHealth,
+  Device,
+  DeviceStatusParams,
+  FirmwareInfo,
+  HealthSample,
+  ResetInfo,
+  SocketDrop,
+} from "../shared/api";
 import { getDeviceName, healthchecksOn, pingHealthcheck } from "./devices";
+import {
+  connectColumns,
+  describeDrop,
+  healthColumns,
+  parseDiagMessage,
+  parseDrop,
+} from "./diagnostics";
 import { migrate } from "./migrations";
 
 // Column names are interpolated into SQL, so only these are accepted.
@@ -18,7 +33,26 @@ const DEVICE_FIELDS = new Set([
   "ota_at",
   "connected_at",
   "shown_etags",
+  "rssi",
+  "uptime_s",
+  "uptime_at",
+  "last_drop",
+  "last_reset",
+  "health",
+  "health_at",
 ]);
+
+/** A devices row: Device, with its diagnostics as the JSON they're stored as. */
+export type DeviceRow = Omit<Device, "last_drop" | "last_reset" | "health"> & {
+  last_drop: string | null;
+  last_reset: string | null;
+  health: string | null;
+};
+
+/** How long the hourly health reports are kept. */
+export const HEALTH_HISTORY_DAYS = 30;
+/** How long "Refresh now" waits for a board's answer. */
+const DIAG_TIMEOUT_MS = 10_000;
 
 // The board protocol over the WebSocket (see device/src/board_messages.h):
 // the server sends "state 1 <etag1> <etag2> <etag3> <firmware or ->" when the
@@ -26,6 +60,8 @@ const DEVICE_FIELDS = new Set([
 // 30 s (answered with "pong" by the runtime, without waking this object) and
 // "shown <etag1> <etag2> <etag3>" with what its panels show, after a state
 // it already shows and after each update (even one some screens failed).
+// For the admin's "Refresh now", the server sends "diag" and the board
+// answers "diag uptime=... rssi=..." (see diagnostics.ts).
 const STATE_VERSION = 1;
 const PING = "ping";
 const PONG = "pong";
@@ -87,6 +123,11 @@ export type ImageResult =
  */
 export class HymnBoard extends DurableObject<Env> {
   private readonly sql: SqlStorage;
+  /**
+   * Who is waiting for each board's answer to "diag". Only in memory: the
+   * request waiting keeps this instance alive until the answer comes.
+   */
+  private readonly diagWaiters = new Map<string, (() => void)[]>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -247,7 +288,7 @@ export class HymnBoard extends DurableObject<Env> {
     return update.rowsWritten > 0;
   }
 
-  updateDevice(id: string, fields: Partial<Omit<Device, "id">>): void {
+  updateDevice(id: string, fields: Partial<Omit<DeviceRow, "id">>): void {
     // Only overwrite the fields that were given, like the Flask server did.
     const entries = Object.entries(fields).filter(
       (entry): entry is [string, string | number] =>
@@ -281,9 +322,10 @@ export class HymnBoard extends DurableObject<Env> {
       }
     }
     return this.sql
-      .exec<Device>("SELECT * FROM devices")
+      .exec<DeviceRow>("SELECT * FROM devices")
       .toArray()
-      .map((device) => {
+      .map((row) => {
+        const device = deviceFromRow(row);
         const pinged = seen.get(device.id);
         const stored = device.last_seen ? Date.parse(device.last_seen) : 0;
         const lastSeen =
@@ -292,6 +334,87 @@ export class HymnBoard extends DurableObject<Env> {
             : device.last_seen;
         return { ...device, last_seen: lastSeen, live: pinged !== undefined };
       });
+  }
+
+  /**
+   * A board's hourly report (its /firmware/latest): the latest values on its
+   * row, in the same UPDATE as its firmware version, and one row of history.
+   */
+  recordHealth(
+    id: string,
+    firmwareVersion: string | undefined,
+    query: Record<string, string>,
+  ): void {
+    const at = new Date().toISOString();
+    const columns = healthColumns((key) => query[key], at);
+    this.updateDevice(id, { firmware_version: firmwareVersion, ...columns });
+    if (columns.health !== undefined) {
+      this.sql.exec(
+        "INSERT OR REPLACE INTO device_health (device_id, at, rssi, uptime_s, health) VALUES (?, ?, ?, ?, ?)",
+        id,
+        at,
+        columns.rssi ?? null,
+        columns.uptime_s ?? null,
+        columns.health,
+      );
+    }
+  }
+
+  /** A board's hourly reports from the last `days` days, oldest first. */
+  getHealthHistory(id: string, days = 7): HealthSample[] {
+    const since = new Date(Date.now() - days * 86_400_000).toISOString();
+    return this.sql
+      .exec<{ at: string; rssi: number | null; uptime_s: number | null; health: string }>(
+        "SELECT at, rssi, uptime_s, health FROM device_health WHERE device_id = ? AND at >= ? ORDER BY at",
+        id,
+        since,
+      )
+      .toArray()
+      .map((row) => ({
+        at: row.at,
+        rssi: row.rssi,
+        uptime_s: row.uptime_s,
+        heap_min: parseJson<BoardHealth>(row.health)?.heap_min ?? null,
+      }));
+  }
+
+  /**
+   * The admin's "Refresh now": asks the board for its health over its socket
+   * and waits for the answer, which webSocketMessage() stores. "offline" if
+   * the board has no socket, "timeout" if it didn't answer (firmware from
+   * before diagnostics never does).
+   */
+  async requestDiagnostics(
+    id: string,
+    timeoutMs = DIAG_TIMEOUT_MS,
+  ): Promise<"ok" | "offline" | "timeout"> {
+    const [socket] = this.openSockets(id);
+    if (!socket) {
+      return "offline";
+    }
+    let wake!: () => void;
+    const answered = new Promise<"ok">((resolve) => {
+      wake = () => resolve("ok");
+    });
+    this.diagWaiters.set(id, [...(this.diagWaiters.get(id) ?? []), wake]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), timeoutMs);
+    });
+    try {
+      socket.send("diag");
+      return await Promise.race([answered, timeout]);
+    } catch {
+      return "offline";
+    } finally {
+      clearTimeout(timer);
+      const left = (this.diagWaiters.get(id) ?? []).filter((waiter) => waiter !== wake);
+      if (left.length > 0) {
+        this.diagWaiters.set(id, left);
+      } else {
+        this.diagWaiters.delete(id);
+      }
+    }
   }
 
   getFirmwareInfo(): FirmwareInfo | null {
@@ -367,14 +490,20 @@ export class HymnBoard extends DurableObject<Env> {
     } satisfies SocketAttachment);
 
     const at = new Date(now).toISOString();
+    const params = (key: string) => url.searchParams.get(key);
     this.updateDevice(deviceId, {
       last_seen: at,
       connected_at: at,
       firmware_version: firmwareVersion,
       saved_state_writes: writes !== null && /^\d+$/.test(writes) ? Number(writes) : undefined,
+      ...connectColumns(params, at),
     });
-    console.log(`Device socket connected: ${name} (${deviceId}) via ${colo ?? "?"}`);
-    this.ctx.waitUntil(this.ping(deviceId, "", "Socket connected"));
+    // The board's side of why its last socket ended, beside the server's
+    // (logged when that socket closed or was replaced)
+    const drop = parseDrop(params);
+    const why = drop ? `: ${describeDrop(drop)}` : "";
+    console.log(`Device socket connected: ${name} (${deviceId}) via ${colo ?? "?"}${why}`);
+    this.ctx.waitUntil(this.ping(deviceId, "", `Socket connected${why}`));
 
     server.send(await this.stateMessage());
     if ((await this.ctx.storage.getAlarm()) === null) {
@@ -434,6 +563,15 @@ export class HymnBoard extends DurableObject<Env> {
       });
       return;
     }
+    const diag = message.length <= 512 ? parseDiagMessage(message) : null;
+    if (diag) {
+      // Only asked for by "Refresh now", so not part of the hourly history
+      this.updateDevice(attachment.deviceId, { last_seen: at, ...healthColumns(diag, at) });
+      for (const wake of this.diagWaiters.get(attachment.deviceId) ?? []) {
+        wake();
+      }
+      return;
+    }
     console.log(`Ignoring message from ${attachment.deviceId}: ${message.slice(0, 80)}`);
   }
 
@@ -471,6 +609,7 @@ export class HymnBoard extends DurableObject<Env> {
     for (const deviceId of live) {
       this.updateDevice(deviceId, { last_seen: at });
     }
+    this.pruneHealthHistory();
     await Promise.all([...live].map((id) => this.ping(id, "", "Socket live")));
     if (this.openSockets().length > 0) {
       await this.ctx.storage.setAlarm(Date.now() + HEALTH_INTERVAL_MS);
@@ -496,6 +635,12 @@ export class HymnBoard extends DurableObject<Env> {
       closeQuietly(ws, CLOSE_OUTDATED, "server updated");
       this.socketGone(ws, "server updated");
     }
+  }
+
+  /** Drops hourly health reports older than HEALTH_HISTORY_DAYS. */
+  private pruneHealthHistory(): void {
+    const before = new Date(Date.now() - HEALTH_HISTORY_DAYS * 86_400_000).toISOString();
+    this.sql.exec("DELETE FROM device_health WHERE at < ?", before);
   }
 
   /** Pings the board's healthchecks.io check, when HEALTHCHECKS=on. */
@@ -576,6 +721,30 @@ export class HymnBoard extends DurableObject<Env> {
       etag,
       buffer,
     );
+  }
+}
+
+/** A devices row as the API returns it, its diagnostics parsed. */
+function deviceFromRow(row: DeviceRow): Device {
+  return {
+    ...row,
+    last_drop: parseJson<SocketDrop>(row.last_drop),
+    last_reset: parseJson<ResetInfo>(row.last_reset),
+    health: parseJson<BoardHealth>(row.health),
+  };
+}
+
+/** JSON this object wrote itself (so of the type it wrote), or null. */
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- the caller says which type it stored
+function parseJson<T>(text: string | null): T | null {
+  if (text === null) {
+    return null;
+  }
+  try {
+    // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- written by this object, from T
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
   }
 }
 

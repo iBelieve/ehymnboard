@@ -102,3 +102,25 @@ test("step 2 adds the socket columns to a version 1 database, keeping its boards
     ]);
   });
 });
+
+test("step 3 adds the diagnostics columns and the health history to a version 2 database", async () => {
+  await withEmptyStorage((storage) => {
+    expect(migrate(storage, MIGRATIONS.slice(0, 2))).toBe(2);
+    storage.sql.exec("INSERT INTO devices (id, connected_at) VALUES ('LEFT', '2026-11-26')");
+
+    expect(migrate(storage)).toBe(LATEST);
+    expect(columns(storage.sql, "devices")).toEqual(
+      expect.arrayContaining(["rssi", "uptime_s", "last_drop", "last_reset", "health"]),
+    );
+    expect(columns(storage.sql, "device_health")).toEqual([
+      "device_id",
+      "at",
+      "rssi",
+      "uptime_s",
+      "health",
+    ]);
+    expect(storage.sql.exec("SELECT * FROM devices").toArray()).toEqual([
+      expect.objectContaining({ id: "LEFT", connected_at: "2026-11-26", rssi: null }),
+    ]);
+  });
+});

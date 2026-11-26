@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import type { DeviceWithName, FirmwareInfo } from "../shared/api";
+import type { BoardState, DeviceWithName, FirmwareInfo } from "../shared/api";
+import { BoardDetails } from "./BoardDetails";
 import { prettyDate } from "./prettyDate";
 
 function describe(device: DeviceWithName, now: Date): string {
@@ -19,10 +20,15 @@ function describe(device: DeviceWithName, now: Date): string {
 export function DeviceList({
   devices,
   firmware,
+  onState,
 }: {
   devices: DeviceWithName[];
   firmware: FirmwareInfo | null;
+  /** A newer state, from a board's "Refresh now" */
+  onState: (state: BoardState) => void;
 }) {
+  // The boards whose Details are open
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   // Re-render every 30 s so "just now" ages even between refreshes.
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -37,31 +43,48 @@ export function DeviceList({
   return (
     <div className="mb-4 text-white max-lg:mb-8 lg:mt-4">
       {devices.map((device) => (
-        <div key={device.id} className="flex items-center gap-2 text-lg">
-          {device.name} ({describe(device, now)})
-          {device.live ? (
-            <span className="badge badge-success" title="Connected: gets new lines at once">
-              Live
-            </span>
-          ) : (
-            device.connected_at && (
-              <span
-                className="badge badge-ghost"
-                title={
-                  device.disconnected_at
-                    ? `Disconnected ${prettyDate(device.disconnected_at, now)}`
-                    : "Not connected"
-                }
-              >
-                Offline
+        <div key={device.id}>
+          <div className="flex items-center gap-2 text-lg">
+            {device.name} ({describe(device, now)})
+            {device.live ? (
+              <span className="badge badge-success" title="Connected: gets new lines at once">
+                Live
               </span>
-            )
-          )}
-          {device.etag_stuck_at && (
-            <span className="badge badge-warning">
-              Re-downloading every poll since {prettyDate(device.etag_stuck_at, now)}
-            </span>
-          )}
+            ) : (
+              device.connected_at && (
+                <span
+                  className="badge badge-ghost"
+                  title={
+                    device.disconnected_at
+                      ? `Disconnected ${prettyDate(device.disconnected_at, now)}`
+                      : "Not connected"
+                  }
+                >
+                  Offline
+                </span>
+              )
+            )}
+            {device.etag_stuck_at && (
+              <span className="badge badge-warning">
+                Re-downloading every poll since {prettyDate(device.etag_stuck_at, now)}
+              </span>
+            )}
+            <button
+              type="button"
+              className="btn btn-xs btn-ghost text-white"
+              aria-expanded={open.has(device.id)}
+              onClick={() =>
+                setOpen((prev) => {
+                  const next = new Set(prev);
+                  if (!next.delete(device.id)) next.add(device.id);
+                  return next;
+                })
+              }
+            >
+              {open.has(device.id) ? "Hide details" : "Details"}
+            </button>
+          </div>
+          {open.has(device.id) && <BoardDetails device={device} now={now} onState={onState} />}
         </div>
       ))}
       {firmware && (

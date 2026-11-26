@@ -26,6 +26,8 @@
 //   server -> board  "state 1 <etag1> <etag2> <etag3> <firmware version or ->"
 //   board -> server  "ping"  (answered "pong" without waking the server)
 //   board -> server  "shown <etag1> <etag2> <etag3>"
+//   server -> board  "diag"  (the admin's "Refresh now")
+//   board -> server  "diag uptime=<s> rssi=<dBm> ..." (see diagnostics.h)
 //
 // Unknown messages, and state messages of another version, are ignored, so
 // the server can add to the protocol without breaking older boards.

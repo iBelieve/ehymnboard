@@ -64,6 +64,8 @@ struct TlsMemory
     std::size_t heap_now;
     std::size_t heap_peak;
     std::size_t heap_size;
+    // Allocations mbedTLS didn't get, since boot
+    unsigned alloc_failures;
 };
 
 TlsMemory tls_memory();
