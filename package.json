@@ -8,10 +8,16 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "dupes": "jscpd device tools web e2e",
+    "fallow": "fallow dead-code && fallow dupes --fail-on-issues",
+    "health": "pnpm run health:static && pnpm run health:web",
+    "health:static": "fallow health --coverage-gaps && fallow health --complexity --workspace '!ehymnboard-web'",
+    "health:web": "fallow health --complexity --workspace ehymnboard-web --coverage web/coverage",
     "check-new-deps": "latest-or-bust"
   },
   "packageManager": "pnpm@12.21.0",
   "devDependencies": {
+    "fallow": "3.48.0",
+    "fallow-type-aware": "3.48.0",
     "jscpd": "5.4.3",
     "latest-or-bust": "0.2.0",
     "oxlint": "catalog:",

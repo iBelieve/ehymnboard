@@ -142,11 +142,6 @@ export class TlsServer {
     };
   }
 
-  /** Stops the worker. */
-  async stop() {
-    await this.#worker.terminate();
-  }
-
   #call(req: TlsRequest): TlsReply {
     Atomics.store(this.#signal, 0, 0);
     // oxlint-disable-next-line unicorn/require-post-message-target-origin -- a MessagePort has no origin

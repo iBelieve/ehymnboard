@@ -102,7 +102,7 @@ export interface FakeCYW43Options {
 }
 
 /** A decoded gSPI command word. */
-interface BusCommand {
+export interface BusCommand {
   write: boolean;
   fn: number;
   addr: number;

@@ -45,9 +45,9 @@ const ROUTER_IP = [10, 0, 0, 1];
 const CLIENT_IP = [10, 0, 0, 2];
 const NETMASK = [255, 255, 255, 0];
 
-type Bytes = Uint8Array;
+export type Bytes = Uint8Array;
 /** An IPv4 or MAC address as a list of bytes. */
-type Address = ArrayLike<number>;
+export type Address = ArrayLike<number>;
 
 const ipEq = (a: number[], b: Address) => a.every((x, i) => x === b[i]);
 const ipStr = (a: ArrayLike<number>) => Array.from(a).join(".");
@@ -169,7 +169,7 @@ export interface VirtualSocket {
 }
 
 /** One TCP connection from the client to the router's port 80 or 443. */
-interface Connection {
+export interface Connection {
   key: string;
   ip: number[];
   port: number;
@@ -198,7 +198,7 @@ interface Connection {
   stalled: boolean;
   lastProgress: number;
   resendScheduled: boolean;
-  tunnel: Tunnel | null;
+  tunnel: ConnectionTunnel | null;
 }
 
 /** Bytes as a string of one character per byte, so lengths and offsets match. */
@@ -218,8 +218,39 @@ function concat(a: Bytes, b: Bytes) {
   return out;
 }
 
+/** The fields of a TCP segment's header the router uses, and its data. */
+interface TcpHeader {
+  srcPort: number;
+  dstPort: number;
+  seq: number;
+  ack: number;
+  flags: number;
+  window: number;
+  data: Bytes;
+}
+
+function parseTcp(seg: Bytes): TcpHeader {
+  return {
+    srcPort: (seg[0] << 8) | seg[1],
+    dstPort: (seg[2] << 8) | seg[3],
+    seq: ((seg[4] << 24) | (seg[5] << 16) | (seg[6] << 8) | seg[7]) >>> 0,
+    ack: ((seg[8] << 24) | (seg[9] << 16) | (seg[10] << 8) | seg[11]) >>> 0,
+    flags: seg[13],
+    window: (seg[14] << 8) | seg[15],
+    data: seg.subarray((seg[12] >> 4) * 4),
+  };
+}
+
+/** What a connection needs of its tunnel. */
+export interface ConnectionTunnel {
+  readonly closed: boolean;
+  deliver(data: Bytes): void;
+  peerEnded(): void;
+  gone(): void;
+}
+
 /** The socket a tunnel handler drives, tied to its TCP connection. */
-class Tunnel implements VirtualSocket {
+class Tunnel implements VirtualSocket, ConnectionTunnel {
   onData: ((data: Uint8Array) => void) | null = null;
   onEnd: (() => void) | null = null;
   onClose: (() => void) | null = null;
@@ -599,87 +630,78 @@ export class VirtualNetwork {
   // ---- TCP -------------------------------------------------------------------
 
   handleTcp(src: number[], dst: number[], seg: Bytes) {
-    const srcPort = (seg[0] << 8) | seg[1];
-    const dstPort = (seg[2] << 8) | seg[3];
-    const seq = ((seg[4] << 24) | (seg[5] << 16) | (seg[6] << 8) | seg[7]) >>> 0;
-    const ack = ((seg[8] << 24) | (seg[9] << 16) | (seg[10] << 8) | seg[11]) >>> 0;
-    const dataOff = (seg[12] >> 4) * 4;
-    const flags = seg[13];
-    const window = (seg[14] << 8) | seg[15];
-    const data = seg.subarray(dataOff);
-    const key = `${ipStr(src)}:${srcPort}`;
-    let c = this.connections.get(key);
+    const h = parseTcp(seg);
+    const key = `${ipStr(src)}:${h.srcPort}`;
+    const c = this.connections.get(key);
 
-    if (flags & TCP_SYN) {
-      const listening = dstPort === 80 || (dstPort === 443 && this.tlsServer);
-      if (!listening || !ipEq(dst, ROUTER_IP)) {
-        this.sendTcpRaw(src, dstPort, srcPort, 0, (seq + 1) >>> 0, TCP_RST | TCP_ACK, 0);
-        return;
+    if (h.flags & TCP_SYN) {
+      this.#accept(src, dst, h, key);
+    } else if (!c) {
+      if (!(h.flags & TCP_RST)) {
+        this.sendTcpRaw(src, h.dstPort, h.srcPort, h.ack, 0, TCP_RST, 0);
       }
-      c = {
-        key,
-        ip: src,
-        port: srcPort,
-        localPort: dstPort,
-        tls:
-          dstPort === 443 && !this.tlsStall ? (this.tlsServer?.open(this.tlsCert) ?? null) : null,
-        tlsInfo: undefined,
-        responded: false,
-        ended: false,
-        iss: 1000,
-        sndUna: 1001,
-        sndNxt: 1001,
-        rcvNxt: (seq + 1) >>> 0,
-        peerWnd: window,
-        request: "",
-        out: dstPort === 443 ? new Uint8Array(0) : null,
-        outBase: 1001,
-        finSent: false,
-        peerFin: false,
-        closed: false,
-        stalled: false,
-        lastProgress: 0,
-        resendScheduled: false,
-        tunnel: null,
-      };
-      this.connections.set(key, c);
-      this.sendTcpRaw(src, dstPort, srcPort, c.iss, c.rcvNxt, TCP_SYN | TCP_ACK, MSS);
-      return;
-    }
-    if (!c) {
-      if (!(flags & TCP_RST)) {
-        this.sendTcpRaw(src, dstPort, srcPort, ack, 0, TCP_RST, 0);
-      }
-      return;
-    }
-    if (flags & TCP_RST) {
+    } else if (h.flags & TCP_RST) {
       this.#forget(c);
+    } else {
+      this.#established(c, h);
+    }
+  }
+
+  /** A SYN: a new connection to a port the router listens on, else a reset. */
+  #accept(src: number[], dst: number[], h: TcpHeader, key: string) {
+    const listening = h.dstPort === 80 || (h.dstPort === 443 && this.tlsServer);
+    if (!listening || !ipEq(dst, ROUTER_IP)) {
+      this.sendTcpRaw(src, h.dstPort, h.srcPort, 0, (h.seq + 1) >>> 0, TCP_RST | TCP_ACK, 0);
       return;
     }
-    if (flags & TCP_ACK && ((ack - c.sndUna) | 0) > 0) {
-      c.sndUna = ack;
+    // A SYN for a connection the router still has (the board sending it
+    // again, or reusing the port): the new one replaces it, so close the old
+    // one's TLS session and tunnel rather than leave them open.
+    const old = this.connections.get(key);
+    if (old) {
+      this.#forget(old);
+    }
+    const tls = h.dstPort === 443;
+    const c: Connection = {
+      key,
+      ip: src,
+      port: h.srcPort,
+      localPort: h.dstPort,
+      tls: tls && !this.tlsStall ? (this.tlsServer?.open(this.tlsCert) ?? null) : null,
+      tlsInfo: undefined,
+      responded: false,
+      ended: false,
+      iss: 1000,
+      sndUna: 1001,
+      sndNxt: 1001,
+      rcvNxt: (h.seq + 1) >>> 0,
+      peerWnd: h.window,
+      request: "",
+      out: tls ? new Uint8Array(0) : null,
+      outBase: 1001,
+      finSent: false,
+      peerFin: false,
+      closed: false,
+      stalled: false,
+      lastProgress: 0,
+      resendScheduled: false,
+      tunnel: null,
+    };
+    this.connections.set(key, c);
+    this.sendTcpRaw(src, h.dstPort, h.srcPort, c.iss, c.rcvNxt, TCP_SYN | TCP_ACK, MSS);
+  }
+
+  /** A segment on an open connection: its ACK, then its data and FIN. */
+  #established(c: Connection, h: TcpHeader) {
+    if (h.flags & TCP_ACK && ((h.ack - c.sndUna) | 0) > 0) {
+      c.sndUna = h.ack;
       c.lastProgress++;
       this.#trim(c);
     }
-    c.peerWnd = window;
+    c.peerWnd = h.window;
 
-    if (data.length > 0 || flags & TCP_FIN) {
-      const inOrder = seq === c.rcvNxt;
-      if (inOrder) {
-        c.rcvNxt = (c.rcvNxt + data.length + (flags & TCP_FIN ? 1 : 0)) >>> 0;
-      }
-      this.sendSegment(c, c.sndNxt, new Uint8Array(0), TCP_ACK);
-      if (inOrder) {
-        this.#received(c, data);
-      }
-      if (inOrder && flags & TCP_FIN) {
-        c.peerFin = true;
-        c.tunnel?.peerEnded();
-      }
-      if (flags & TCP_FIN && c.finSent) {
-        this.#forget(c);
-        return;
-      }
+    if ((h.data.length > 0 || h.flags & TCP_FIN) && this.#data(c, h)) {
+      return;
     }
     if (c.peerFin && c.finSent && c.sndUna === c.sndNxt) {
       this.#forget(c);
@@ -689,6 +711,28 @@ export class VirtualNetwork {
       this.respond(c);
     }
     this.pump(c);
+  }
+
+  /** Acknowledges a segment's data and FIN, taking them if in order. True if it closed the connection. */
+  #data(c: Connection, h: TcpHeader): boolean {
+    const fin = (h.flags & TCP_FIN) !== 0;
+    const inOrder = h.seq === c.rcvNxt;
+    if (inOrder) {
+      c.rcvNxt = (c.rcvNxt + h.data.length + (fin ? 1 : 0)) >>> 0;
+    }
+    this.sendSegment(c, c.sndNxt, new Uint8Array(0), TCP_ACK);
+    if (inOrder) {
+      this.#received(c, h.data);
+      if (fin) {
+        c.peerFin = true;
+        c.tunnel?.peerEnded();
+      }
+    }
+    if (fin && c.finSent) {
+      this.#forget(c);
+      return true;
+    }
+    return false;
   }
 
   /** Bytes from the board, in order: decrypted first on port 443. */

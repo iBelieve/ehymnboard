@@ -71,8 +71,9 @@ jobs:
         run: pnpm run check-new-deps
 
   # Type checks and lints every TypeScript package in the workspace (web/,
-  # e2e/, device/emulator/), each with its own tsconfig and .oxlintrc.json.
-  # Their tests run in their own jobs below.
+  # e2e/, device/emulator/), each with its own tsconfig and .oxlintrc.json,
+  # and runs Fallow over them (.fallowrc.jsonc). Their tests run in their own
+  # jobs below.
   typescript:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -94,6 +95,19 @@ jobs:
       - name: Lint
         if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm run lint
+
+      # Unused files, exports and dependencies, import cycles, and
+      # duplicated code.
+      - name: Dead code and duplication
+        if: (success() || failure()) && steps.setup.outcome == 'success'
+        run: pnpm run fallow
+
+      # Source files and exports no test reaches, and the complexity of the
+      # packages other than web/ (whose CRAP scores need its tests' coverage:
+      # the web job checks it).
+      - name: Coverage gaps and complexity
+        if: (success() || failure()) && steps.setup.outcome == 'success'
+        run: pnpm run health:static
 
   actionlint:
     runs-on: ubuntu-latest
@@ -126,12 +140,60 @@ jobs:
           cache: true
           require-lockfile: true
 
-      - name: Test
-        run: pnpm run test
+      - id: test
+        name: Test
+        run: pnpm run test:coverage
+
+      # Fallow, with the tests' Istanbul coverage (web/coverage).
+      - name: Complexity and CRAP scores
+        if: (success() || failure()) && steps.test.outcome == 'success'
+        run: pnpm -w run health:web
 
       - name: Build
         if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm run build
+
+  # Mutation testing of the web/ lines this change touches (against HEAD^: a
+  # pull request's base, or master's previous commit): Fallow changes the code
+  # in small ways and runs the tests that cover it against each change. A
+  # change no test notices survives, and is annotated on its line. Advisory:
+  # some survivors are equivalent to the original, so they don't fail the
+  # job. Only the Vitest projects that run in Node.js (the rasterizer, the
+  # admin page, the self-hosted assets Worker): Fallow's runner can't run in
+  # the Workers pool, so the Worker's own code isn't mutated. The time budget
+  # keeps a large change inside timeout-minutes: Fallow leaves the mutants it
+  # didn't get to pending, and exits 0.
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      # Installs the whole workspace, as the typescript job does
+      - uses: pnpm/setup@v3
+        with:
+          cache: true
+          require-lockfile: true
+
+      - name: Mutation testing
+        run: pnpm run mutation --base HEAD^ --time-budget 20m
+
+      - name: Annotate surviving mutants
+        run: |
+          report=.fallow/mutation/last-report.json
+          if [ ! -f "$report" ]; then
+            echo "No mutants: the change touches no tested web/ code."
+            exit 0
+          fi
+          # The Worker's code (src/worker/) has no coverage here by design.
+          jq -r '.mutants[] | select(.status == "survived" or (.status == "no_coverage" and (.file | startswith("src/worker/") | not)))
+            | "::warning file=web/\(.file),line=\(.line)::Mutant \(.status): \(.operator) \(.change.from) → \(.change.to) in \(.function // "module scope"); no test fails on it"' "$report"
+          jq -r '.summary.counts | "Mutants: \(.total), killed \(.killed), survived \(.survived), no coverage \(.no_coverage) (src/worker/ code included: it never runs here), not run in the time budget \(.pending)"' "$report" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # The server's Docker image, as dokku builds it. The e2e job runs this image.
   server-image:
@@ -482,6 +544,7 @@ jobs:
       - typescript
       - actionlint
       - web
+      - mutation
       - server-image
       - device-format
       - firmware

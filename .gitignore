@@ -4,3 +4,5 @@ __pycache__
 /.claude/scheduled_tasks.lock
 secrets.cmake
 node_modules/
+coverage/
+.fallow/

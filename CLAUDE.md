@@ -56,6 +56,22 @@ All checks below must pass; run them locally before committing.
   extension writes it). C++ is clang-format's and Python ruff's (`device/`)
 - Duplicate code: `pnpm run dupes` (jscpd over `device/`, `tools/`, `web/`
   and `e2e/`, config in `.jscpd.json`, zero tolerance)
+- Fallow (config in `.fallowrc.jsonc`), over the workspace's TypeScript:
+  `pnpm run fallow` (dead code, type-aware through `fallow-type-aware`, then
+  its own duplicate check) fails on unused files, exports, class members and
+  dependencies (dev ones too), exported signatures naming unexported types,
+  import cycles and duplicated code. Remove what's really unused, or record
+  a deliberate exception in `.fallowrc.jsonc` or with a
+  `// fallow-ignore-next-line <rule> -- why` comment (a reason is required).
+  `pnpm run health` fails on a function with cyclomatic complexity over 20,
+  cognitive complexity over 15 or a CRAP score of 30 or more, and on a
+  source file or export no test reaches. It's two runs: `health:static`
+  (coverage gaps, and every package but web/, with estimated coverage) and
+  `health:web` (with the coverage `pnpm run test:coverage` in `web/`
+  writes). No baseline: split the function, or for CRAP, test it. No CRAP
+  check (complexity still counts) for `web/test/`, as Vitest never measures
+  its own test files, or for `device/emulator/`, whose scenario tests run
+  about 13 times slower under V8 coverage
 - New dependencies: `pnpm run check-new-deps` runs
   [latest-or-bust](https://github.com/iBelieve/latest-or-bust), which fails
   if a dependency the branch adds, or whose version it changes (in any
@@ -107,7 +123,8 @@ All checks below must pass; run them locally before committing.
   key) to trust the test CA in `certs/test/`. `certs/roots.pem` is what real
   boards trust: `check-tls-roots.yml` checks the live server against it
   daily. Only erasable TypeScript syntax (no enums or parameter
-  properties); import with `.ts` extensions
+  properties); import with `.ts` extensions. The emulator isn't mutation
+  tested: each mutant would rerun minutes of emulated firmware
 - Autobahn: the `ehymnboard_autobahn` build (an echo client on the same
   WebSocket code) runs the Autobahn fuzzingserver's sections 1-7 in the
   emulator: start the container as CI's `autobahn` job does, then
@@ -119,6 +136,20 @@ All checks below must pass; run them locally before committing.
 - Checks: `pnpm run typecheck` (TypeScript 7), `pnpm run lint` (oxlint with
   type-aware rules via tsrs, config in `.oxlintrc.json`), `pnpm run test`,
   `pnpm run build`; formatting is checked once for the whole repository
+- Tests: Vitest projects `node` (the rasterizer and the self-hosted assets
+  Worker), `client` (the React admin, in happy-dom with Testing Library;
+  `test/client/setup.ts` fakes the canvas) and `worker` (in workerd).
+  `pnpm run test:coverage` writes Istanbul coverage to `coverage/` for
+  `pnpm run health:web` at the root
+- Mutation testing: `pnpm run mutation --base <ref>` (Fallow) changes the
+  lines changed since the ref in small ways and runs the tests that cover
+  them against each change; a change no test fails on survives. It refuses
+  to run with uncommitted changes, so commit first (or pass
+  `--allow-dirty`). Only the `node` and `client` projects: Fallow's runner
+  doesn't work in the Workers pool, so `src/worker/` isn't mutated. CI's
+  `mutation` job runs it against `HEAD^` within a 20-minute budget and
+  annotates each survivor without failing (some are equivalent to the
+  original). Kill a real survivor with a test
 - After changing `wrangler.jsonc`, regenerate `worker-configuration.d.ts`
   with `pnpm exec wrangler types`
 - Don't change the device endpoints' paths, query parameters or response

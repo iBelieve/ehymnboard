@@ -37,7 +37,7 @@ const DEVICE_DIR = path.join(import.meta.dirname, "..", "..");
  * The key the build encrypted its image with: $PFB_AES_KEY, else the one in
  * device/secrets.cmake, else secrets.example.cmake's (which CI builds with).
  */
-export function aesKey() {
+function aesKey() {
   let key = process.env.PFB_AES_KEY;
   for (const file of ["secrets.cmake", "secrets.example.cmake"]) {
     const secrets = path.join(DEVICE_DIR, file);

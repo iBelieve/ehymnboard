@@ -65,9 +65,9 @@ type SocketAttachment = {
 // reset of the board's saved state.
 export const STUCK_ETAG_DOWNLOADS = 3;
 
-type StoredScreen = { etag: string; buffer: ArrayBuffer };
+export type StoredScreen = { etag: string; buffer: ArrayBuffer };
 type ScreenRow = StoredScreen & { id: number };
-type FirmwareRow = FirmwareInfo & { image: ArrayBuffer };
+export type FirmwareRow = FirmwareInfo & { image: ArrayBuffer };
 
 export type ImageResult =
   | { status: 304; etag: string }

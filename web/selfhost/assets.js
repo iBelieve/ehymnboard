@@ -2,6 +2,7 @@
 // built client from a disk directory, with the same single-page-application
 // fallback to index.html that wrangler.jsonc configures on Cloudflare.
 
+/** @type {Record<string, string | undefined>} */
 const CONTENT_TYPES = {
   css: "text/css; charset=utf-8",
   html: "text/html; charset=utf-8",
@@ -18,7 +19,7 @@ const CONTENT_TYPES = {
 export default {
   /**
    * @param {Request} request
-   * @param {{ FILES: Fetcher }} env
+   * @param {{ FILES: { fetch(request: Request): Promise<Response> } }} env The client-files disk service
    */
   async fetch(request, env) {
     if (request.method !== "GET" && request.method !== "HEAD") {

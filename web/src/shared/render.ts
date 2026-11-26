@@ -22,7 +22,7 @@ const ROW_BYTES = SCREEN_WIDTH / 8;
 // most ~275px tall, so 16 keeps the error well under a pixel.
 const CURVE_STEPS = 16;
 
-export function measureText(font: Font, text: string, size: number): number {
+function measureText(font: Font, text: string, size: number): number {
   return font.getAdvanceWidth(text, size, { kerning: true });
 }
 
@@ -126,59 +126,75 @@ function flatten(commands: PathCommand[]): Point[][] {
   return polygons;
 }
 
+type Edge = { x0: number; y0: number; x1: number; y1: number; dir: number };
+type Crossing = { x: number; dir: number };
+
 /**
  * Sets every pixel whose center is inside the polygons (nonzero winding rule),
  * like FreeType's monochrome rasterizer.
  */
 function fillPath(buffer: Uint8Array, polygons: Point[][]) {
-  type Edge = { x0: number; y0: number; x1: number; y1: number; dir: number };
-  const edges: Edge[] = [];
+  const edges = polygons.flatMap(edgesOf);
+  // A loop, not Math.min(...ys): a long line of intricate glyphs ("@" x 100)
+  // has more edges than a call can take arguments. Each edge points down, so
+  // y0 is its top and y1 its bottom.
   let minY = Infinity;
   let maxY = -Infinity;
+  for (const e of edges) {
+    minY = Math.min(minY, e.y0);
+    maxY = Math.max(maxY, e.y1);
+  }
+  const firstRow = Math.max(0, Math.floor(minY));
+  const lastRow = Math.min(SCREEN_HEIGHT - 1, Math.ceil(maxY));
 
-  for (const polygon of polygons) {
-    for (let i = 0; i < polygon.length; i++) {
-      const [ax, ay] = polygon[i]!;
-      const [bx, by] = polygon[(i + 1) % polygon.length]!;
-      if (ay === by) {
-        continue;
-      }
+  for (let row = firstRow; row <= lastRow; row++) {
+    fillRow(buffer, row, crossingsAt(edges, row + 0.5));
+  }
+}
+
+/** A polygon's edges, each pointing down (`dir` says which way it went), less horizontal ones. */
+function edgesOf(polygon: Point[]): Edge[] {
+  const edges: Edge[] = [];
+  for (let i = 0; i < polygon.length; i++) {
+    const [ax, ay] = polygon[i]!;
+    const [bx, by] = polygon[(i + 1) % polygon.length]!;
+    if (ay !== by) {
       edges.push(
         ay < by
           ? { x0: ax, y0: ay, x1: bx, y1: by, dir: 1 }
           : { x0: bx, y0: by, x1: ax, y1: ay, dir: -1 },
       );
-      minY = Math.min(minY, ay, by);
-      maxY = Math.max(maxY, ay, by);
     }
   }
+  return edges;
+}
 
-  const firstRow = Math.max(0, Math.floor(minY));
-  const lastRow = Math.min(SCREEN_HEIGHT - 1, Math.ceil(maxY));
-  const crossings: { x: number; dir: number }[] = [];
-
-  for (let row = firstRow; row <= lastRow; row++) {
-    const y = row + 0.5;
-    crossings.length = 0;
-
-    for (const e of edges) {
-      // Half-open so a vertex shared by two edges is counted once.
-      if (y >= e.y0 && y < e.y1) {
-        crossings.push({ x: e.x0 + ((y - e.y0) / (e.y1 - e.y0)) * (e.x1 - e.x0), dir: e.dir });
-      }
+/** Where the edges cross the line at `y`, left to right. */
+function crossingsAt(edges: Edge[], y: number): Crossing[] {
+  const crossings: Crossing[] = [];
+  for (const e of edges) {
+    // Half-open so a vertex shared by two edges is counted once.
+    if (y >= e.y0 && y < e.y1) {
+      crossings.push({ x: e.x0 + ((y - e.y0) / (e.y1 - e.y0)) * (e.x1 - e.x0), dir: e.dir });
     }
-    crossings.sort((a, b) => a.x - b.x);
+  }
+  // In place: the array is this row's own, and the admin's preview runs this
+  // in browsers older than Array#toSorted.
+  crossings.sort((a, b) => a.x - b.x);
+  return crossings;
+}
 
-    let winding = 0;
-    for (let i = 0; i < crossings.length - 1; i++) {
-      winding += crossings[i]!.dir;
-      if (winding !== 0) {
-        // Pixels whose centers (col + 0.5) fall in [left, right).
-        const from = Math.max(0, Math.ceil(crossings[i]!.x - 0.5));
-        const to = Math.min(SCREEN_WIDTH - 1, Math.ceil(crossings[i + 1]!.x - 0.5) - 1);
-        for (let col = from; col <= to; col++) {
-          buffer[row * ROW_BYTES + (col >> 3)]! |= 0x80 >> (col & 7);
-        }
+/** Sets the pixels of a row between crossings where the winding number isn't zero. */
+function fillRow(buffer: Uint8Array, row: number, crossings: Crossing[]) {
+  let winding = 0;
+  for (let i = 0; i < crossings.length - 1; i++) {
+    winding += crossings[i]!.dir;
+    if (winding !== 0) {
+      // Pixels whose centers (col + 0.5) fall in [left, right).
+      const from = Math.max(0, Math.ceil(crossings[i]!.x - 0.5));
+      const to = Math.min(SCREEN_WIDTH - 1, Math.ceil(crossings[i + 1]!.x - 0.5) - 1);
+      for (let col = from; col <= to; col++) {
+        buffer[row * ROW_BYTES + (col >> 3)]! |= 0x80 >> (col & 7);
       }
     }
   }

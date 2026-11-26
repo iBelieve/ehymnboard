@@ -5,7 +5,7 @@ export const DEVICE_NAMES: Record<string, string> = {
 };
 
 // healthchecks.io check for each board.
-export const HEALTHCHECKS_PING_URLS: Record<string, string> = {
+const HEALTHCHECKS_PING_URLS: Record<string, string> = {
   E6614103E71F8D26: "https://hc-ping.com/a717c5f0-8a83-45f9-92a7-c79a21a437b4",
   E661A4D41787452B: "https://hc-ping.com/6c7ef2cb-71b8-492e-9e11-4ddfacf29d0c",
 };

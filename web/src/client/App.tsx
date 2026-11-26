@@ -17,14 +17,58 @@ import { DeviceList } from "./DeviceList";
 const SCREEN_IDS = Array.from({ length: SCREEN_COUNT }, (_, i) => i + 1);
 const REFRESH_MS = 10_000;
 
+type StoredScreens = Record<number, { etag: string; buffer: Uint8Array }>;
+
 export function App() {
+  const board = useBoard();
+  const { state, draft } = board;
+  const stored = useStoredScreens(state?.screens, board.setLoadError);
+  const dirty = !!state && !!draft && draft.some((line, i) => line !== state.lines[i]);
+  const preview = usePreview(state, dirty ? draft : undefined, stored);
+
+  return (
+    <div className="grid grid-cols-1 gap-8 px-8 py-8 lg:h-dvh lg:grid-cols-2">
+      <div
+        className="fixed inset-0 bg-cover opacity-20 brightness-75 grayscale-[0.7]"
+        style={{ backgroundImage: "url('/church-lent.jpg')" }}
+      />
+      <div className="z-10 flex flex-col">
+        <h1 className="font-display text-5xl tracking-wide text-white max-lg:mb-8">Hymn Board</h1>
+
+        {state && <DeviceList devices={state.devices} firmware={state.firmware} />}
+
+        <div className="flex flex-grow flex-col items-center justify-center">
+          {/* Relative so the unsaved-changes note can sit under the card
+              without taking up space: the layout matches the old admin's. */}
+          <div className="relative">
+            <div className="overflow-hidden rounded-2xl border-8 border-transparent bg-white/40 shadow-lg">
+              <LinesForm board={board} />
+            </div>
+            {dirty && (
+              <div className="absolute inset-x-0 top-full mt-2 text-center text-sm text-white opacity-75">
+                Previewing unsaved changes
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+      <BoardPreview screens={preview} />
+    </div>
+  );
+}
+
+type Board = ReturnType<typeof useBoard>;
+
+/**
+ * The board's state from the server, loaded once and then polled, the lines
+ * being edited, and saving them.
+ */
+function useBoard() {
   const [state, setState] = useState<BoardState>();
   const [draft, setDraft] = useState<Lines>();
-  const [stored, setStored] = useState<Record<number, { etag: string; buffer: Uint8Array }>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const [loadError, setLoadError] = useState<string>();
-  const fetching = useRef(new Set<string>());
   const lastLines = useRef<Lines>(undefined);
   // Bumped when a save starts and ends, so a poll that overlaps a save can't
   // put back the state from before it.
@@ -65,46 +109,6 @@ export function App() {
     };
   }, [applyState]);
 
-  // Fetch the stored bits for any screen whose etag changed, once per etag.
-  useEffect(() => {
-    for (const { id, etag } of state?.screens ?? []) {
-      const key = `${id}:${etag}`;
-      if (stored[id]?.etag !== etag && !fetching.current.has(key)) {
-        fetching.current.add(key);
-        // Cached under the ETag the server sent with the bits, which is newer
-        // than the state's if the lines changed in between. Then the old ETag
-        // stays marked as fetched, so it isn't fetched again in a loop.
-        fetchScreen(id)
-          .then((screen) => {
-            setStored((prev) => ({ ...prev, [id]: screen }));
-            if (screen.etag === etag) fetching.current.delete(key);
-          })
-          .catch((e: unknown) => {
-            fetching.current.delete(key);
-            setLoadError(String(e));
-          });
-      }
-    }
-  }, [state?.screens, stored]);
-
-  const dirty = !!state && !!draft && draft.some((line, i) => line !== state.lines[i]);
-
-  // While editing, render the draft in the browser with the same code the
-  // server uses; otherwise show exactly what the boards download, rendering
-  // the saved lines the same way until those bits arrive.
-  const preview = useMemo(() => {
-    // Trimmed the way the server saves them.
-    const lines = dirty && draft ? trimLines(draft) : state?.lines;
-    const font = lines && getFont();
-    return SCREEN_IDS.map((id) => {
-      const current = state?.screens.find((screen) => screen.id === id)?.etag;
-      if (!dirty && current !== undefined && stored[id]?.etag === current) {
-        return stored[id].buffer;
-      }
-      return lines && font ? renderScreen(font, ...linesForScreen(lines, id)) : undefined;
-    });
-  }, [dirty, draft, state, stored]);
-
   async function save(lines: Lines) {
     setSaving(true);
     setError(undefined);
@@ -119,76 +123,116 @@ export function App() {
     }
   }
 
+  return { state, draft, setDraft, saving, error: error ?? loadError, setLoadError, save };
+}
+
+/** The bits the boards download for each screen, fetched once per etag. */
+function useStoredScreens(
+  screens: BoardState["screens"] | undefined,
+  onError: (error: string) => void,
+): StoredScreens {
+  const [stored, setStored] = useState<StoredScreens>({});
+  const fetching = useRef(new Set<string>());
+
+  // Fetch the stored bits for any screen whose etag changed, once per etag.
+  useEffect(() => {
+    for (const { id, etag } of screens ?? []) {
+      const key = `${id}:${etag}`;
+      if (stored[id]?.etag !== etag && !fetching.current.has(key)) {
+        fetching.current.add(key);
+        // Cached under the ETag the server sent with the bits, which is newer
+        // than the state's if the lines changed in between. Then the old ETag
+        // stays marked as fetched, so it isn't fetched again in a loop.
+        fetchScreen(id)
+          .then((screen) => {
+            setStored((prev) => ({ ...prev, [id]: screen }));
+            if (screen.etag === etag) fetching.current.delete(key);
+          })
+          .catch((e: unknown) => {
+            fetching.current.delete(key);
+            onError(String(e));
+          });
+      }
+    }
+  }, [screens, stored, onError]);
+
+  return stored;
+}
+
+/**
+ * What each screen shows. While editing (`edited` is the draft), the draft
+ * rendered in the browser with the same code the server uses; otherwise
+ * exactly what the boards download, rendering the saved lines the same way
+ * until those bits arrive.
+ */
+function usePreview(
+  state: BoardState | undefined,
+  edited: Lines | undefined,
+  stored: StoredScreens,
+): (Uint8Array | undefined)[] {
+  return useMemo(() => {
+    // Trimmed the way the server saves them.
+    const lines = edited ? trimLines(edited) : state?.lines;
+    const font = lines && getFont();
+    return SCREEN_IDS.map((id) => {
+      const current = state?.screens.find((screen) => screen.id === id)?.etag;
+      if (!edited && current !== undefined && stored[id]?.etag === current) {
+        return stored[id].buffer;
+      }
+      return lines && font ? renderScreen(font, ...linesForScreen(lines, id)) : undefined;
+    });
+  }, [edited, state, stored]);
+}
+
+/** The six text boxes, any error, and the Apply and Clear buttons. */
+function LinesForm({ board }: { board: Board }) {
+  const { draft, setDraft, saving, error, save } = board;
   return (
-    <div className="grid grid-cols-1 gap-8 px-8 py-8 lg:h-dvh lg:grid-cols-2">
-      <div
-        className="fixed inset-0 bg-cover opacity-20 brightness-75 grayscale-[0.7]"
-        style={{ backgroundImage: "url('/church-lent.jpg')" }}
-      />
-      <div className="z-10 flex flex-col">
-        <h1 className="font-display text-5xl tracking-wide text-white max-lg:mb-8">Hymn Board</h1>
+    <form
+      className="mx-auto flex max-w-sm flex-col gap-4 bg-white p-4"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (draft) void save(draft);
+      }}
+    >
+      {(draft ?? EMPTY_LINES).map((line, i) => (
+        <input
+          key={i}
+          type="text"
+          className="input input-xl input-bordered text-center"
+          aria-label={`Line ${i + 1}`}
+          value={line}
+          disabled={!draft}
+          maxLength={100}
+          data-1p-ignore
+          onChange={(e) => setDraft((prev) => prev && withLine(prev, i, e.target.value))}
+        />
+      ))}
 
-        {state && <DeviceList devices={state.devices} firmware={state.firmware} />}
-
-        <div className="flex flex-grow flex-col items-center justify-center">
-          {/* Relative so the unsaved-changes note can sit under the card
-              without taking up space: the layout matches the old admin's. */}
-          <div className="relative">
-            <div className="overflow-hidden rounded-2xl border-8 border-transparent bg-white/40 shadow-lg">
-              <form
-                className="mx-auto flex max-w-sm flex-col gap-4 bg-white p-4"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (draft) void save(draft);
-                }}
-              >
-                {(draft ?? EMPTY_LINES).map((line, i) => (
-                  <input
-                    key={i}
-                    type="text"
-                    className="input input-xl input-bordered text-center"
-                    aria-label={`Line ${i + 1}`}
-                    value={line}
-                    disabled={!draft}
-                    maxLength={100}
-                    data-1p-ignore
-                    onChange={(e) => setDraft((prev) => prev && withLine(prev, i, e.target.value))}
-                  />
-                ))}
-
-                {(error ?? loadError) && (
-                  <div className="text-error text-sm">{error ?? loadError}</div>
-                )}
-
-                <div className="mt-4 flex gap-4">
-                  <button
-                    className="btn btn-primary btn-lg flex-grow"
-                    type="submit"
-                    disabled={!draft || saving}
-                  >
-                    Apply
-                  </button>
-                  <button
-                    className="btn btn-soft btn-error btn-lg flex-grow"
-                    type="button"
-                    disabled={!draft || saving}
-                    onClick={() => void save([...EMPTY_LINES])}
-                  >
-                    Clear
-                  </button>
-                </div>
-              </form>
-            </div>
-            {dirty && (
-              <div className="absolute inset-x-0 top-full mt-2 text-center text-sm text-white opacity-75">
-                Previewing unsaved changes
-              </div>
-            )}
-          </div>
+      {error && (
+        <div className="text-error text-sm" role="alert">
+          {error}
         </div>
+      )}
+
+      <div className="mt-4 flex gap-4">
+        <button
+          className="btn btn-primary btn-lg flex-grow"
+          type="submit"
+          disabled={!draft || saving}
+        >
+          Apply
+        </button>
+        <button
+          className="btn btn-soft btn-error btn-lg flex-grow"
+          type="button"
+          disabled={!draft || saving}
+          onClick={() => void save([...EMPTY_LINES])}
+        >
+          Clear
+        </button>
       </div>
-      <BoardPreview screens={preview} />
-    </div>
+    </form>
   );
 }
 
