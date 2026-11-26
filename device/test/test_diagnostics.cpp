@@ -209,6 +209,12 @@ TEST(ResetQuery, LeavesOutWhatIsntKnown)
     record.phase = Phase::PANEL;
     record.detail = 2;
     EXPECT_EQ(reset_query(record), "&reset=panel_busy&reset_phase=panel&reset_detail=2&reset_uptime=200");
+
+    // pico-sdk's errors are negative
+    record.reason = ResetReason::FLASH_SAVE_FAILED;
+    record.phase = Phase::FLASH_SAVE;
+    record.detail = static_cast<uint32_t>(-1);
+    EXPECT_EQ(reset_query(record), "&reset=flash_save_failed&reset_phase=flash_save&reset_detail=-1&reset_uptime=200");
 }
 
 RC_GTEST_PROP(ResetRecord, SurvivesTheScratchRegisters, ())

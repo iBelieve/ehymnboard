@@ -27,8 +27,13 @@
 #include "diagnostics.h"
 
 // Reads why the board last reset and clears the record, so that a later
-// reset nothing records isn't mistaken for this one. Call first in main().
+// reset nothing records isn't mistaken for this one. Call first in main(),
+// before stdio is up: a crash before it would find the last boot's record
+// and keep it.
 void diag_read_reset();
+
+// Prints what diag_read_reset() found, once stdio is up
+void diag_log_reset();
 
 // Why the board last reset (once diag_read_reset() has run)
 const ResetRecord &diag_boot_reset();

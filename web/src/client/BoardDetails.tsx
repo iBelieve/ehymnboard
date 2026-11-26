@@ -195,7 +195,9 @@ function Sparkline({
         aria-label={`${title}: from ${format(min)} to ${format(max)}, now ${format(latest.value)}`}
         onPointerMove={(e) => {
           const box = e.currentTarget.getBoundingClientRect();
-          const at = first + ((e.clientX - box.left) / box.width) * (last - first);
+          // The inverse of x(), padding and all
+          const across = ((e.clientX - box.left) / box.width) * WIDTH;
+          const at = first + ((across - PAD) / (WIDTH - 2 * PAD)) * (last - first);
           let nearest = 0;
           points.forEach((point, i) => {
             if (Math.abs(point.at - at) < Math.abs(points[nearest]!.at - at)) nearest = i;

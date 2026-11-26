@@ -85,14 +85,18 @@ app.get("/ok", (c) => c.body(null, 204));
 // The board's WebSocket: the server pushes its state (screen etags and
 // firmware version) here, so it no longer polls. Images still come from
 // /images/N. Only the known boards may connect.
+/** One of our boards (`DEVICE_NAMES`), or a test board in `EXTRA_DEVICE_IDS`. */
+function isKnownDevice(env: Env, deviceId: string | undefined): deviceId is string {
+  const extra = (env.EXTRA_DEVICE_IDS ?? "").split(",").map((id) => id.trim());
+  return !!deviceId && (Object.hasOwn(DEVICE_NAMES, deviceId) || extra.includes(deviceId));
+}
+
 app.get("/ws", async (c) => {
   if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") {
     return c.text("Expected a WebSocket upgrade\n", 426);
   }
   const deviceId = c.req.query("device_id");
-  const extra = (c.env.EXTRA_DEVICE_IDS ?? "").split(",").map((id) => id.trim());
-  const known = deviceId && (Object.hasOwn(DEVICE_NAMES, deviceId) || extra.includes(deviceId));
-  if (!known) {
+  if (!isKnownDevice(c.env, deviceId)) {
     console.log(`Refusing a socket from unknown device ${deviceId}`);
     return c.text("Unknown device\n", 403);
   }
@@ -225,8 +229,11 @@ app.get("/firmware/latest", async (c) => {
 
   if (deviceId) {
     // With the board's hourly health report, from firmware that sends one
-    // (a plain object: Hono's query() can't be sent over RPC)
-    const query = Object.fromEntries(new URL(c.req.url).searchParams);
+    // (a plain object: Hono's query() can't be sent over RPC). Anyone can
+    // call this, so only our boards' reports are kept, as each adds a row.
+    const query = isKnownDevice(c.env, deviceId)
+      ? Object.fromEntries(new URL(c.req.url).searchParams)
+      : {};
     await stub.recordHealth(deviceId, version, query);
   }
 
@@ -308,7 +315,10 @@ app.post("/api/devices/:id/diagnostics", requireAuth, async (c) => {
     return c.text("The board isn't connected\n", 409);
   }
   if (result === "timeout") {
-    return c.text("The board didn't answer (its firmware may be too old)\n", 504);
+    return c.text(
+      "The board didn't answer in time (it may be busy with a download, or its firmware too old)\n",
+      504,
+    );
   }
   return c.json(await getState(c.env));
 });

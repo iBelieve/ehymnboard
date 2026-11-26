@@ -115,8 +115,9 @@ export function describeDrop(drop: Omit<SocketDrop, "at">): string {
     );
   }
   if (drop.fail !== null) {
+    const attempts = drop.fails === 1 ? "1 failed attempt" : `${drop.fails ?? "?"} failed attempts`;
     parts.push(
-      `${drop.fails ?? "?"} failed attempts, the last ${drop.fail}${drop.fail_detail ? ` (${drop.fail_detail})` : ""}`,
+      `${attempts}, the last ${drop.fail}${drop.fail_detail ? ` (${drop.fail_detail})` : ""}`,
     );
   }
   return parts.join("; ");

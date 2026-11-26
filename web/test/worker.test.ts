@@ -364,4 +364,16 @@ describe("diagnostics", () => {
     ]);
     expect((await get(`/api/devices/${LEFT}/health`)).status).toBe(401);
   });
+
+  test("an unknown board's health isn't kept", async () => {
+    await get("/firmware/latest?device_id=X&version=v1&uptime=3600&rssi=-66&heap_free=90000");
+    const state = await (await get("/api/state", AUTH)).json<BoardState>();
+    expect(state.devices.find((d) => d.id === "X")).toMatchObject({
+      firmware_version: "v1",
+      rssi: null,
+      health: null,
+    });
+    const history = await (await get("/api/devices/X/health", AUTH)).json<HealthSample[]>();
+    expect(history).toEqual([]);
+  });
 });

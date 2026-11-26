@@ -49,7 +49,8 @@ static constexpr uint32_t LOOP_MS = 100;
 
 static uint64_t now_ms()
 {
-    return to_ms_since_boot(get_absolute_time());
+    // Not to_ms_since_boot(), whose 32 bits wrap after 49 days
+    return to_us_since_boot(get_absolute_time()) / 1000;
 }
 
 // Downloads one screen's image and draws it if it changed. On transient HTTP
@@ -272,7 +273,12 @@ static void service(Board &board)
     }
     if (events.closed)
     {
-        diag_sockets().on_end(*events.closed, now);
+        // Unless the policy already gave up on it (ABORT, which counted it)
+        // and lwIP ended it just before the abort
+        if (policy.state() != ConnectionPolicy::State::BACKOFF)
+        {
+            diag_sockets().on_end(*events.closed, now);
+        }
         policy.on_closed(now);
         printf("WS: socket closed, retrying in %llums\n", policy.retry_at() - now);
     }
@@ -285,6 +291,8 @@ bi_decl(bi_program_version_string(FIRMWARE_VERSION));
 
 int main()
 {
+    // Before anything can crash and record a reset over the last boot's
+    diag_read_reset();
     stdio_init_all();
 
     long_watchdog_enable(60 /* seconds */);
@@ -296,7 +304,7 @@ int main()
     printf("eHymnboard starting...\n");
     printf("Pico SDK version: %s\n", PICO_SDK_VERSION_STRING);
     printf("Device ID: %s\n", unique_board_id.c_str());
-    diag_read_reset();
+    diag_log_reset();
 #ifdef EHYMNBOARD_TEST_ROOT_CA
     printf("WARNING: test build, trusts the emulator's test CA: don't run it on a board\n");
 #endif

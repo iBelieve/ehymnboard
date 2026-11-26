@@ -257,7 +257,9 @@ std::string reset_query(const ResetRecord &record)
     query += param("reset_phase", phase_name(record.phase));
     if (record.detail != 0)
     {
-        query += param("reset_detail", record.detail);
+        // Signed, as a failed flash save's pico-sdk error is: a crash's PC,
+        // in flash or RAM, and a panel's number are the same either way
+        query += param("reset_detail", static_cast<int32_t>(record.detail));
     }
     if (record.extra != 0)
     {

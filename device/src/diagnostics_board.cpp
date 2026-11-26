@@ -51,7 +51,8 @@ static void write_scratch(const ScratchWords &words)
 
 static uint32_t uptime_s()
 {
-    return static_cast<uint32_t>(to_ms_since_boot(get_absolute_time()) / 1000);
+    // Not to_ms_since_boot(), whose 32 bits wrap after 49 days
+    return static_cast<uint32_t>(to_us_since_boot(get_absolute_time()) / 1'000'000);
 }
 
 void diag_read_reset()
@@ -65,7 +66,10 @@ void diag_read_reset()
     flags.had_psm_restart = (chip & VREG_AND_CHIP_RESET_CHIP_RESET_HAD_PSM_RESTART_BITS) != 0;
     boot_reset = decode_reset(flags);
     write_scratch({});
+}
 
+void diag_log_reset()
+{
     printf("Reset reason: %s", reset_reason_name(boot_reset.reason));
     if (boot_reset.recorded)
     {

@@ -132,7 +132,11 @@ export function App() {
           <DeviceList
             devices={state.devices}
             firmware={state.firmware}
-            onState={(next) => applyState(next, false)}
+            // Only its boards: unlike the poll, it isn't guarded against a
+            // save in between, so its lines may be older than the save's
+            onState={(next) =>
+              setState((prev) => (prev ? { ...prev, devices: next.devices } : next))
+            }
           />
         )}
 

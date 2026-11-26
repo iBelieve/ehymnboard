@@ -45,6 +45,9 @@ describe("what boards send", () => {
     expect(describeDrop(drop!)).toBe(
       "last socket ended: pong_timeout after 3600 s; 2 failed attempts, the last handshake (503)",
     );
+    expect(describeDrop({ ...drop!, fails: 1 })).toBe(
+      "last socket ended: pong_timeout after 3600 s; 1 failed attempt, the last handshake (503)",
+    );
     expect(connectColumns(params, AT)).toEqual({
       rssi: -61,
       uptime_s: 7200,
@@ -84,6 +87,10 @@ describe("what boards send", () => {
     expect(
       describeReset({ reason: "power_on", phase: null, detail: null, extra: null, uptime_s: null }),
     ).toBe("power_on");
+    // A failed flash save's pico-sdk error, which the board sends signed
+    expect(
+      parseReset(query("reset=flash_save_failed&reset_phase=flash_save&reset_detail=-1")),
+    ).toMatchObject({ reason: "flash_save_failed", detail: -1 });
     expect(JSON.parse(bootColumns(params, AT).last_reset!)).toEqual({ ...reset, at: AT });
   });
 

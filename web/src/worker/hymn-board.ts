@@ -388,6 +388,9 @@ export class HymnBoard extends DurableObject<Env> {
     id: string,
     timeoutMs = DIAG_TIMEOUT_MS,
   ): Promise<"ok" | "offline" | "timeout"> {
+    // A socket from before a deploy would have its answer dropped (see
+    // webSocketMessage()), so it goes first and the board reconnects
+    this.closeOutdatedSockets();
     const [socket] = this.openSockets(id);
     if (!socket) {
       return "offline";
