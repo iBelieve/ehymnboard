@@ -46,5 +46,5 @@ VOLUME /data
 # Listens on $PORT, or 8000 when it isn't set. No EXPOSE: dokku then sets PORT
 # (5000 by default) and proxies port 80 to it, as it did for the Flask app.
 
-# BASIC_AUTH_USERNAME and BASIC_AUTH_PASSWORD come from the environment.
+# BETTER_AUTH_SECRET and SETUP_PASSWORD come from the environment.
 CMD ["/usr/bin/sh", "-c", "exec workerd serve dist/workerd.capnp --socket-addr \"http=0.0.0.0:${PORT:-8000}\" --directory-path client-files=/app/dist/client --directory-path do-storage=/data"]

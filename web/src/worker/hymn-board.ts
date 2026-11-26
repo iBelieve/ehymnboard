@@ -4,7 +4,7 @@ import { renderScreen } from "../shared/render";
 import { EMPTY_LINES, isLines, linesForScreen, SCREEN_COUNT, type Lines } from "../shared/screen";
 import type { Device, DeviceStatusParams, FirmwareInfo } from "../shared/api";
 import { getDeviceName, healthchecksOn, pingHealthcheck } from "./devices";
-import { migrate } from "./migrations";
+import { MIGRATIONS, migrateOnStart } from "./migrations";
 
 // Column names are interpolated into SQL, so only these are accepted.
 const DEVICE_FIELDS = new Set([
@@ -93,17 +93,7 @@ export class HymnBoard extends DurableObject<Env> {
     this.sql = ctx.storage.sql;
     // Answered by the runtime, so a board's pings never wake this object.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair(PING, PONG));
-    // Each instance migrates itself before it handles its first request.
-    void ctx.blockConcurrencyWhile(() => {
-      try {
-        migrate(ctx.storage);
-        return Promise.resolve();
-      } catch (error) {
-        // Otherwise only the reset of the object shows up, not the SQL error.
-        console.error("Schema migration failed:", error);
-        return Promise.reject(error instanceof Error ? error : new Error(String(error)));
-      }
-    });
+    migrateOnStart(ctx, MIGRATIONS);
   }
 
   getLines(): Lines {

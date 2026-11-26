@@ -1,8 +1,12 @@
 // Secrets set in the environment (dokku config or `wrangler secret put`), so
-// `wrangler types` can't see them. Leave both unset to disable basic auth.
+// `wrangler types` can't see them.
 interface Env {
-  BASIC_AUTH_USERNAME?: string;
-  BASIC_AUTH_PASSWORD?: string;
+  // Signs Better Auth's session cookies: at least 32 random characters
+  // (`openssl rand -base64 32`). The admin refuses to sign anyone in without it.
+  BETTER_AUTH_SECRET?: string;
+  // Lets whoever knows it create the first account, an admin, while there's
+  // none. Unset, nobody can.
+  SETUP_PASSWORD?: string;
   // Comma-separated board IDs allowed on /ws besides the known boards: the
   // e2e tests' emulated board. Unset in production.
   EXTRA_DEVICE_IDS?: string;

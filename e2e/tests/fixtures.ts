@@ -317,6 +317,10 @@ export class Board {
  * a release left over on the server can't update a board by surprise.
  */
 export const test = base.extend<{ admin: AdminPage; backend: string; board: Board }>({
+  // The browser's own: signed in (see signIn.setup.ts), as the page is.
+  request: async ({ context }, use) => {
+    await use(context.request);
+  },
   admin: async ({ page, backend }, use) => {
     // Stay hermetic: the pages load web fonts and scripts from CDNs. The
     // browser may upgrade the server to https itself (*.workers.dev is on

@@ -19,10 +19,12 @@
 // Full-stack end-to-end tests: the real firmware in the emulator talks to a
 // running hymn board server while a browser drives its admin page. See
 // README.md for how to point it at a server.
+import path from "node:path";
 import { defineConfig } from "@playwright/test";
 
-const username = process.env.E2E_USERNAME;
-const password = process.env.E2E_PASSWORD;
+/** The session signIn.setup.ts saves, which every test starts with. */
+export const SIGNED_IN = path.join(import.meta.dirname, ".auth", "signed-in.json");
+
 const executablePath = process.env.E2E_CHROMIUM_EXECUTABLE;
 
 export default defineConfig({
@@ -36,8 +38,11 @@ export default defineConfig({
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:8000",
-    httpCredentials: username && password ? { username, password, send: "always" } : undefined,
     trace: "retain-on-failure",
     launchOptions: executablePath ? { executablePath } : {},
   },
+  projects: [
+    { name: "sign in", testMatch: "signIn.setup.ts" },
+    { name: "e2e", dependencies: ["sign in"], use: { storageState: SIGNED_IN } },
+  ],
 });

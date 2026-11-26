@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BoardState } from "../shared/api";
+import type { BoardState, Viewer } from "../shared/api";
 import { getFont } from "../shared/font";
 import { renderScreen } from "../shared/render";
 import {
@@ -11,13 +11,15 @@ import {
   type Lines,
 } from "../shared/screen";
 import { fetchScreen, fetchState, saveLines } from "./api";
+import { signOut } from "./auth";
 import { BoardPreview } from "./BoardPreview";
 import { DeviceList } from "./DeviceList";
+import { Background } from "./SignIn";
 
 const SCREEN_IDS = Array.from({ length: SCREEN_COUNT }, (_, i) => i + 1);
 const REFRESH_MS = 10_000;
 
-export function App() {
+export function App({ viewer }: { viewer: Viewer }) {
   const [state, setState] = useState<BoardState>();
   const [draft, setDraft] = useState<Lines>();
   const [stored, setStored] = useState<Record<number, { etag: string; buffer: Uint8Array }>>({});
@@ -121,12 +123,24 @@ export function App() {
 
   return (
     <div className="grid grid-cols-1 gap-8 px-8 py-8 lg:h-dvh lg:grid-cols-2">
-      <div
-        className="fixed inset-0 bg-cover opacity-20 brightness-75 grayscale-[0.7]"
-        style={{ backgroundImage: "url('/church-lent.jpg')" }}
-      />
+      <Background />
       <div className="z-10 flex flex-col">
-        <h1 className="font-display text-5xl tracking-wide text-white max-lg:mb-8">Hymn Board</h1>
+        <div className="flex flex-wrap items-start justify-between gap-4 max-lg:mb-8">
+          <h1 className="font-display text-5xl tracking-wide text-white">Hymn Board</h1>
+          <div className="flex items-center gap-1 text-sm text-white">
+            <span className="opacity-75">{viewer.name}</span>
+            <a className="btn btn-ghost btn-sm text-white" href="#accounts">
+              Accounts
+            </a>
+            <button
+              className="btn btn-ghost btn-sm text-white"
+              type="button"
+              onClick={() => void signOut()}
+            >
+              Sign out
+            </button>
+          </div>
+        </div>
 
         {state && <DeviceList devices={state.devices} firmware={state.firmware} />}
 

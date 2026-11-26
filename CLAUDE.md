@@ -121,6 +121,11 @@ All checks below must pass; run them locally before committing.
   `pnpm run build`; formatting is checked once for the whole repository
 - After changing `wrangler.jsonc`, regenerate `worker-configuration.d.ts`
   with `pnpm exec wrangler types`
+- Accounts are Better Auth's, in the `Accounts` Durable Object (see
+  `web/README.md`, "Accounts"): its tables are `ACCOUNT_MIGRATIONS` in
+  `src/worker/migrations.ts`, so a Better Auth upgrade or plugin that adds
+  fields needs a migration step there (compare with Better Auth's generated
+  SQL). Every deploy needs `BETTER_AUTH_SECRET` and `SETUP_PASSWORD`
 - Don't change the device endpoints' paths, query parameters or response
   bytes, or the `/ws` messages (`state`, `ping`/`pong`, `shown`, close
   codes): the firmware hard-codes them. The rasterizer is compared against
@@ -143,7 +148,10 @@ the emulator.
   filtered install (`pnpm install --filter ehymnboard-e2e...`) brings its
   packages too
 - `pnpm install`, `pnpm exec playwright install chromium`, then with a server
-  running: `E2E_BASE_URL=http://localhost:8000 E2E_USERNAME=… E2E_PASSWORD=… pnpm test`.
+  running: `E2E_BASE_URL=http://localhost:8000 E2E_SETUP_PASSWORD=… pnpm test`
+  (`signIn.setup.ts` signs in through the page first, creating the first
+  account with the server's `SETUP_PASSWORD` if there's none; `E2E_EMAIL`
+  and `E2E_PASSWORD` default to e2e@example.com and e2e-password).
   The server must run with `EXTRA_DEVICE_IDS=0000000000000000` (the emulated
   board's ID), or `/ws` refuses the board
 - `pnpm run typecheck`, `pnpm run lint`

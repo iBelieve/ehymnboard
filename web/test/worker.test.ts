@@ -1,25 +1,31 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import type { BoardState } from "../src/shared/api";
 import { getFont } from "../src/shared/font";
 import { renderScreen } from "../src/shared/render";
 import { SCREEN_BYTES } from "../src/shared/screen";
 import { type Ping, recordPings } from "./healthchecks";
+import { signInAsAdmin } from "./signIn";
 import worker from "../src/worker/index";
 
 const LEFT = "E6614103E71F8D26";
-const AUTH = { Authorization: `Basic ${btoa("admin:secret")}` };
+/** The session cookie of the first account, an admin. */
+let AUTH: Record<string, string>;
+
+beforeAll(async () => {
+  AUTH = await signInAsAdmin();
+});
 
 function get(path: string, headers: Record<string, string> = {}) {
   return exports.default.fetch(new Request(`http://api.hymnboard.sonrise.io${path}`, { headers }));
 }
 
-function putLines(lines: string[], headers: Record<string, string> = AUTH) {
+function putLines(lines: string[], headers?: Record<string, string>) {
   return exports.default.fetch(
     new Request("http://api.hymnboard.sonrise.io/api/lines", {
       method: "PUT",
-      headers: { ...headers, "Content-Type": "application/json" },
+      headers: { ...(headers ?? AUTH), "Content-Type": "application/json" },
       body: JSON.stringify({ lines }),
     }),
   );
@@ -244,12 +250,13 @@ describe("admin API", () => {
     expect((await get("/api/state", crossSite)).status).toBe(200);
   });
 
-  test("requires basic auth", async () => {
+  test("requires signing in", async () => {
     expect((await get("/api/state")).status).toBe(401);
     expect(
-      (await get("/api/state", { Authorization: `Basic ${btoa("admin:wrong")}` })).status,
+      (await get("/api/state", { Cookie: "__Secure-better-auth.session_token=forged" })).status,
     ).toBe(401);
     expect((await putLines(["1", "2", "3", "4", "5", "6"], {})).status).toBe(401);
+    expect((await get("/api/screens/1")).status).toBe(401);
   });
 
   test("rejects anything but six strings", async () => {

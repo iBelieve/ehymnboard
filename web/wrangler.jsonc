@@ -12,13 +12,19 @@
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    // Everything goes through the Worker first so basic auth covers the admin.
+    // Everything goes through the Worker first, so the API's routes always win.
     "run_worker_first": true,
   },
   "durable_objects": {
-    "bindings": [{ "name": "HYMN_BOARD", "class_name": "HymnBoard" }],
+    "bindings": [
+      { "name": "HYMN_BOARD", "class_name": "HymnBoard" },
+      { "name": "ACCOUNTS", "class_name": "Accounts" },
+    ],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HymnBoard"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["HymnBoard"] },
+    { "tag": "v2", "new_sqlite_classes": ["Accounts"] },
+  ],
   // Which deploy is running: the Durable Object closes boards' sockets from an
   // earlier one, whose ping times Cloudflare stops keeping (see hymn-board.ts)
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
@@ -39,13 +45,17 @@
   // URL with its own, empty Durable Object. Previews don't inherit bindings or
   // vars, so the binding is repeated here, and with no HEALTHCHECKS var they
   // never ping healthchecks.io. Observability is spelled out too, so previews
-  // keep traces and Issues whatever the dashboard's Previews base says. Their basic-auth secrets are set
-  // with `wrangler preview base-config secret put` (see README.md).
+  // keep traces and Issues whatever the dashboard's Previews base says. Their secrets
+  // (BETTER_AUTH_SECRET, SETUP_PASSWORD) are set with
+  // `wrangler preview base-config secret put` (see README.md).
   "previews": {
     // Lets the e2e tests' emulated board connect to a preview's /ws
     "vars": { "EXTRA_DEVICE_IDS": "0000000000000000" },
     "durable_objects": {
-      "bindings": [{ "name": "HYMN_BOARD", "class_name": "HymnBoard" }],
+      "bindings": [
+        { "name": "HYMN_BOARD", "class_name": "HymnBoard" },
+        { "name": "ACCOUNTS", "class_name": "Accounts" },
+      ],
     },
     "version_metadata": { "binding": "CF_VERSION_METADATA" },
     "observability": {

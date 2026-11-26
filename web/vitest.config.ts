@@ -17,8 +17,8 @@ export default defineConfig({
             wrangler: { configPath: "./wrangler.jsonc" },
             miniflare: {
               bindings: {
-                BASIC_AUTH_USERNAME: "admin",
-                BASIC_AUTH_PASSWORD: "secret",
+                BETTER_AUTH_SECRET: "a test secret of at least 32 characters",
+                SETUP_PASSWORD: "setup-secret",
                 EXTRA_DEVICE_IDS: "0000000000000000, 1111111111111111",
                 HEALTHCHECKS: "on",
               },
@@ -27,7 +27,16 @@ export default defineConfig({
         ],
         test: {
           name: "worker",
-          include: ["test/worker.test.ts", "test/migrations.test.ts", "test/websocket.test.ts"],
+          // Loading Better Auth into the Accounts object takes a few seconds
+          // the first time in each file (the bundled Worker doesn't).
+          testTimeout: 20_000,
+          hookTimeout: 20_000,
+          include: [
+            "test/worker.test.ts",
+            "test/migrations.test.ts",
+            "test/websocket.test.ts",
+            "test/accounts.test.ts",
+          ],
         },
       },
     ],

@@ -428,7 +428,8 @@ jobs:
         run: |
           docker load --input "$RUNNER_TEMP/server-image.tar"
           docker run -d --name server -p "$SERVER_PORT:$SERVER_PORT" -e PORT="$SERVER_PORT" \
-            -e BASIC_AUTH_USERNAME=e2e -e BASIC_AUTH_PASSWORD=e2e-password \
+            -e BETTER_AUTH_SECRET=ci-only-secret-of-at-least-32-characters \
+            -e SETUP_PASSWORD=e2e-setup \
             -e EXTRA_DEVICE_IDS=0000000000000000 \
             ehymnboard-server:ci
           for _ in $(seq 30); do
@@ -450,8 +451,9 @@ jobs:
       - name: Run end-to-end tests
         env:
           E2E_BASE_URL: http://localhost:${{ env.SERVER_PORT }}
-          E2E_USERNAME: e2e
+          E2E_EMAIL: e2e@example.com
           E2E_PASSWORD: e2e-password
+          E2E_SETUP_PASSWORD: e2e-setup
         run: pnpm test
 
       - name: Server logs

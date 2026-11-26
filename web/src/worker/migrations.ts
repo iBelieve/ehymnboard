@@ -1,6 +1,7 @@
-// Versioned schema migrations for the HymnBoard Durable Object's SQLite
-// storage. Each instance migrates itself the first time it starts after a
-// deploy, so a future instance per church needs nothing extra.
+// Versioned schema migrations for the Durable Objects' SQLite storage: the
+// HymnBoard's (MIGRATIONS) and the Accounts' (ACCOUNT_MIGRATIONS). Each
+// instance migrates itself the first time it starts after a deploy (see
+// migrateOnStart), so a future HymnBoard per church needs nothing extra.
 //
 // To change the schema, append a step; never edit or reorder a released one.
 // Step N takes the database from version N - 1 to version N. Keep steps
@@ -58,6 +59,111 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE devices ADD COLUMN shown_etags TEXT;
   `,
 ];
+
+// The Accounts object's tables are Better Auth's, with the admin and API key
+// plugins, as its own migration generator writes them for SQLite (names are
+// Better Auth's, so they're quoted camelCase). A Better Auth upgrade or a new
+// plugin that adds fields needs a step here; compare with
+// `getMigrations(...).compileMigrations()` from better-auth/db/migration.
+export const ACCOUNT_MIGRATIONS: readonly string[] = [
+  // 1: the first release, users signing in with an email and password.
+  `
+  CREATE TABLE "user" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "name" TEXT NOT NULL,
+    "email" TEXT NOT NULL UNIQUE,
+    "emailVerified" INTEGER NOT NULL,
+    "image" TEXT,
+    "createdAt" DATE NOT NULL,
+    "updatedAt" DATE NOT NULL,
+    "role" TEXT,
+    "banned" INTEGER,
+    "banReason" TEXT,
+    "banExpires" DATE
+  );
+  CREATE TABLE "session" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "expiresAt" DATE NOT NULL,
+    "token" TEXT NOT NULL UNIQUE,
+    "createdAt" DATE NOT NULL,
+    "updatedAt" DATE NOT NULL,
+    "ipAddress" TEXT,
+    "userAgent" TEXT,
+    "userId" TEXT NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE,
+    "impersonatedBy" TEXT
+  );
+  CREATE TABLE "account" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "accountId" TEXT NOT NULL,
+    "providerId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL REFERENCES "user" ("id") ON DELETE CASCADE,
+    "accessToken" TEXT,
+    "refreshToken" TEXT,
+    "idToken" TEXT,
+    "accessTokenExpiresAt" DATE,
+    "refreshTokenExpiresAt" DATE,
+    "scope" TEXT,
+    "password" TEXT,
+    "createdAt" DATE NOT NULL,
+    "updatedAt" DATE NOT NULL
+  );
+  CREATE TABLE "verification" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "identifier" TEXT NOT NULL,
+    "value" TEXT NOT NULL,
+    "expiresAt" DATE NOT NULL,
+    "createdAt" DATE NOT NULL,
+    "updatedAt" DATE NOT NULL
+  );
+  CREATE TABLE "apikey" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "configId" TEXT NOT NULL,
+    "name" TEXT,
+    "start" TEXT,
+    "referenceId" TEXT NOT NULL,
+    "prefix" TEXT,
+    "key" TEXT NOT NULL,
+    "refillInterval" INTEGER,
+    "refillAmount" INTEGER,
+    "lastRefillAt" DATE,
+    "enabled" INTEGER,
+    "rateLimitEnabled" INTEGER,
+    "rateLimitTimeWindow" INTEGER,
+    "rateLimitMax" INTEGER,
+    "requestCount" INTEGER,
+    "remaining" INTEGER,
+    "lastRequest" DATE,
+    "expiresAt" DATE,
+    "createdAt" DATE NOT NULL,
+    "updatedAt" DATE NOT NULL,
+    "permissions" TEXT,
+    "metadata" TEXT
+  );
+  CREATE INDEX "session_userId_idx" ON "session" ("userId");
+  CREATE INDEX "account_userId_idx" ON "account" ("userId");
+  CREATE INDEX "verification_identifier_idx" ON "verification" ("identifier");
+  CREATE INDEX "apikey_configId_idx" ON "apikey" ("configId");
+  CREATE INDEX "apikey_referenceId_idx" ON "apikey" ("referenceId");
+  CREATE INDEX "apikey_key_idx" ON "apikey" ("key");
+  `,
+];
+
+/**
+ * Migrates a Durable Object's storage before it handles its first request.
+ * Call it from the constructor.
+ */
+export function migrateOnStart(ctx: DurableObjectState, migrations: readonly string[]) {
+  void ctx.blockConcurrencyWhile(() => {
+    try {
+      migrate(ctx.storage, migrations);
+      return Promise.resolve();
+    } catch (error) {
+      // Otherwise only the reset of the object shows up, not the SQL error.
+      console.error("Schema migration failed:", error);
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+}
 
 /**
  * Brings the database up to the latest version, one transaction per step, so

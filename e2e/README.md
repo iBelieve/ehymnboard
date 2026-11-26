@@ -37,6 +37,12 @@ in order, Apply and Clear buttons, a line per board ("… (last seen …") and a
 SVG picture of the board with one `<image>` per screen. A new admin page
 that keeps those passes unchanged.
 
+Before the tests, `signIn.setup.ts` signs in on the page (Email, Password,
+Sign in), or, on a server with no accounts yet, creates the first one with
+the server's setup password (Setup password, Your name, Email, New password,
+Create account). Every test starts with that session, and publishes firmware
+with it too, so the account must be an admin, as the first one is.
+
 ## Run them
 
 Build the firmware (see [device/README.md](../device/README.md)) and start
@@ -47,7 +53,7 @@ included):
 cd e2e
 pnpm install
 pnpm exec playwright install chromium
-E2E_BASE_URL=http://localhost:8000 E2E_USERNAME=e2e E2E_PASSWORD=e2e-password pnpm test
+E2E_BASE_URL=http://localhost:8000 E2E_SETUP_PASSWORD=e2e-setup pnpm test
 ```
 
 To start the server for this, run its Docker image, as CI does (built from
@@ -55,7 +61,8 @@ the repository root), or `pnpm dev` in `web/` (both listen on port 8000):
 
 ```sh
 docker build -t hymnboard -f web/Dockerfile . && docker run --rm -p 8000:8000 \
-  -e BASIC_AUTH_USERNAME=e2e -e BASIC_AUTH_PASSWORD=e2e-password \
+  -e BETTER_AUTH_SECRET=local-only-secret-of-at-least-32-characters \
+  -e SETUP_PASSWORD=e2e-setup \
   -e EXTRA_DEVICE_IDS=0000000000000000 hymnboard
 ```
 
@@ -68,13 +75,14 @@ them at a server in use. Each test publishes the build under test as the server'
 before its board boots and again when it ends, so a release left on the
 server can't update a board by surprise.
 
-| Variable                       | Default                              |
-| ------------------------------ | ------------------------------------ |
-| `E2E_BASE_URL`                 | `http://localhost:8000` (plain HTTP) |
-| `E2E_USERNAME`, `E2E_PASSWORD` | none: the server's basic auth, if on |
-| `FIRMWARE_UF2`                 | `../device/build/ehymnboard.uf2`     |
-| `E2E_CHROMIUM_EXECUTABLE`      | Playwright's own Chromium            |
-| `EMULATOR_VERBOSE=1`           | prints the firmware's serial output  |
+| Variable                    | Default                              |
+| --------------------------- | ------------------------------------ |
+| `E2E_BASE_URL`              | `http://localhost:8000` (plain HTTP) |
+| `E2E_EMAIL`, `E2E_PASSWORD` | `e2e@example.com`, `e2e-password`    |
+| `E2E_SETUP_PASSWORD`        | none: the server's `SETUP_PASSWORD`  |
+| `FIRMWARE_UF2`              | `../device/build/ehymnboard.uf2`     |
+| `E2E_CHROMIUM_EXECUTABLE`   | Playwright's own Chromium            |
+| `EMULATOR_VERBOSE=1`        | prints the firmware's serial output  |
 
 `FIRMWARE_UF2` must sit in its build directory, which also holds the
 bootloader, `firmware_version.txt` and the encrypted OTA image. The OTA test
@@ -94,5 +102,6 @@ pnpm run lint           # oxlint, type-aware rules via tsrs
 Point `SERVER_DIR`, `SERVER_CONTEXT` and `SERVER_PORT` in `ci.yml` at
 it (the directory with its Dockerfile, the image's build context, usually that
 same directory, and the port its image listens on). The image must serve the device API and the admin page on that port,
-with basic auth from `BASIC_AUTH_USERNAME` and `BASIC_AUTH_PASSWORD`, and
-answer `GET /ok` once it's ready.
+with the same sign-in page (`signIn.setup.ts`), set up from
+`BETTER_AUTH_SECRET` and `SETUP_PASSWORD`, and answer `GET /ok` once it's
+ready.

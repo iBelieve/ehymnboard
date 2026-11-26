@@ -59,13 +59,46 @@ pnpm typecheck && pnpm lint   # tsc 7, oxlint (type-aware via tsrs); Prettier ru
 pnpm build        # dist/client (admin) and dist/hymnboard (Worker)
 ```
 
-Basic auth is off unless `BASIC_AUTH_USERNAME` and `BASIC_AUTH_PASSWORD` are
-set (for `pnpm dev`, put them in `.dev.vars`). `pnpm dev` turns
-`wrangler.jsonc`'s `HEALTHCHECKS=on` off (in `vite.config.ts`), so local
-requests never ping the boards' real checks. After changing
-`wrangler.jsonc`, run `pnpm exec wrangler types` to regenerate
-`worker-configuration.d.ts`, with `.dev.vars` moved aside: the command reads
-it too, and would declare its secrets as always set.
+`pnpm dev` turns `wrangler.jsonc`'s `HEALTHCHECKS=on` off (in
+`vite.config.ts`), so local requests never ping the boards' real checks, and
+gives itself the secrets below, with `dev` as the setup password: open the
+admin and create the first account. After changing `wrangler.jsonc`, run
+`pnpm exec wrangler types` to regenerate `worker-configuration.d.ts` (with any
+`.dev.vars` moved aside: the command reads it too, and would declare its
+secrets as always set).
+
+## Accounts
+
+The admin is for signed-in accounts only, each with an email and password,
+through [Better Auth](https://better-auth.com). Its tables live in their own
+Durable Object, `Accounts` (one instance, `accounts`, for every board), apart
+from the boards' `HymnBoard`: someone signs in before we know which boards
+they look after. Better Auth has no adapter for Durable Object storage, so
+`src/worker/durable-object-dialect.ts` gives its Kysely adapter one, and its
+tables are created by the same hand-written migrations as the boards'
+(`ACCOUNT_MIGRATIONS` in `src/worker/migrations.ts`). Better Auth itself is
+loaded only by that object, so the boards' requests never load it.
+
+- An account is an **admin**, who also manages accounts (on the admin's
+  Accounts page: add, remove, set a password) and uploads firmware, or a
+  **user**, who changes the lines. Nobody signs themselves up.
+- Until the first account exists, the admin page offers to create it, an
+  admin, to whoever knows the deploy's `SETUP_PASSWORD`.
+- Admins can make API keys on the Accounts page, for uploading firmware with
+  curl (`X-Api-Key`, see `device/README.md`). A key does nothing else.
+- Sign-ins are limited per address (Better Auth's rate limit, by
+  `CF-Connecting-IP`). Sessions last 30 days from the last visit.
+- No email is sent yet: an admin sets a forgotten password. Emailed codes,
+  passkeys and password-reset emails are Better Auth plugins away, since
+  every account already has its email.
+
+Two secrets, on every deploy (Worker secrets, previews' base config, or the
+Docker container's environment):
+
+| Secret               | What it's for                                                                                                    |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `BETTER_AUTH_SECRET` | Signs the session cookies; at least 32 random characters (`openssl rand -base64 32`). Without it nobody signs in |
+| `SETUP_PASSWORD`     | Creates the first account, while there's none; without it, nobody can                                            |
 
 ## Self-hosting (dokku)
 
@@ -85,7 +118,7 @@ dokku builder:set "$APP" selected dockerfile
 dokku builder-dockerfile:set "$APP" dockerfile-path web/Dockerfile
 dokku storage:ensure-directory "$APP"
 dokku storage:mount "$APP" "/var/lib/dokku/data/storage/$APP:/data"
-dokku config:set "$APP" BASIC_AUTH_USERNAME=... BASIC_AUTH_PASSWORD=...
+dokku config:set "$APP" BETTER_AUTH_SECRET="$(openssl rand -base64 32)" SETUP_PASSWORD=...
 git push "dokku@dev.sonrise.io:$APP" master
 ```
 
@@ -211,11 +244,11 @@ pnpm from the root `package.json`'s `packageManager` and Node from
 (`.wrangler/deploy/config.json` points it at `dist/hymnboard/wrangler.json`),
 so it deploys exactly what was built.
 
-Basic auth comes from the Worker's secrets, `BASIC_AUTH_USERNAME` and
-`BASIC_AUTH_PASSWORD` (Settings > Variables and Secrets, or
-`pnpm exec wrangler secret put BASIC_AUTH_PASSWORD`). Without them the admin
-is open to anyone, so keep them set, and set them before the first deploy of
-any new Worker.
+The Worker's secrets, `BETTER_AUTH_SECRET` and `SETUP_PASSWORD` (see
+"Accounts"), are set in Settings > Variables and Secrets, or with
+`pnpm exec wrangler secret put BETTER_AUTH_SECRET`. Set them before the first
+deploy of any new Worker. Once the first account exists, `SETUP_PASSWORD`
+does nothing, so it can be deleted.
 
 ### Previews
 
@@ -230,10 +263,11 @@ emulated board's ID, so the e2e tests can run against a preview. Workers Builds 
 command and variable for previews, with `pnpm exec wrangler preview` as the
 preview command.
 
-Preview URLs are public, so the basic-auth secrets are set in the Previews
-base config too (`pnpm exec wrangler preview base-config secret put
-BASIC_AUTH_PASSWORD`, and the same for the username); new previews start
-with them.
+Each preview has its own accounts, so it needs both secrets, set once in
+the Previews base config (`pnpm exec wrangler preview base-config secret put
+BETTER_AUTH_SECRET`, and the same for `SETUP_PASSWORD`); new previews start
+with them. Open a new preview and create its first account with the setup
+password.
 
 ### Boards on TLS
 
