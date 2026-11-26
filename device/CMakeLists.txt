@@ -94,6 +94,10 @@ set(EHB_SLOT_A_ORIGIN 0x1000A000)
 set(EHB_SLOT_B_ORIGIN 0x10104000)
 set(EHB_SLOT_LENGTH 0xF9F00)
 
+# CI passes -DWERROR=ON; warnings are treated as errors there, so fix any
+# warnings before pushing
+option(WERROR "Treat compiler warnings as errors" OFF)
+
 # --- The A/B bootloader -------------------------------------------------------
 
 # Flash's first sector: boot2 and the stub that starts the bootloader (or
@@ -113,6 +117,9 @@ add_executable(ehymnboard_bootloader
         src/boot_flash.cpp
 )
 target_compile_options(ehymnboard_bootloader PRIVATE -Os -Wall -Wextra)
+if (WERROR)
+    target_compile_options(ehymnboard_bootloader PRIVATE -Werror)
+endif()
 target_link_libraries(ehymnboard_bootloader
         pico_stdlib
         hardware_flash
@@ -197,10 +204,6 @@ add_custom_target(ehymnboard_firmware_version
     COMMENT "Generating firmware version"
 )
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/generated)
-
-# CI passes -DWERROR=ON; warnings are treated as errors there, so fix any
-# warnings before pushing
-option(WERROR "Treat compiler warnings as errors" OFF)
 
 # What every firmware build has: USB stdio, the warnings, the generated
 # headers, TLS and the libraries the shared sources use

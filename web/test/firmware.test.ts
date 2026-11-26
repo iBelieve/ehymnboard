@@ -38,10 +38,11 @@ describe("bundles", () => {
 });
 
 describe("a single image, from before the A/B bootloader", () => {
-  test("is slot A's alone", () => {
+  test("is only for boards on pico_fota_bootloader, which name no slot", () => {
     expect(uploadError(A)).toBeNull();
     expect(bytes(slotImage(A, undefined))).toEqual(A);
-    expect(bytes(slotImage(A, "a"))).toEqual(A);
+    // Firmware from before the A/B bootloader mustn't run on it, in either slot
+    expect(slotImage(A, "a")).toBeNull();
     expect(slotImage(A, "b")).toBeNull();
   });
 

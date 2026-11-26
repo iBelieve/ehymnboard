@@ -51,6 +51,10 @@ bool can_install_updates();
 // Writes flash only when something changes; safe to call again.
 void commit_running_firmware();
 
+// The rollback after_rollback() reports has been dealt with: clears it
+// (pico_fota_bootloader clears its own at the next install)
+void forget_rollback();
+
 // This firmware, on trial, is broken: on the next boot the bootloader goes
 // back to the other slot at once (pico_fota_bootloader does on any reboot)
 void abandon_update();

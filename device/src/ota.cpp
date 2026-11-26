@@ -233,7 +233,14 @@ err_t on_download_headers(httpc_state_t *connection, void *arg, struct pbuf *hdr
     const auto length = find_content_length(headers);
     if (!length || *length == 0 || *length % PAGE_SIZE != 0 || *length > slot_capacity())
     {
-        printf("OTA: invalid firmware image size %ld\n", length ? static_cast<long>(*length) : -1L);
+        if (length)
+        {
+            printf("OTA: invalid firmware image size %lu\n", static_cast<unsigned long>(*length));
+        }
+        else
+        {
+            printf("OTA: invalid firmware image size (no usable Content-Length)\n");
+        }
         return ERR_VAL; // aborts the request
     }
 
@@ -475,6 +482,9 @@ void ota_handle_boot()
         ota_boot_status = "rolled_back";
         ota_boot_version = attempted;
         save_ota_state("", attempted);
+        // Reported: so the next update's attempt isn't taken for this
+        // rollback if the power goes before its install is recorded
+        forget_rollback();
     }
     else if (booted_after_update)
     {
@@ -607,6 +617,13 @@ static bool ota_check_for_update()
     const auto size = download_image(version);
     if (size == 0)
     {
+        // A 404: the server has no image for this slot (a single image, for
+        // boards on pico_fota_bootloader), so it's no use asking again soon
+        if (download.complete && download.status_code == 404)
+        {
+            printf("OTA: the server has no image of %s for slot %s\n", version.c_str(), update_slot() == 0 ? "A" : "B");
+            return true;
+        }
         return false;
     }
 

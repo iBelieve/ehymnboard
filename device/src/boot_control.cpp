@@ -246,6 +246,17 @@ std::optional<Record> abandoned(const std::optional<Record> &current, uint8_t sl
     return record;
 }
 
+std::optional<Record> rollback_forgotten(const std::optional<Record> &current, uint8_t slot)
+{
+    if (!current || !after_rollback(current, slot))
+    {
+        return std::nullopt;
+    }
+    Record record = *current;
+    record.rolled_back = false;
+    return record;
+}
+
 bool on_trial(const std::optional<Record> &current, uint8_t slot)
 {
     return current && current->active == slot && current->state == State::TRIAL;

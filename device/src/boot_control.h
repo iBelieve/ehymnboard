@@ -167,6 +167,10 @@ std::optional<Record> committed(const std::optional<Record> &current, uint8_t sl
 // boots. Nothing if it isn't on trial.
 std::optional<Record> abandoned(const std::optional<Record> &current, uint8_t slot);
 
+// The firmware in `slot` has reported that the bootloader went back to it:
+// the flag cleared. Nothing if it isn't set.
+std::optional<Record> rollback_forgotten(const std::optional<Record> &current, uint8_t slot);
+
 // The running firmware's view of the record
 bool on_trial(const std::optional<Record> &current, uint8_t slot);
 bool after_rollback(const std::optional<Record> &current, uint8_t slot);

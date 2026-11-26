@@ -39,8 +39,8 @@ bootloader and the firmware (the bootloader's UF2 also clears the boot
 record, so the bootloader starts the firmware just loaded into slot A):
 
 ```sh
-picotool load build/ehymnboard_bootloader.uf2
-picotool load -x build/ehymnboard.uf2
+picotool load ehymnboard_bootloader.uf2
+picotool load -x ehymnboard.uf2
 ```
 
 ### OTA Updates
@@ -145,7 +145,7 @@ curl -u "$BASIC_AUTH_USERNAME:$BASIC_AUTH_PASSWORD" \
   https://hymnboard.sonrise.io/firmware
 ```
 
-Every board running a different version installs it, including boards with a newer build flashed over USB: the server pushes the new version to each connected board at once. The server sends each board the image for its other slot, and slot A's to a board on pico_fota_bootloader. A single image (`ehymnboard_fota_image_encrypted.bin`, slot A's) still uploads, for a build from before the A/B bootloader; boards on the A/B bootloader in slot A can't install it. A new firmware commits itself on the first `state` message it gets over its socket. Before committing it also checks that it can make an ordinary request (`/firmware/latest`): if that fails five times, half a minute apart, it gives up its trial and reboots to be rolled back. The devices page shows each board's firmware version and any rollback.
+Every board running a different version installs it, including boards with a newer build flashed over USB: the server pushes the new version to each connected board at once. The server sends each board the image for its other slot, and slot A's to a board on pico_fota_bootloader. A single image (`ehymnboard_fota_image_encrypted.bin`, slot A's) still uploads, for a build from before the A/B bootloader; only boards on pico_fota_bootloader get it, as boards on the A/B bootloader mustn't run such firmware. A new firmware commits itself on the first `state` message it gets over its socket. Before committing it also checks that it can make an ordinary request (`/firmware/latest`): if that fails five times, half a minute apart, it gives up its trial and reboots to be rolled back. The devices page shows each board's firmware version and any rollback.
 
 Notes:
 

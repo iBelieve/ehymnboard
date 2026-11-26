@@ -31,6 +31,8 @@ const build = new OtaBuild(FIRMWARE);
 const NEXT = build.nextVersion("ota2");
 /** Boots new firmware gets to commit (boot::TRIAL_BOOTS) */
 const TRIAL_BOOTS = 3;
+/** The boot record's two sectors (boot::RECORD_OFFSETS) */
+const RECORD_SECTORS = [0x8000, 0x9000];
 
 function requests(emu: Emulator, path: string) {
   return emu.net.requests.filter((r) => r.path === path);
@@ -148,11 +150,16 @@ test("rolls back an update whose socket never goes live, after its trial boots, 
   assert.equal(booted.query.ota_status, "rolled_back");
   assert.equal(booted.query.ota_version, NEXT);
 
-  // A newer upload is still installed.
+  // A newer upload is still installed, even if the power goes while its
+  // install is recorded: that attempt isn't taken for the old rollback.
   const third = build.nextVersion("ota3");
   offer(emu, third);
   emu.powerCycle();
-  emu.waitForSerial(`Firmware version: ${third}`, 180_000, emu.serial.length);
+  const cycled = emu.serial.length;
+  const cut = emu.board.cutPowerDuring(1, (op) => RECORD_SECTORS.includes(op.offset));
+  emu.waitFor("the cut during the install's record", cut, 180_000);
+  emu.waitForSerial(`Firmware version: ${third}`, 240_000, cycled);
+  assert.ok(!emu.serial.slice(cycled).includes(`update to ${third} failed`));
 });
 
 test("tries a rolled-back update again if the old firmware can't get online either", () => {

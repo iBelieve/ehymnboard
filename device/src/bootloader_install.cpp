@@ -65,9 +65,24 @@ static bool flash_matches(uint32_t offset, const void *data, size_t size)
     return memcmp(boot::flash_at(offset), data, size) == 0;
 }
 
+// The stub's vector table, after boot2's 256 bytes: its stack, and its reset
+// handler just behind the table. pico_fota_bootloader's points past a whole
+// vector table. Only this is compared, not the whole first sector, so a later
+// build whose boot2 (pico-sdk's) or stub code differs still sees a board on
+// the A/B bootloader as one, rather than as one on pico_fota_bootloader.
+static constexpr uint32_t STUB_VECTORS_OFFSET = 256;
+static constexpr size_t STUB_VECTORS_SIZE = 8;
+
+static bool stub_in_place()
+{
+    return stub_size() >= STUB_VECTORS_OFFSET + STUB_VECTORS_SIZE &&
+           flash_matches(boot::STUB_OFFSET + STUB_VECTORS_OFFSET, ehb_stub_image + STUB_VECTORS_OFFSET,
+                         STUB_VECTORS_SIZE);
+}
+
 BootloaderKind running_bootloader()
 {
-    if (!flash_matches(boot::STUB_OFFSET, ehb_stub_image, stub_size()))
+    if (!stub_in_place())
     {
         return BootloaderKind::OLD;
     }

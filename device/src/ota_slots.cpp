@@ -149,6 +149,20 @@ void commit_running_firmware()
     }
 }
 
+void forget_rollback()
+{
+    if (!can_install_updates())
+    {
+        return;
+    }
+    const auto records = boot::read_records();
+    const auto record = boot::rollback_forgotten(records.newest, running_slot());
+    if (record)
+    {
+        save_record(records, *record);
+    }
+}
+
 void abandon_update()
 {
     if (!can_install_updates())

@@ -325,10 +325,14 @@ describe("OTA firmware", () => {
     const image = await get(`/firmware/image?device_id=${LEFT}&target_version=v2`);
     expect(image.status).toBe(200);
     expect((await image.arrayBuffer()).byteLength).toBe(512);
-    // A single image is slot A's: nothing for a board in slot A
-    expect((await get(`/firmware/image?device_id=${LEFT}&target_version=v2&slot=b`)).status).toBe(
-      404,
-    );
+    // A single image is from before the A/B bootloader: nothing for a board
+    // on it, in either slot
+    for (const slot of ["a", "b"]) {
+      const response = await get(
+        `/firmware/image?device_id=${LEFT}&target_version=v2&slot=${slot}`,
+      );
+      expect(response.status).toBe(404);
+    }
   });
 
   test("serves each slot its image from a bundle", async () => {

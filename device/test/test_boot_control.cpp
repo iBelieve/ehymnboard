@@ -323,6 +323,22 @@ TEST(BootControl, OnlyTheSlotOnTrialCanAbandonIt)
     EXPECT_FALSE(boot::abandoned(std::nullopt, SLOT_A).has_value());
 }
 
+TEST(BootControl, AReportedRollbackIsForgotten)
+{
+    Record record = confirmed(SLOT_A);
+    record.rolled_back = true;
+    const auto forgotten = boot::rollback_forgotten(record, SLOT_A);
+    ASSERT_TRUE(forgotten.has_value());
+    EXPECT_FALSE(boot::after_rollback(forgotten, SLOT_A));
+    EXPECT_EQ(forgotten->active, SLOT_A);
+    EXPECT_EQ(forgotten->state, State::CONFIRMED);
+    EXPECT_EQ(forgotten->images, record.images);
+    // Nothing to forget
+    EXPECT_FALSE(boot::rollback_forgotten(confirmed(SLOT_A), SLOT_A).has_value());
+    EXPECT_FALSE(boot::rollback_forgotten(record, SLOT_B).has_value());
+    EXPECT_FALSE(boot::rollback_forgotten(std::nullopt, SLOT_A).has_value());
+}
+
 TEST(BootControl, AfterRollbackIsTheActiveSlotsFlag)
 {
     Record record = confirmed(SLOT_A);
