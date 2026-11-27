@@ -122,86 +122,91 @@ export function App({ viewer }: { viewer: Viewer }) {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-8 px-8 py-8 lg:h-dvh lg:grid-cols-2">
+    <div className="flex flex-col gap-8 px-8 py-8 lg:h-dvh">
       <Background />
-      <div className="z-10 flex flex-col">
-        <div className="flex flex-wrap items-start justify-between gap-4 max-lg:mb-8">
-          <h1 className="font-display text-5xl tracking-wide text-white">Hymn Board</h1>
-          <div className="flex items-center gap-1 text-sm text-white">
-            <span className="opacity-75">{viewer.name}</span>
-            <a className="btn btn-ghost btn-sm text-white" href="#accounts">
-              Accounts
-            </a>
-            <button
-              className="btn btn-ghost btn-sm text-white"
-              type="button"
-              onClick={() => void signOut()}
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
+      {/* Across the page, above both columns, so the menu sits level with
+          the title at the right, as a site's navigation does. */}
+      <header className="z-10 flex flex-wrap items-center justify-between gap-x-8 gap-y-4">
+        <h1 className="font-display text-5xl tracking-wide text-white">Hymn Board</h1>
+        <nav className="flex items-center gap-1 text-sm text-white">
+          <span className="mr-2 opacity-75">{viewer.name}</span>
+          <a className="btn btn-ghost btn-sm text-white" href="#accounts">
+            Accounts
+          </a>
+          <button
+            className="btn btn-ghost btn-sm text-white"
+            type="button"
+            onClick={() => void signOut()}
+          >
+            Sign out
+          </button>
+        </nav>
+      </header>
+      <div className="grid grid-cols-1 gap-8 lg:min-h-0 lg:flex-grow lg:grid-cols-2">
+        <div className="z-10 flex flex-col">
+          {state && <DeviceList devices={state.devices} firmware={state.firmware} />}
 
-        {state && <DeviceList devices={state.devices} firmware={state.firmware} />}
-
-        <div className="flex flex-grow flex-col items-center justify-center">
-          {/* Relative so the unsaved-changes note can sit under the card
+          <div className="flex flex-grow flex-col items-center justify-center">
+            {/* Relative so the unsaved-changes note can sit under the card
               without taking up space: the layout matches the old admin's. */}
-          <div className="relative">
-            <div className="overflow-hidden rounded-2xl border-8 border-transparent bg-white/40 shadow-lg">
-              <form
-                className="mx-auto flex max-w-sm flex-col gap-4 bg-white p-4"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (draft) void save(draft);
-                }}
-              >
-                {(draft ?? EMPTY_LINES).map((line, i) => (
-                  <input
-                    key={i}
-                    type="text"
-                    className="input input-xl input-bordered text-center"
-                    aria-label={`Line ${i + 1}`}
-                    value={line}
-                    disabled={!draft}
-                    maxLength={100}
-                    data-1p-ignore
-                    onChange={(e) => setDraft((prev) => prev && withLine(prev, i, e.target.value))}
-                  />
-                ))}
+            <div className="relative">
+              <div className="overflow-hidden rounded-2xl border-8 border-transparent bg-white/40 shadow-lg">
+                <form
+                  className="mx-auto flex max-w-sm flex-col gap-4 bg-white p-4"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (draft) void save(draft);
+                  }}
+                >
+                  {(draft ?? EMPTY_LINES).map((line, i) => (
+                    <input
+                      key={i}
+                      type="text"
+                      className="input input-xl input-bordered text-center"
+                      aria-label={`Line ${i + 1}`}
+                      value={line}
+                      disabled={!draft}
+                      maxLength={100}
+                      data-1p-ignore
+                      onChange={(e) =>
+                        setDraft((prev) => prev && withLine(prev, i, e.target.value))
+                      }
+                    />
+                  ))}
 
-                {(error ?? loadError) && (
-                  <div className="text-error text-sm">{error ?? loadError}</div>
-                )}
+                  {(error ?? loadError) && (
+                    <div className="text-error text-sm">{error ?? loadError}</div>
+                  )}
 
-                <div className="mt-4 flex gap-4">
-                  <button
-                    className="btn btn-primary btn-lg flex-grow"
-                    type="submit"
-                    disabled={!draft || saving}
-                  >
-                    Apply
-                  </button>
-                  <button
-                    className="btn btn-soft btn-error btn-lg flex-grow"
-                    type="button"
-                    disabled={!draft || saving}
-                    onClick={() => void save([...EMPTY_LINES])}
-                  >
-                    Clear
-                  </button>
-                </div>
-              </form>
-            </div>
-            {dirty && (
-              <div className="absolute inset-x-0 top-full mt-2 text-center text-sm text-white opacity-75">
-                Previewing unsaved changes
+                  <div className="mt-4 flex gap-4">
+                    <button
+                      className="btn btn-primary btn-lg flex-grow"
+                      type="submit"
+                      disabled={!draft || saving}
+                    >
+                      Apply
+                    </button>
+                    <button
+                      className="btn btn-soft btn-error btn-lg flex-grow"
+                      type="button"
+                      disabled={!draft || saving}
+                      onClick={() => void save([...EMPTY_LINES])}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </form>
               </div>
-            )}
+              {dirty && (
+                <div className="absolute inset-x-0 top-full mt-2 text-center text-sm text-white opacity-75">
+                  Previewing unsaved changes
+                </div>
+              )}
+            </div>
           </div>
         </div>
+        <BoardPreview screens={preview} />
       </div>
-      <BoardPreview screens={preview} />
     </div>
   );
 }
