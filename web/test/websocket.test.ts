@@ -17,7 +17,7 @@ const RIGHT = "E661A4D41787452B";
 const LEFT_PING = "https://hc-ping.com/a717c5f0-8a83-45f9-92a7-c79a21a437b4";
 const RIGHT_PING = "https://hc-ping.com/6c7ef2cb-71b8-492e-9e11-4ddfacf29d0c";
 const AUTH = { Authorization: `Basic ${btoa("admin:secret")}` };
-const BASE = "http://api.hymnboard.sonrise.io";
+const BASE = "https://hymnboard.sonrise.io";
 const STATE = /^state 1 ([0-9a-f]{40}) ([0-9a-f]{40}) ([0-9a-f]{40}) (\S+)$/;
 
 /** A board's end of its WebSocket, collecting what the server sends. */

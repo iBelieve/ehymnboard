@@ -1,14 +1,11 @@
 # eHymnBoard web app and backend (Workers)
 
-The hymn board server (it replaced the Flask app that lived in `server/`,
-last at commit 02ece7f): a Cloudflare Worker written in TypeScript with
+The hymn board server: a Cloudflare Worker written in TypeScript with
 [Hono](https://hono.dev), a React admin built with Vite, and a single
 `HymnBoard` Durable Object (SQLite-backed) that holds the lines, the rendered
 screens, device status and the OTA firmware image. Production runs on
 Cloudflare as the Worker `hymnboard`, at `hymnboard.sonrise.io` (see
-"Cloudflare (production)"). Until 2026-11-23 production ran on a dokku app,
-a Docker image of the same build on workerd; that setup has been dropped, and
-nothing is self-hosted now.
+"Cloudflare (production)").
 
 ## Layout
 
@@ -37,7 +34,7 @@ attachment. Applying lines or uploading firmware sends every board the new
 otherwise), plus any in `EXTRA_DEVICE_IDS` (comma separated, for the e2e
 tests' emulated board; leave it unset in production). While any board is
 connected, an alarm every 10 minutes pings each live board's
-healthchecks.io check (the boards no longer call `/device_healthy`) and
+healthchecks.io check (so the boards needn't call `/device_healthy`) and
 closes sockets that stopped pinging. After a deploy, the boards' sockets from
 before it are closed (code 4002) by whichever comes first: the admin's next
 look at the boards, a board connecting or sending a message, or the alarm.
@@ -126,14 +123,9 @@ with them.
 
 ### Boards on TLS
 
-Firmware with TLS (see `device/README.md`) talks only to
-`https://hymnboard.sonrise.io` and `wss://hymnboard.sonrise.io/ws` on port
-443, and checks Cloudflare's certificate. Firmware from before it talked
-plain HTTP to `api.hymnboard.sonrise.io` on port 80, a name with no valid
-certificate (Universal SSL covers `*.sonrise.io`, one level deep). Every
-board runs the TLS firmware, so nothing uses `api.` any more. A board on
-older firmware would need that name pointed at the Worker, with **Always Use
-HTTPS** and HSTS off for it.
+The boards talk only to `https://hymnboard.sonrise.io` and
+`wss://hymnboard.sonrise.io/ws` on port 443, and check the server's
+certificate (see `device/README.md`).
 
 `.github/workflows/check-tls-roots.yml` checks daily that Cloudflare's
 certificate for `hymnboard.sonrise.io` (and the Worker's `workers.dev` name)
