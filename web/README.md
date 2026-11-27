@@ -26,7 +26,7 @@ Boards also keep a WebSocket open at `GET /ws` (the messages are in
 [device/README.md](../device/README.md#talking-to-the-server)), so the
 server pushes each change instead of the boards polling. The `HymnBoard`
 Durable Object accepts the sockets with the Hibernation API, tagged by board,
-so on Cloudflare it can be evicted between changes while the sockets stay
+so it can be evicted between changes while the sockets stay
 open: the runtime answers the boards' `ping` with `pong` itself
 (`setWebSocketAutoResponse`), and each socket's board ID is in its
 attachment. Applying lines or uploading firmware sends every board the new
@@ -37,9 +37,9 @@ connected, an alarm every 10 minutes pings each live board's
 healthchecks.io check (so the boards needn't call `/device_healthy`) and
 closes sockets that stopped pinging. After a deploy, the boards' sockets from
 before it are closed (code 4002) by whichever comes first: the admin's next
-look at the boards, a board connecting or sending a message, or the alarm.
-They reconnect: on Cloudflare those sockets stay open, but their ping times
-stop updating. A socket opening and closing is logged
+look at the boards, a board connecting or sending a message, or the alarm,
+and the boards reconnect. Those sockets stay open across a deploy, but their
+ping times stop updating. A socket opening and closing is logged
 to the board's check too (pings need `HEALTHCHECKS=on`, which the production
 Worker and the Worker tests (with `fetch` mocked) set, and previews,
 `pnpm dev` and the e2e tests' server don't), and the admin shows each board as
@@ -141,7 +141,7 @@ still chains to a root the boards trust.
 - `hymnboard.mluther.org`, the address the church uses for the admin, is a
   custom domain of the Worker too.
 - The zone's **WebSockets** setting must stay on for the boards' sockets.
-- On Cloudflare the boards' sockets hibernate, so they only wake the Durable
+- The boards' sockets hibernate, so they only wake the Durable
   Object for a `shown` message or a socket opening or closing. Otherwise it
   runs for HTTP requests (the admin's, and the boards' at boot, after a
   change and for the hourly firmware check) and the 10 minute alarm.

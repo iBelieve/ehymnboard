@@ -83,7 +83,7 @@ The messages are short text (`src/board_messages.h`):
 | From   | Message                                     | Meaning                                                                                                  |
 | ------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | server | `state 1 <etag1> <etag2> <etag3> <version>` | What each screen should show and the firmware to run (`-` for none). Sent on connect and on every change |
-| board  | `ping`                                      | Every 30 s. The server answers `pong` (on Cloudflare, without waking the Durable Object)                 |
+| board  | `ping`                                      | Every 30 s. The server answers `pong` without waking the Durable Object                                  |
 | board  | `shown <etag1> <etag2> <etag3>`             | What the panels show now (`-` for a screen never drawn)                                                  |
 
 The upgrade request carries the same query string as every other request
