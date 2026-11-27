@@ -123,8 +123,10 @@ All checks below must pass; run them locally before committing.
   with `pnpm exec wrangler types`
 - Don't change the device endpoints' paths, query parameters or response
   bytes, or the `/ws` messages (`state`, `ping`/`pong`, `shown`, close
-  codes): the firmware hard-codes them. The rasterizer is compared against
-  the old Flask server's output in `test/render.test.ts`
+  codes): the firmware hard-codes them. The rasterizer is checked bit for bit
+  against reference screens in `test/fixtures/render/` (`test/render.test.ts`);
+  regenerate them with `UPDATE_RENDER_FIXTURES=1` only after a deliberate
+  rendering change, and look at them first
 - Docker: the image builds from the repository root, for the workspace's
   lockfile: `docker build -f web/Dockerfile .` (`.dockerignore` at the root
   sends only the root files and `web/`). CI builds it, and dokku builds it the

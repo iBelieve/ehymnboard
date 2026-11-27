@@ -18,7 +18,7 @@ production ran until 2026-11-23.
 | `src/client/` | The React admin: line editor, live board preview, device status                                              |
 | `src/shared/` | Code both sides run: screen geometry, API types, and the 1-bit text rasterizer (opentype.js + scanline fill) |
 | `selfhost/`   | workerd config generator and a tiny static-assets Worker that stands in for Workers Static Assets            |
-| `test/`       | Rasterizer tests against Flask's output (`fixtures/flask/`) and endpoint tests in the Workers runtime        |
+| `test/`       | Rasterizer tests against reference screens (`fixtures/render/`) and endpoint tests in the Workers runtime    |
 
 The device protocol keeps the Flask server's endpoints byte for byte:
 `GET /images/{1,2,3}` returns the raw 81,600-byte buffer with a bare SHA-1

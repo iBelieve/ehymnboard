@@ -1,81 +1,102 @@
-import { readFileSync } from "node:fs";
-import { gunzipSync } from "node:zlib";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { getFont } from "../src/shared/font";
 import { fitFontSize, renderScreen } from "../src/shared/render";
 import { SCREEN_BYTES, SCREEN_HEIGHT, SCREEN_WIDTH } from "../src/shared/screen";
 
-// Rendered by the old Flask server (server/app.py at commit 02ece7f, Pillow)
-// for the same lines. Regenerate with test/fixtures/flask/generate.py.
-const fixtures = new URL("./fixtures/flask/", import.meta.url);
-type Case = { lines: [string, string]; sizes: [number | null, number | null] };
-// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- our own fixture
-const cases = JSON.parse(readFileSync(new URL("cases.json", fixtures), "utf8")) as Case[];
+// Reference screens, drawn by this rasterizer and checked bit for bit. They
+// started out matching the old Flask server (Pillow) to within a pixel of
+// placement, which the boards showed for years. After a deliberate change to
+// the rasterizer, look at the new screens, then rewrite them with
+//
+//     UPDATE_RENDER_FIXTURES=1 pnpm vitest run test/render.test.ts
+//
+// Each is a binary PBM (P4) file: a short header, then the screen buffer
+// exactly as the board gets it. PBM draws a set bit black, so the text shows
+// black on white in an image viewer.
+const fixtures = new URL("./fixtures/render/", import.meta.url);
+const update = process.env["UPDATE_RENDER_FIXTURES"] === "1";
+const PBM_HEADER = `P4\n${SCREEN_WIDTH} ${SCREEN_HEIGHT}\n`;
 
-function flaskBuffer(i: number): Uint8Array {
-  return new Uint8Array(gunzipSync(readFileSync(new URL(`case${i}.bin.gz`, fixtures))));
+type Case = { name: string; lines: [string, string]; sizes: [number | null, number | null] };
+
+const cases: Case[] = [
+  // The cases the Flask comparison covered
+  { name: "hymn-number", lines: ["657", "LSB 657"], sizes: [275, 275] },
+  { name: "top-only", lines: ["123", ""], sizes: [275, null] },
+  { name: "bottom-only", lines: ["", "PSALM 23"], sizes: [null, 275] },
+  { name: "verses", lines: ["1-4, 7", "LSB 708"], sizes: [275, 275] },
+  { name: "wide-line", lines: ["A", "WWWWWWWWWWWWWWWWWWWW"], sizes: [275, 76] },
+  { name: "words", lines: ["Introit", "Gradual"], sizes: [275, 275] },
+  { name: "narrow-letters", lines: ["H", "Kyrie"], sizes: [275, 275] },
+  { name: "reading", lines: ["2:18", "1 Cor 13:4-7"], sizes: [275, 216] },
+  // Long text, shrunk to fit
+  {
+    name: "long-text",
+    lines: ["Lutheran Service Book", "The Church's One Foundation"],
+    sizes: [114, 90],
+  },
+  // The widest line that still fits at full size (856 of 860 px), and one
+  // just too wide for it
+  { name: "widest-at-full-size", lines: ["AGNUS DEI", "LSB 99999"], sizes: [275, 262] },
+  { name: "punctuation", lines: ["—", "?!"], sizes: [275, 275] },
+  { name: "accents", lines: ["Té Deum", "ÉÇÜ"], sizes: [275, 275] },
+  // ✝ and ☩ aren't in Bebas Neue, so they're drawn as its missing-glyph shape
+  { name: "missing-glyphs", lines: ["€ ✝ ☩", ""], sizes: [275, null] },
+];
+
+function fixtureUrl(name: string) {
+  return new URL(`${name}.pbm`, fixtures);
 }
 
-function isSet(buffer: Uint8Array, x: number, y: number) {
-  return (buffer[y * (SCREEN_WIDTH / 8) + (x >> 3)]! & (0x80 >> (x & 7))) !== 0;
+function readFixture(name: string): Uint8Array {
+  const file = readFileSync(fixtureUrl(name));
+  const header = new TextDecoder().decode(file.subarray(0, PBM_HEADER.length));
+  expect(header, `${name}.pbm isn't a ${SCREEN_WIDTH}x${SCREEN_HEIGHT} PBM`).toBe(PBM_HEADER);
+  return new Uint8Array(file.subarray(PBM_HEADER.length));
 }
 
-/** Bounding box of the set pixels in rows [fromY, toY). */
-function bbox(buffer: Uint8Array, fromY: number, toY: number) {
-  let [minX, minY, maxX, maxY] = [Infinity, Infinity, -1, -1];
-  for (let y = fromY; y < toY; y++) {
-    for (let x = 0; x < SCREEN_WIDTH; x++) {
-      if (isSet(buffer, x, y)) {
-        minX = Math.min(minX, x);
-        maxX = Math.max(maxX, x);
-        minY = Math.min(minY, y);
-        maxY = Math.max(maxY, y);
-      }
-    }
-  }
-  return [minX, minY, maxX, maxY];
+function writeFixture(name: string, buffer: Uint8Array) {
+  mkdirSync(fixtures, { recursive: true });
+  writeFileSync(fixtureUrl(name), Buffer.concat([Buffer.from(PBM_HEADER), buffer]));
 }
 
-function popcount(buffer: Uint8Array) {
+/** How many pixels differ between two screen buffers. */
+function differingPixels(a: Uint8Array, b: Uint8Array) {
   let count = 0;
-  for (let byte of buffer) {
-    for (; byte; byte >>= 1) {
+  for (let i = 0; i < a.length; i++) {
+    for (let byte = a[i]! ^ b[i]!; byte; byte >>= 1) {
       count += byte & 1;
     }
   }
   return count;
 }
 
-describe("matches the Flask server's rendering", () => {
+describe("matches the reference screens", () => {
   const font = getFont();
 
-  test.each(cases.map((c, i) => [i, c] as const))("case %i %j", (i, { lines, sizes }) => {
-    const expected = flaskBuffer(i);
+  test.each(cases)("$name: $lines", ({ name, lines, sizes }) => {
     const actual = renderScreen(font, lines[0], lines[1]);
-
     expect(actual.length).toBe(SCREEN_BYTES);
 
-    // Same font size for each line.
     expect(lines.map((line) => (line ? fitFontSize(font, line) : null))).toEqual(sizes);
+    // Every case has text, so a blank screen is a broken rasterizer
+    expect(actual.some((byte) => byte !== 0)).toBe(true);
 
-    // Same placement: each line's bounding box within a pixel.
-    for (const [from, to] of [
-      [0, SCREEN_HEIGHT / 2],
-      [SCREEN_HEIGHT / 2, SCREEN_HEIGHT],
-    ] as const) {
-      const a = bbox(actual, from, to);
-      const e = bbox(expected, from, to);
-      if (e[2] === -1) {
-        expect(a).toEqual(e); // an empty line stays empty
-        continue;
-      }
-      a.forEach((value, k) => expect(Math.abs(value - e[k]!)).toBeLessThanOrEqual(1));
+    if (update) {
+      writeFixture(name, actual);
+      return;
     }
-
-    // Same shapes: Pillow uses FreeType's hinted rasterizer, so edges differ
-    // by a pixel here and there, but nothing more.
-    const diff = actual.map((byte, k) => byte ^ expected[k]!);
-    expect(popcount(diff)).toBeLessThan(popcount(expected) * 0.08);
+    expect(
+      existsSync(fixtureUrl(name)),
+      `no ${name}.pbm: write it with UPDATE_RENDER_FIXTURES=1`,
+    ).toBe(true);
+    const expected = readFixture(name);
+    expect(expected.length).toBe(SCREEN_BYTES);
+    expect(
+      differingPixels(actual, expected),
+      `${name} differs from ${name}.pbm (pixels that differ)`,
+    ).toBe(0);
   });
 });
 
@@ -85,7 +106,7 @@ test("blank lines render a blank screen", () => {
 
 test("line breaks and control characters render as spaces, like Flask's clean_line", () => {
   const font = getFont();
-  expect(renderScreen(font, "LSB\n657", "Kyrie \tEleison")).toEqual(
+  expect(renderScreen(font, "LSB\n657", "Kyrie \tEleison")).toEqual(
     renderScreen(font, "LSB 657", "Kyrie  Eleison"),
   );
 });
