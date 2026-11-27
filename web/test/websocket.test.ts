@@ -516,6 +516,8 @@ describe("the nightly redraw", () => {
 
   test("a redraw's download of the image the board has is sent again, not an update", async () => {
     const etag = (await exports.default.fetch(`${BASE}/images/2`)).headers.get("Etag")!;
+    // Storage outlives a test, so an earlier one may have updated the board
+    const updatedAt = device(await state())?.last_updated_at ?? null;
     const logged = spyOnLog();
     // More times than flag a board that doesn't keep its ETag
     for (let i = 0; i < 4; i++) {
@@ -528,7 +530,10 @@ describe("the nightly redraw", () => {
     }
     // Without redraw=1, it's current
     expect((await exports.default.fetch(`${BASE}/images/2?etag=${etag}`)).status).toBe(304);
-    expect(device(await state())).toMatchObject({ last_updated_at: null, etag_stuck_at: null });
+    expect(device(await state())).toMatchObject({
+      last_updated_at: updatedAt,
+      etag_stuck_at: null,
+    });
     expect(logged()).toContainEqual(`Device Left Hymn Board (${LEFT}) redrawing image 2 (${etag})`);
     await settle();
     expect(pings.filter((p) => p.url.endsWith("/log") || p.url.endsWith("/failure"))).toEqual([]);

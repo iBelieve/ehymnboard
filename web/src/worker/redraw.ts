@@ -22,32 +22,29 @@ export const REDRAW_SPACING_MS = 12 * 60 * 60_000;
 
 /**
  * The hour (0-23) at `now` in `timeZone`, an IANA time zone such as
- * "America/Chicago". An unknown or missing time zone counts as UTC.
+ * "America/Chicago", or undefined for a missing or unknown time zone.
  */
-export function localHour(now: number, timeZone: string | undefined): number {
+export function localHour(now: number, timeZone: string | undefined): number | undefined {
+  if (timeZone === undefined) {
+    // Intl would take the runtime's own
+    return undefined;
+  }
   let format: Intl.DateTimeFormat;
   try {
-    // Without a time zone, Intl takes the runtime's own, which isn't always UTC
-    format = new Intl.DateTimeFormat("en-US", {
-      timeZone: timeZone ?? "UTC",
-      hour: "numeric",
-      hourCycle: "h23",
-    });
+    format = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", hourCycle: "h23" });
   } catch {
     // A RangeError for a time zone this runtime doesn't know
-    format = new Intl.DateTimeFormat("en-US", {
-      timeZone: "UTC",
-      hour: "numeric",
-      hourCycle: "h23",
-    });
+    return undefined;
   }
-  const hour = format.formatToParts(now).find((part) => part.type === "hour")?.value;
-  return Number(hour);
+  const hour = Number(format.formatToParts(now).find((part) => part.type === "hour")?.value);
+  return Number.isInteger(hour) ? hour : undefined;
 }
 
 /**
  * Whether a board in `timeZone` is due its nightly redraw at `now`, given
- * when it was last asked (ms since the epoch, if ever).
+ * when it was last asked (ms since the epoch, if ever). Never where the time
+ * zone isn't known: 3 AM UTC is an American evening, when a church may be
+ * full, so a board is better left without its redraw.
  */
 export function redrawDue(
   now: number,
@@ -55,7 +52,7 @@ export function redrawDue(
   lastRedrawAt: number | undefined,
 ): boolean {
   const hour = localHour(now, timeZone);
-  if (hour < REDRAW_HOUR || hour >= REDRAW_HOUR + REDRAW_WINDOW_HOURS) {
+  if (hour === undefined || hour < REDRAW_HOUR || hour >= REDRAW_HOUR + REDRAW_WINDOW_HOURS) {
     return false;
   }
   return lastRedrawAt === undefined || now - lastRedrawAt >= REDRAW_SPACING_MS;

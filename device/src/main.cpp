@@ -34,6 +34,7 @@
 #include "waveshare.h"
 #include "wifi.h"
 #include "ws_connection.h"
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <stdio.h>
@@ -43,6 +44,9 @@
 static constexpr uint64_t FETCH_RETRY_MS = 15'000;
 // How long downloads may keep failing before the board reboots
 static constexpr uint64_t DOWNLOADS_FAILING_REBOOT_MS = 180'000;
+// How long a redraw's downloads may keep failing before the board gives up on
+// it until the next night. It doesn't reboot: its panels show the right images
+static constexpr uint64_t REDRAW_GIVE_UP_MS = 180'000;
 // How often the main loop runs
 static constexpr uint32_t LOOP_MS = 100;
 
@@ -62,7 +66,7 @@ static FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std:
 
     if (ret == FetchImageResult::NEW_IMAGE)
     {
-        printf("New image for screen %d\n", screen_id);
+        printf(redraw ? "Redrawing screen %d\n" : "New image for screen %d\n", screen_id);
         screen.init();
         screen.display(image_buffer);
         screen.shutdown();
@@ -93,6 +97,8 @@ struct Screens
     // The screens to download and draw again though they show what the server
     // wants: it asked for a redraw ("redraw"), and a full refresh clears ghosting
     std::array<bool, SCREEN_COUNT> redraw{};
+    // When the server asked for the redraw still under way, if one is
+    std::optional<uint64_t> redraw_since_ms;
     // When to retry after a failed download
     uint64_t retry_at_ms = 0;
     // Since when downloads have kept failing, if they have
@@ -132,6 +138,48 @@ static bool any_needs_drawing(const Screens &screens)
         }
     }
     return false;
+}
+
+// After a round of downloads: when to try the failed ones again, and whether
+// downloads keep failing. Only a screen that still wants a new image counts
+// as failing (a state message serviced meanwhile may have made it unwanted,
+// whatever the other screens want); a redraw that keeps failing is given up
+// instead, as the panels already show the right images.
+static void note_failures(Screens &screens, const std::array<bool, SCREEN_COUNT> &failed)
+{
+    const auto now = now_ms();
+    bool still_failing = false;
+    bool any_failed = false;
+    for (std::size_t i = 0; i < SCREEN_COUNT; i++)
+    {
+        still_failing = still_failing || (failed.at(i) && screens.wanted.at(i) != screens.shown.at(i));
+        any_failed = any_failed || (failed.at(i) && needs_drawing(screens, i));
+    }
+    if (any_failed)
+    {
+        screens.retry_at_ms = now + FETCH_RETRY_MS;
+    }
+    if (!still_failing)
+    {
+        screens.failing_since_ms.reset();
+    }
+    else if (!screens.failing_since_ms)
+    {
+        screens.failing_since_ms = now;
+    }
+
+    const auto redrawing = [&screens] {
+        return std::find(screens.redraw.begin(), screens.redraw.end(), true) != screens.redraw.end();
+    };
+    if (redrawing() && screens.redraw_since_ms && now - *screens.redraw_since_ms >= REDRAW_GIVE_UP_MS)
+    {
+        printf("Redraw kept failing for >3 minutes, giving up until the server asks again\n");
+        screens.redraw.fill(false);
+    }
+    if (!redrawing())
+    {
+        screens.redraw_since_ms.reset();
+    }
 }
 
 // Downloads and draws every screen that doesn't show what the server wants,
@@ -180,26 +228,7 @@ static bool update_screens(Board &board)
     // How close TLS came to running out of memory, downloading beside the socket
     tls_log_memory();
 
-    // A failed download only counts while its screen still wants a new image:
-    // a state message serviced meanwhile may have made it unwanted, whatever
-    // the other screens want
-    bool still_failing = false;
-    for (std::size_t i = 0; i < SCREEN_COUNT; i++)
-    {
-        still_failing = still_failing || (failed.at(i) && needs_drawing(screens, i));
-    }
-    if (still_failing)
-    {
-        screens.retry_at_ms = now_ms() + FETCH_RETRY_MS;
-        if (!screens.failing_since_ms)
-        {
-            screens.failing_since_ms = now_ms();
-        }
-    }
-    else
-    {
-        screens.failing_since_ms.reset();
-    }
+    note_failures(screens, failed);
 
     if (any_updated)
     {
@@ -269,14 +298,11 @@ static void service(Board &board)
         board.offered_version = events.state->firmware_version;
 
         // Let the server know what the panels show, if they're current. Then
-        // nothing needs downloading (unless for a redraw), so no download is
-        // failing either
+        // no new image needs downloading, so no download is failing either (a
+        // redraw's failures don't count)
         if (screens.wanted == screens.shown)
         {
-            if (!any_needs_drawing(screens))
-            {
-                screens.failing_since_ms.reset();
-            }
+            screens.failing_since_ms.reset();
             board.link.client().send_text(format_shown_message(screens.shown));
         }
     }
@@ -284,6 +310,7 @@ static void service(Board &board)
     {
         printf("Server asked for every screen to be redrawn\n");
         screens.redraw.fill(true);
+        screens.redraw_since_ms = now;
         screens.retry_at_ms = now;
     }
     if (events.pong)

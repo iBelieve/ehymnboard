@@ -332,7 +332,8 @@ test("redraws every screen with a full update when the server asks, without savi
   // And it's done: no more downloads
   emu.run(60_000);
   assert.equal(emu.net.requests.length, requests + 3);
-  assert.ok(emu.serial.indexOf("Refreshing screen", asked) >= 0);
+  // Each of the three downloads was a redraw
+  assert.equal(emu.serial.slice(asked).match(/Refreshing screen \d \(redraw\)/g)?.length, 3);
 });
 
 test("a redraw whose download fails is tried again", () => {
@@ -349,11 +350,34 @@ test("a redraw whose download fails is tried again", () => {
   socket.sendText("redraw");
   const failed = emu.waitForSerial("Refreshing screen 2 failed", 60_000);
   // Only screen 2 again, after the retry delay
-  emu.waitForSerial("New image for screen 2", 30_000, failed);
+  emu.waitForSerial("Redrawing screen 2", 30_000, failed);
   emu.waitFor("screen 2's redraw", () => emu.displays.length === 6, 10_000);
   assert.deepEqual(
     emu.displays.slice(3).map((d) => d.screen),
     [1, 3, 2],
   );
   assert.equal(emu.reboots, 0);
+});
+
+test("a redraw whose downloads keep failing is given up, without a reboot", () => {
+  // The panels already show the right images, so failing to redraw them is no
+  // reason to reboot (unlike failing to download a new image)
+  const { emu, at } = bootLive();
+  const [socket] = emu.server.sockets;
+  emu.server.override = (req) => (req.path === "/images/2" ? { status: 500 } : undefined);
+  socket.sendText("redraw");
+  emu.waitForSerial(
+    "Redraw kept failing for >3 minutes, giving up until the server asks again",
+    240_000,
+    at,
+  );
+  const requests = emu.net.requests.length;
+  emu.run(120_000);
+  assert.equal(emu.net.requests.length, requests, "no more downloads");
+  assert.equal(emu.reboots, 0);
+  assert.ok(!emu.serial.includes("Image downloads failing", at));
+  assert.deepEqual(
+    emu.displays.slice(3).map((d) => d.screen),
+    [1, 3],
+  );
 });

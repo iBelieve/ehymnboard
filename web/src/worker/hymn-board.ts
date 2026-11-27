@@ -514,9 +514,8 @@ export class HymnBoard extends DurableObject<Env> {
       return;
     }
     this.ctx.storage.kv.put(key, now);
-    const where = timeZone ?? "UTC, as its time zone isn't known";
     console.log(
-      `Asked ${getDeviceName(deviceId)} (${deviceId}) to redraw its panels (after ${REDRAW_HOUR} AM ${where})`,
+      `Asked ${getDeviceName(deviceId)} (${deviceId}) to redraw its panels (after ${REDRAW_HOUR} AM ${timeZone ?? "?"})`,
     );
   }
 

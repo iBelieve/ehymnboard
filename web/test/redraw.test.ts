@@ -27,9 +27,9 @@ describe("localHour", () => {
     expect(localHour(Date.UTC(2026, 6, 5, 9, 30), "America/Chicago")).toBe(4);
   });
 
-  test("takes an unknown or missing time zone as UTC", () => {
-    expect(localHour(SUNDAY, "Not/AZone")).toBe(9);
-    expect(localHour(SUNDAY, undefined)).toBe(9);
+  test("is undefined for an unknown or missing time zone", () => {
+    expect(localHour(SUNDAY, "Not/AZone")).toBeUndefined();
+    expect(localHour(SUNDAY, undefined)).toBeUndefined();
   });
 });
 
@@ -42,6 +42,14 @@ describe("redrawDue", () => {
     expect(redrawDue(SUNDAY - HOUR, "America/Chicago", undefined)).toBe(false);
     expect(redrawDue(SUNDAY + 2 * HOUR, "America/Chicago", undefined)).toBe(false);
     expect(redrawDue(SUNDAY, "Europe/London", undefined)).toBe(false);
+  });
+
+  test("never where the time zone isn't known", () => {
+    // 03:30 UTC: 9:30 PM in Chicago
+    const night = Date.UTC(2026, 10, 29, 3, 30);
+    expect(redrawDue(night, "UTC", undefined)).toBe(true);
+    expect(redrawDue(night, undefined, undefined)).toBe(false);
+    expect(redrawDue(night, "Not/AZone", undefined)).toBe(false);
   });
 
   test("on a night the clocks skip 3 AM", () => {
