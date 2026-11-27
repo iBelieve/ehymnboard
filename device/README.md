@@ -143,7 +143,9 @@ Cloudflare's edge and Let's Encrypt both serve. Later requests resume the
 first handshake's session, so a download skips the certificate check.
 
 It trusts only the root CAs in `certs/roots.pem`: every CA Cloudflare issues
-edge certificates from, and Let's Encrypt. They stay in flash and are parsed
+edge certificates from, and Let's Encrypt, so the server could move off
+Cloudflare to its own Let's Encrypt certificate without an OTA update first.
+They stay in flash and are parsed
 only for the handshake that needs one. A server whose certificate came from
 any other CA cuts the boards off until they're flashed over USB, so
 `.github/workflows/check-tls-roots.yml` checks every day that the live
