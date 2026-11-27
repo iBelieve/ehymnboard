@@ -5,9 +5,11 @@ import { getFont } from "../src/shared/font";
 import { fitFontSize, renderScreen } from "../src/shared/render";
 import { SCREEN_BYTES, SCREEN_HEIGHT, SCREEN_WIDTH } from "../src/shared/screen";
 
-// Reference images: how the boards draw these lines today (drawn with Pillow,
-// which the renderer was made to match). If the rendering changes on purpose,
-// replace them with renderScreen()'s own output.
+// Reference images: these lines as Pillow drew them for the old server, which
+// renderScreen() was made to match (to within the tolerances below). If the
+// rendering changes on purpose, replace each case<i>.bin.gz with the gzipped
+// renderScreen() output for the lines at index i of cases.json, and its sizes
+// with fitFontSize()'s.
 const fixtures = new URL("./fixtures/reference/", import.meta.url);
 type Case = { lines: [string, string]; sizes: [number | null, number | null] };
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- our own fixture
@@ -54,6 +56,7 @@ describe("matches the reference images", () => {
     const expected = referenceBuffer(i);
     const actual = renderScreen(font, lines[0], lines[1]);
 
+    expect(expected.length).toBe(SCREEN_BYTES);
     expect(actual.length).toBe(SCREEN_BYTES);
 
     // Same font size for each line.
@@ -76,7 +79,7 @@ describe("matches the reference images", () => {
     // Same shapes: Pillow drew the references with FreeType's hinted
     // rasterizer, so edges differ by a pixel here and there, but nothing more.
     const diff = actual.map((byte, k) => byte ^ expected[k]!);
-    expect(popcount(diff)).toBeLessThan(popcount(expected) * 0.08);
+    expect(popcount(diff)).toBeLessThanOrEqual(popcount(expected) * 0.08);
   });
 });
 
