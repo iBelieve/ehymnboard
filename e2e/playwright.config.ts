@@ -26,7 +26,9 @@ const executablePath = process.env.E2E_CHROMIUM_EXECUTABLE;
 // run here by `wrangler dev` (the Workers runtime under Miniflare, as on
 // Cloudflare) with empty data each run and the emulated board allowed.
 const ownServer = process.env.E2E_BASE_URL === undefined;
-const port = 8787;
+// Not 8787, `wrangler dev`'s default, or 8788, `wrangler pages dev`'s: a
+// Worker another project runs on its default port would take this one
+const port = 8790;
 const username = process.env.E2E_USERNAME ?? (ownServer ? "e2e" : undefined);
 const password = process.env.E2E_PASSWORD ?? (ownServer ? "e2e-password" : undefined);
 const vars = {
@@ -37,13 +39,19 @@ const vars = {
   HEALTHCHECKS: "off",
 };
 const state = ".wrangler/e2e-state";
+/** `value` as one sh word, whatever it holds (the command runs in a shell). */
+function shellWord(value: string) {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
 const serverCommand = [
   "pnpm run build",
   `rm -rf ${state}`,
   [
-    "pnpm exec wrangler dev --config dist/hymnboard/wrangler.json",
+    // No --config: wrangler follows .wrangler/deploy/config.json to the
+    // Worker the build just wrote, whatever wrangler.jsonc names it
+    "pnpm exec wrangler dev",
     `--ip 127.0.0.1 --port ${port} --persist-to ${state}`,
-    ...Object.entries(vars).map(([name, value]) => `--var ${name}:${value ?? ""}`),
+    ...Object.entries(vars).map(([name, value]) => `--var ${shellWord(`${name}:${value ?? ""}`)}`),
   ].join(" "),
 ].join(" && ");
 

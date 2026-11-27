@@ -52,7 +52,7 @@ pnpm exec playwright install chromium
 pnpm test
 ```
 
-`pnpm test` builds `web/`, starts it with `wrangler dev` on port 8787 with
+`pnpm test` builds `web/`, starts it with `wrangler dev` on port 8790 with
 empty data, basic auth `e2e`/`e2e-password`, `HEALTHCHECKS` off and the
 emulated board allowed (`EXTRA_DEVICE_IDS=0000000000000000`), runs the
 tests and stops it. The server's state is kept in
@@ -73,7 +73,7 @@ server can't update a board by surprise.
 
 | Variable                       | Default                                                    |
 | ------------------------------ | ---------------------------------------------------------- |
-| `E2E_BASE_URL`                 | none: the tests start `web/` on `http://127.0.0.1:8787`    |
+| `E2E_BASE_URL`                 | none: the tests start `web/` on `http://127.0.0.1:8790`    |
 | `E2E_USERNAME`, `E2E_PASSWORD` | `e2e`, `e2e-password` for their own server; none otherwise |
 | `FIRMWARE_UF2`                 | `../device/build/ehymnboard.uf2`                           |
 | `E2E_CHROMIUM_EXECUTABLE`      | Playwright's own Chromium                                  |
@@ -96,5 +96,7 @@ pnpm run lint           # oxlint, type-aware rules via tsrs
 
 Run it and point `E2E_BASE_URL` at it. It must serve the device API and the
 admin page there, with basic auth (or none), and accept the emulated board's
-ID on `/ws`. To make CI test it, change the `webServer` command in
-`playwright.config.ts` to start it.
+ID on `/ws`. To make CI test it, change the `webServer` entry in
+`playwright.config.ts` to start it: its `command`, the `cwd` that runs in
+(`../web` now) and the `url` Playwright waits on until the server is ready
+(`GET /ok`, which must then answer with a 2xx).

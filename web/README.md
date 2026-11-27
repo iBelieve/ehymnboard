@@ -161,4 +161,7 @@ or with `pnpm exec wrangler rollback`. The Durable Object's data stays as it
 is. Don't roll back to a build without `/ws` (from before the WebSocket): the
 boards would never get a live socket, and would reboot every 3 minutes, with
 their screens as they are, until it's back. Every rollback reconnects the
-boards once, as a deploy does.
+boards once, as a deploy does, but only to a version from 2026-11-24 on
+(#42), which closes the sockets an earlier deploy accepted. An older one
+leaves them open, and its alarm closes them as silent once their ping times
+stop updating.

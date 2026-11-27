@@ -6,7 +6,9 @@
   // dist/hymnboard/, which `wrangler deploy` and the e2e tests' server run.
   "name": "hymnboard",
   "main": "src/worker/index.ts",
-  // Keep at or below the date the installed wrangler's workerd supports.
+  // Keep at or below the date every installed workerd supports: wrangler's
+  // (`wrangler dev`, the Worker tests) and the Vite plugin's (`pnpm dev`),
+  // which can be older.
   "compatibility_date": "2026-11-15",
   "assets": {
     "binding": "ASSETS",
