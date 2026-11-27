@@ -5,7 +5,7 @@ import { EMPTY_LINES, isLines, linesForScreen, SCREEN_COUNT, type Lines } from "
 import type { Device, DeviceStatusParams, FirmwareInfo } from "../shared/api";
 import { getDeviceName, healthchecksOn, pingHealthcheck } from "./devices";
 import { migrate } from "./migrations";
-import { DEFAULT_TIME_ZONE, REDRAW_HOUR, redrawDue } from "./redraw";
+import { REDRAW_HOUR, redrawDue, redrawTimeZone } from "./redraw";
 
 // Column names are interpolated into SQL, so only these are accepted.
 const DEVICE_FIELDS = new Set([
@@ -514,8 +514,11 @@ export class HymnBoard extends DurableObject<Env> {
       return;
     }
     this.ctx.storage.kv.put(key, now);
+    // The time zone it was due in: Chicago if its own is missing or unknown here
+    const zone = redrawTimeZone(timeZone);
+    const unknown = zone === timeZone ? "" : `, as ${timeZone ?? "its own"} isn't known`;
     console.log(
-      `Asked ${getDeviceName(deviceId)} (${deviceId}) to redraw its panels (after ${REDRAW_HOUR} AM ${timeZone ?? `${DEFAULT_TIME_ZONE}, as its own isn't known`})`,
+      `Asked ${getDeviceName(deviceId)} (${deviceId}) to redraw its panels (after ${REDRAW_HOUR} AM ${zone}${unknown})`,
     );
   }
 

@@ -27,25 +27,35 @@ export const REDRAW_SPACING_MS = 12 * 60 * 60_000;
  */
 export const DEFAULT_TIME_ZONE = "America/Chicago";
 
-/**
- * The hour (0-23) at `now` in `timeZone`, an IANA time zone such as
- * "America/Chicago" (DEFAULT_TIME_ZONE if missing or unknown), or undefined
- * if Intl gives none.
- */
-export function localHour(now: number, timeZone: string | undefined): number | undefined {
-  let format: Intl.DateTimeFormat;
+/** Formats the hour (0-23) in `timeZone`, or is undefined for one this runtime doesn't know. */
+function hourFormat(timeZone: string): Intl.DateTimeFormat | undefined {
   try {
-    // Without a time zone, Intl would take the runtime's own
-    format = new Intl.DateTimeFormat("en-US", {
-      timeZone: timeZone ?? DEFAULT_TIME_ZONE,
-      hour: "numeric",
-      hourCycle: "h23",
-    });
+    return new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", hourCycle: "h23" });
   } catch {
     // A RangeError for a time zone this runtime doesn't know
-    return timeZone === undefined ? undefined : localHour(now, undefined);
+    return undefined;
   }
-  const hour = Number(format.formatToParts(now).find((part) => part.type === "hour")?.value);
+}
+
+/**
+ * The time zone a board's redraw follows: `timeZone`, an IANA time zone such
+ * as "America/Chicago", or DEFAULT_TIME_ZONE if it's missing or one this
+ * runtime doesn't know.
+ */
+export function redrawTimeZone(timeZone: string | undefined): string {
+  // Without a time zone, Intl would take the runtime's own
+  return timeZone !== undefined && hourFormat(timeZone) !== undefined
+    ? timeZone
+    : DEFAULT_TIME_ZONE;
+}
+
+/**
+ * The hour (0-23) at `now` in `timeZone`, taken as redrawTimeZone() takes it,
+ * or undefined if Intl gives none.
+ */
+export function localHour(now: number, timeZone: string | undefined): number | undefined {
+  const format = hourFormat(redrawTimeZone(timeZone));
+  const hour = Number(format?.formatToParts(now).find((part) => part.type === "hour")?.value);
   return Number.isInteger(hour) ? hour : undefined;
 }
 

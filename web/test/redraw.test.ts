@@ -6,6 +6,7 @@ import {
   REDRAW_WINDOW_HOURS,
   localHour,
   redrawDue,
+  redrawTimeZone,
 } from "../src/worker/redraw";
 
 // 2026-11-29 09:30 UTC: 03:30 in Chicago (UTC-6 in winter)
@@ -32,6 +33,19 @@ describe("localHour", () => {
     expect(DEFAULT_TIME_ZONE).toBe("America/Chicago");
     expect(localHour(SUNDAY, "Not/AZone")).toBe(3);
     expect(localHour(SUNDAY, undefined)).toBe(3);
+  });
+});
+
+describe("redrawTimeZone", () => {
+  test("is the board's own time zone where this runtime knows it", () => {
+    expect(redrawTimeZone("Europe/London")).toBe("Europe/London");
+    expect(redrawTimeZone("UTC")).toBe("UTC");
+  });
+
+  test("is Chicago for an unknown or missing time zone", () => {
+    expect(redrawTimeZone("Not/AZone")).toBe(DEFAULT_TIME_ZONE);
+    expect(redrawTimeZone("")).toBe(DEFAULT_TIME_ZONE);
+    expect(redrawTimeZone(undefined)).toBe(DEFAULT_TIME_ZONE);
   });
 });
 
