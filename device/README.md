@@ -143,15 +143,16 @@ Cloudflare's edge and Let's Encrypt both serve. Later requests resume the
 first handshake's session, so a download skips the certificate check.
 
 It trusts only the root CAs in `certs/roots.pem`: every CA Cloudflare issues
-edge certificates from, and Let's Encrypt, so the server could move off
-Cloudflare to its own Let's Encrypt certificate without an OTA update first.
-They stay in flash and are parsed
-only for the handshake that needs one. A server whose certificate came from
-any other CA cuts the boards off until they're flashed over USB, so
-`.github/workflows/check-tls-roots.yml` checks every day that the live
-chains still verify against that file with the board's TLS settings. To add
-a root, append it with a `# Name:` line and release firmware before the
-server switches.
+edge certificates from, Let's Encrypt among them, which also lets the server
+move off Cloudflare to its own Let's Encrypt certificate without an OTA update
+first, as long as Let's Encrypt's chains end at ISRG Root X1 or X2. The roots
+stay in flash and are parsed only for the handshake that needs one. A server
+whose certificate came from any other CA cuts the boards off until they're
+flashed over USB, so `.github/workflows/check-tls-roots.yml` checks every day
+that the live chains still verify against that file with the board's TLS
+settings; it checks only the live server, so check a new one the same way
+before moving to it. To add a root, append it with a `# Name:` line and
+release firmware before the server switches.
 
 A full handshake beside the open socket peaks at about 45 KB of the 88 KB
 heap (the board logs `TLS: heap …` after each round of downloads). lwIP's
