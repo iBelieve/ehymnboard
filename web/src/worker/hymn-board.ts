@@ -5,7 +5,7 @@ import { EMPTY_LINES, isLines, linesForScreen, SCREEN_COUNT, type Lines } from "
 import type { Device, DeviceStatusParams, FirmwareInfo } from "../shared/api";
 import { getDeviceName, healthchecksOn, pingHealthcheck } from "./devices";
 import { migrate } from "./migrations";
-import { REDRAW_DOWNLOADS_MS, REDRAW_HOUR, redrawDue } from "./redraw";
+import { REDRAW_HOUR, redrawDue } from "./redraw";
 
 // Column names are interpolated into SQL, so only these are accepted.
 const DEVICE_FIELDS = new Set([
@@ -28,7 +28,8 @@ const DEVICE_FIELDS = new Set([
 // "shown <etag1> <etag2> <etag3>" with what its panels show, after a state
 // it already shows and after each update (even one some screens failed).
 // Once a night the server sends "redraw" (see redraw.ts): the board downloads
-// every screen again and redraws it with a full refresh. Boards from before
+// every screen again, with its ETag and `redraw=1` (so it gets the image even
+// if it's current), and redraws it with a full refresh. Boards from before
 // it ignore it, as they do any message they don't know.
 const STATE_VERSION = 1;
 const PING = "ping";
@@ -85,7 +86,7 @@ export type ImageResult =
       buffer: ArrayBuffer;
       /** True only on the download that newly flags the board as stuck. */
       etagStuck: boolean;
-      /** The board already shows this image: it's redrawing it (see REDRAW). */
+      /** The board asked for the image it shows, to redraw it (see REDRAW). */
       redraw: boolean;
     };
 
@@ -166,59 +167,36 @@ export class HymnBoard extends DurableObject<Env> {
   }
 
   /**
-   * A device polling for a screen. Answers 304 when its etag is current, and
-   * records that the device was seen either way.
+   * A device polling for a screen. Answers 304 when its etag is current,
+   * unless it's redrawing the screen (`redraw`), and records that the device
+   * was seen either way.
    */
   async fetchImage(
     id: number,
     etag: string | undefined,
     status: DeviceStatusParams,
+    redraw = false,
   ): Promise<ImageResult> {
     const screen = await this.getScreen(id);
     const now = new Date().toISOString();
     const updated = etag !== screen.etag;
+    // The image the board has, sent again to redraw: nothing new, and it
+    // kept its ETag
+    const redrawn = redraw && !updated;
 
     let etagStuck = false;
-    let redraw = false;
     if (status.device_id) {
-      // A board asked to redraw downloads, without its ETag, the image it
-      // said it shows: neither a new image nor a sign it lost its ETag
-      redraw =
-        updated &&
-        etag === undefined &&
-        this.askedToRedraw(status.device_id) &&
-        this.shownEtag(status.device_id, id) === screen.etag;
-      const changed = updated && !redraw;
       this.updateDevice(status.device_id, {
         saved_state_writes: status.saved_state_writes,
         last_seen: now,
-        last_updated_at: changed ? now : undefined,
+        last_updated_at: updated ? now : undefined,
       });
-      etagStuck = this.trackDownload(status.device_id, id, changed ? screen.etag : undefined, now);
+      etagStuck = this.trackDownload(status.device_id, id, updated ? screen.etag : undefined, now);
     }
 
-    return updated
-      ? { status: 200, etag: screen.etag, buffer: screen.buffer, etagStuck, redraw }
+    return updated || redrawn
+      ? { status: 200, etag: screen.etag, buffer: screen.buffer, etagStuck, redraw: redrawn }
       : { status: 304, etag: screen.etag };
-  }
-
-  /** Whether the board was asked to redraw (see redrawIfDue) within the last hour. */
-  private askedToRedraw(deviceId: string): boolean {
-    const at = this.ctx.storage.kv.get<number>(redrawKey(deviceId));
-    return at !== undefined && Date.now() - at < REDRAW_DOWNLOADS_MS;
-  }
-
-  /** The etag the board last said its screen `id` shows ("shown"), if any. */
-  private shownEtag(deviceId: string, id: number): string | undefined {
-    const row = this.sql
-      .exec<{ shown_etags: string | null }>(
-        "SELECT shown_etags FROM devices WHERE id = ?",
-        deviceId,
-      )
-      .toArray()[0];
-    const shown: unknown = row?.shown_etags ? JSON.parse(row.shown_etags) : undefined;
-    const etag: unknown = Array.isArray(shown) ? shown[id - 1] : undefined;
-    return typeof etag === "string" ? etag : undefined;
   }
 
   /**
@@ -523,7 +501,7 @@ export class HymnBoard extends DurableObject<Env> {
    * was last asked is kept per board, as a board can reconnect meanwhile.
    */
   private redrawIfDue(ws: WebSocket, { deviceId, timeZone }: SocketAttachment): void {
-    const key = redrawKey(deviceId);
+    const key = `redraw_at:${deviceId}`;
     const last = this.ctx.storage.kv.get<number>(key);
     const now = Date.now();
     if (!redrawDue(now, timeZone, last)) {
@@ -642,11 +620,6 @@ export class HymnBoard extends DurableObject<Env> {
       buffer,
     );
   }
-}
-
-/** Where the Durable Object's storage keeps when a board was last asked to redraw. */
-function redrawKey(deviceId: string): string {
-  return `redraw_at:${deviceId}`;
 }
 
 function attachmentOf(ws: WebSocket): SocketAttachment | undefined {

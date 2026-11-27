@@ -108,7 +108,10 @@ app.get("/images/:id{[0-9]+}", async (c) => {
   // The firmware's HTTP client can't send headers, so it passes ?etag=.
   const etag = c.req.header("If-None-Match") || c.req.query("etag") || undefined;
   const status = deviceStatus(c);
-  const result = await board(c.env).fetchImage(id, etag, status);
+  // Sent by a board redrawing its screens (the "redraw" message): it wants
+  // the image even if its etag is current
+  const redraw = c.req.query("redraw") === "1";
+  const result = await board(c.env).fetchImage(id, etag, status, redraw);
 
   // The firmware stores this bare 40-character value, so no quotes.
   c.header("Etag", result.etag);

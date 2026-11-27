@@ -21,13 +21,6 @@ export const REDRAW_WINDOW_HOURS = 2;
 export const REDRAW_SPACING_MS = 12 * 60 * 60_000;
 
 /**
- * How long after asking a board to redraw its ETag-less downloads of the
- * images it shows count as the redraw. Its retries of a failed download stop
- * within minutes (after 3 minutes it reboots).
- */
-export const REDRAW_DOWNLOADS_MS = 60 * 60_000;
-
-/**
  * The hour (0-23) at `now` in `timeZone`, an IANA time zone such as
  * "America/Chicago". An unknown or missing time zone counts as UTC.
  */

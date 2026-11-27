@@ -296,14 +296,15 @@ test("redraws every screen with a full update when the server asks, without savi
   const asked = emu.waitForSerial("Server asked for every screen to be redrawn", 5_000, at);
   emu.waitFor("three more displays", () => emu.displays.length === 6, 60_000);
 
-  // Downloaded again without the ETag, so the server sends each image again
+  // Downloaded again with the ETag and redraw=1, so the server sends each
+  // image though it's current
   const since = emu.net.requests.slice(requests);
   assert.deepEqual(
-    since.map((r) => [r.path, r.query.etag]),
+    since.map((r) => [r.path, r.query.etag, r.query.redraw]),
     [
-      ["/images/1", undefined],
-      ["/images/2", undefined],
-      ["/images/3", undefined],
+      ["/images/1", "v1-1", "1"],
+      ["/images/2", "v1-2", "1"],
+      ["/images/3", "v1-3", "1"],
     ],
   );
   // The same images, each with the full update (0xF7)

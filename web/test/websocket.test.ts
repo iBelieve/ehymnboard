@@ -141,17 +141,6 @@ async function hangUp(board: Board) {
   await settle();
 }
 
-/** Connects, and says the board shows the screens its state names. */
-async function connectShowing(cf?: Cf): Promise<{ board: Board; etags: string[] }> {
-  const board = await connect(LEFT, "v1", cf);
-  const etags = STATE.exec(await board.next(0))!.slice(1, 4);
-  board.ws.send(`shown ${etags.join(" ")}`);
-  // A ping round trip orders it after the message
-  await board.ask("ping");
-  await runInDurableObject(env.HYMN_BOARD.getByName("main"), () => undefined);
-  return { board, etags };
-}
-
 /** The next alarm pings nobody and schedules no other. */
 async function expectAlarmToStop() {
   const stub = env.HYMN_BOARD.getByName("main");
@@ -243,7 +232,12 @@ describe("GET /ws", () => {
   });
 
   test("records what the board shows", async () => {
-    const { etags } = await connectShowing();
+    const board = await connect();
+    const etags = STATE.exec(await board.next(0))!.slice(1, 4);
+    board.ws.send(`shown ${etags.join(" ")}`);
+    // A ping round trip orders it after the message
+    await board.ask("ping");
+    await runInDurableObject(env.HYMN_BOARD.getByName("main"), () => undefined);
     expect(JSON.parse(device(await state())!.shown_etags!)).toEqual(etags);
   });
 
@@ -520,41 +514,35 @@ describe("the nightly redraw", () => {
     expect(board.messages).toEqual([expect.stringMatching(STATE), "pong"]);
   });
 
-  test("a board's download of an image it shows is a redraw, not an update", async () => {
-    const { board, etags } = await connectShowing({ timezone: zoneWhereItIs(REDRAW_HOUR) });
-    expect(await runDurableObjectAlarm(env.HYMN_BOARD.getByName("main"))).toBe(true);
-    expect(await board.next(2)).toBe("redraw");
+  test("a redraw's download of the image the board has is sent again, not an update", async () => {
+    const etag = (await exports.default.fetch(`${BASE}/images/2`)).headers.get("Etag")!;
     const logged = spyOnLog();
-
-    // Without its ETag, as the board redraws, more times than flag a stuck board
+    // More times than flag a board that doesn't keep its ETag
     for (let i = 0; i < 4; i++) {
-      const res = await exports.default.fetch(`${BASE}/images/2?device_id=${LEFT}`);
+      const res = await exports.default.fetch(
+        `${BASE}/images/2?device_id=${LEFT}&etag=${etag}&redraw=1`,
+      );
       expect(res.status).toBe(200);
-      expect(res.headers.get("Etag")).toBe(etags[1]);
+      expect(res.headers.get("Etag")).toBe(etag);
+      expect((await res.arrayBuffer()).byteLength).toBe(81_600);
     }
+    // Without redraw=1, it's current
+    expect((await exports.default.fetch(`${BASE}/images/2?etag=${etag}`)).status).toBe(304);
     expect(device(await state())).toMatchObject({ last_updated_at: null, etag_stuck_at: null });
-    expect(logged()).toContainEqual(
-      `Device Left Hymn Board (${LEFT}) redrawing image 2 (${etags[1]})`,
-    );
+    expect(logged()).toContainEqual(`Device Left Hymn Board (${LEFT}) redrawing image 2 (${etag})`);
+    await settle();
     expect(pings.filter((p) => p.url.endsWith("/log") || p.url.endsWith("/failure"))).toEqual([]);
   });
 
-  test("a download of an image the board shows, unasked, counts towards a stuck ETag", async () => {
-    await connectShowing();
-    for (let i = 0; i < 3; i++) {
-      expect((await exports.default.fetch(`${BASE}/images/2?device_id=${LEFT}`)).status).toBe(200);
-    }
-    expect(device(await state())?.last_updated_at).toBeTruthy();
-    expect(device(await state())?.etag_stuck_at).toBeTruthy();
-  });
-
-  test("a download of an image the board shows, with another ETag, is an update", async () => {
-    await connectShowing();
-    // As from a board that lost the saved state it had told the server of
+  test("a redraw's download with an outdated etag is an update", async () => {
     const stale = "0".repeat(40);
-    const res = await exports.default.fetch(`${BASE}/images/2?device_id=${LEFT}&etag=${stale}`);
+    const logged = spyOnLog();
+    const res = await exports.default.fetch(
+      `${BASE}/images/2?device_id=${LEFT}&etag=${stale}&redraw=1`,
+    );
     expect(res.status).toBe(200);
     expect(device(await state())?.last_updated_at).toBeTruthy();
+    expect(logged()).toContainEqual(expect.stringMatching(/ updating image 2 from 0{40} to /));
   });
 });
 

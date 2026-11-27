@@ -80,12 +80,12 @@ when one changes. The client is our own, on lwIP's raw TCP API
 
 The messages are short text (`src/board_messages.h`):
 
-| From   | Message                                     | Meaning                                                                                                  |
-| ------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| server | `state 1 <etag1> <etag2> <etag3> <version>` | What each screen should show and the firmware to run (`-` for none). Sent on connect and on every change |
-| board  | `ping`                                      | Every 30 s. The server answers `pong` without waking the Durable Object                                  |
-| board  | `shown <etag1> <etag2> <etag3>`             | What the panels show now (`-` for a screen never drawn)                                                  |
-| server | `redraw`                                    | Nightly: download every screen again (without its ETag) and redraw it with a full refresh                |
+| From   | Message                                     | Meaning                                                                                                   |
+| ------ | ------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| server | `state 1 <etag1> <etag2> <etag3> <version>` | What each screen should show and the firmware to run (`-` for none). Sent on connect and on every change  |
+| board  | `ping`                                      | Every 30 s. The server answers `pong` without waking the Durable Object                                   |
+| board  | `shown <etag1> <etag2> <etag3>`             | What the panels show now (`-` for a screen never drawn)                                                   |
+| server | `redraw`                                    | Nightly: download every screen again (`GET /images/N` with `&redraw=1`) and redraw it with a full refresh |
 
 The nightly redraw is for the panels: Waveshare's manual says to refresh them
 at least once every 24 hours, or old images can stick, and a full refresh

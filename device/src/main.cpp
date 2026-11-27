@@ -53,12 +53,12 @@ static uint64_t now_ms()
 
 // Downloads one screen's image and draws it if it changed. On transient HTTP
 // failures we just log and bail out; the caller retries later.
-static FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag)
+static FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag, bool redraw)
 {
     long_watchdog_update();
 
-    printf("Refreshing screen %d\n", screen_id);
-    const auto ret = fetch_image(screen_id, etag);
+    printf("Refreshing screen %d%s\n", screen_id, redraw ? " (redraw)" : "");
+    const auto ret = fetch_image(screen_id, etag, redraw);
 
     if (ret == FetchImageResult::NEW_IMAGE)
     {
@@ -135,8 +135,9 @@ static bool any_needs_drawing(const Screens &screens)
 }
 
 // Downloads and draws every screen that doesn't show what the server wants,
-// or that it asked to redraw, keeping the socket serviced in between. Returns true if any download got
-// an answer (a new image or a 304), so the server should hear what's shown.
+// or that it asked to redraw, keeping the socket serviced in between. Returns
+// true if any download got an answer (a new image or a 304), so the server
+// should hear what's shown.
 static bool update_screens(Board &board)
 {
     auto &screens = board.screens;
@@ -151,13 +152,12 @@ static bool update_screens(Board &board)
         {
             continue;
         }
-        // A redraw asks without the ETag, so the server sends the image again
-        std::string etag = screens.redraw.at(i) ? std::string() : screens.shown.at(i);
-        const auto ret = refresh_screen(static_cast<int>(i + 1), *screens.panels.at(i), etag);
+        std::string etag = screens.shown.at(i);
+        const auto ret = refresh_screen(static_cast<int>(i + 1), *screens.panels.at(i), etag, screens.redraw.at(i));
         if (ret == FetchImageResult::NEW_IMAGE || ret == FetchImageResult::NO_CHANGE)
         {
-            // An image without an ETag keeps the one the screen had, as before
-            if (!etag.empty() && etag != screens.shown.at(i))
+            // A redraw of the same image has nothing new to save
+            if (etag != screens.shown.at(i))
             {
                 screens.shown.at(i) = etag;
                 any_updated = true;
