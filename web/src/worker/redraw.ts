@@ -21,20 +21,29 @@ export const REDRAW_WINDOW_HOURS = 2;
 export const REDRAW_SPACING_MS = 12 * 60 * 60_000;
 
 /**
+ * The time zone of a board whose own isn't known (Cloudflare gave none, or
+ * one this runtime doesn't know): the boards so far are in the US, where 3 AM
+ * UTC is an evening, when a church may be full.
+ */
+export const DEFAULT_TIME_ZONE = "America/Chicago";
+
+/**
  * The hour (0-23) at `now` in `timeZone`, an IANA time zone such as
- * "America/Chicago", or undefined for a missing or unknown time zone.
+ * "America/Chicago" (DEFAULT_TIME_ZONE if missing or unknown), or undefined
+ * if Intl gives none.
  */
 export function localHour(now: number, timeZone: string | undefined): number | undefined {
-  if (timeZone === undefined) {
-    // Intl would take the runtime's own
-    return undefined;
-  }
   let format: Intl.DateTimeFormat;
   try {
-    format = new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", hourCycle: "h23" });
+    // Without a time zone, Intl would take the runtime's own
+    format = new Intl.DateTimeFormat("en-US", {
+      timeZone: timeZone ?? DEFAULT_TIME_ZONE,
+      hour: "numeric",
+      hourCycle: "h23",
+    });
   } catch {
     // A RangeError for a time zone this runtime doesn't know
-    return undefined;
+    return timeZone === undefined ? undefined : localHour(now, undefined);
   }
   const hour = Number(format.formatToParts(now).find((part) => part.type === "hour")?.value);
   return Number.isInteger(hour) ? hour : undefined;
@@ -42,9 +51,7 @@ export function localHour(now: number, timeZone: string | undefined): number | u
 
 /**
  * Whether a board in `timeZone` is due its nightly redraw at `now`, given
- * when it was last asked (ms since the epoch, if ever). Never where the time
- * zone isn't known: 3 AM UTC is an American evening, when a church may be
- * full, so a board is better left without its redraw.
+ * when it was last asked (ms since the epoch, if ever).
  */
 export function redrawDue(
   now: number,

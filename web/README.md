@@ -37,8 +37,8 @@ tests' emulated board; leave it unset in production). While any board is
 connected, an alarm every 10 minutes pings each live board's
 healthchecks.io check and closes sockets that stopped pinging. The first
 alarm between 3 AM and 5 AM in a board's time zone (the one Cloudflare places
-its IP address in, `request.cf.timezone` on its upgrade request; a board
-whose time zone isn't known gets none, as 3 AM UTC is an American evening)
+its IP address in, `request.cf.timezone` on its upgrade request, or
+America/Chicago if it isn't known, as 3 AM UTC is an American evening)
 sends the board `redraw`, once a night, and the board downloads and
 redraws every screen with a full refresh (see `src/worker/redraw.ts`). It
 asks for each image with its ETag and `redraw=1`, and gets it even though it's

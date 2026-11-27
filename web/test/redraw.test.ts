@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  DEFAULT_TIME_ZONE,
   REDRAW_HOUR,
   REDRAW_SPACING_MS,
   REDRAW_WINDOW_HOURS,
@@ -27,9 +28,10 @@ describe("localHour", () => {
     expect(localHour(Date.UTC(2026, 6, 5, 9, 30), "America/Chicago")).toBe(4);
   });
 
-  test("is undefined for an unknown or missing time zone", () => {
-    expect(localHour(SUNDAY, "Not/AZone")).toBeUndefined();
-    expect(localHour(SUNDAY, undefined)).toBeUndefined();
+  test("takes an unknown or missing time zone as Chicago", () => {
+    expect(DEFAULT_TIME_ZONE).toBe("America/Chicago");
+    expect(localHour(SUNDAY, "Not/AZone")).toBe(3);
+    expect(localHour(SUNDAY, undefined)).toBe(3);
   });
 });
 
@@ -44,12 +46,13 @@ describe("redrawDue", () => {
     expect(redrawDue(SUNDAY, "Europe/London", undefined)).toBe(false);
   });
 
-  test("never where the time zone isn't known", () => {
+  test("at night in Chicago where the time zone isn't known", () => {
     // 03:30 UTC: 9:30 PM in Chicago
-    const night = Date.UTC(2026, 10, 29, 3, 30);
-    expect(redrawDue(night, "UTC", undefined)).toBe(true);
-    expect(redrawDue(night, undefined, undefined)).toBe(false);
-    expect(redrawDue(night, "Not/AZone", undefined)).toBe(false);
+    const evening = Date.UTC(2026, 10, 29, 3, 30);
+    expect(redrawDue(evening, "UTC", undefined)).toBe(true);
+    expect(redrawDue(evening, undefined, undefined)).toBe(false);
+    expect(redrawDue(evening, "Not/AZone", undefined)).toBe(false);
+    expect(redrawDue(SUNDAY, undefined, undefined)).toBe(true);
   });
 
   test("on a night the clocks skip 3 AM", () => {
