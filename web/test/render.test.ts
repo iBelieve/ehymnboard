@@ -1,15 +1,18 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { getFont } from "../src/shared/font";
 import { fitFontSize, renderScreen } from "../src/shared/render";
 import { SCREEN_BYTES, SCREEN_HEIGHT, SCREEN_WIDTH } from "../src/shared/screen";
 
-// Reference screens, drawn by this rasterizer and checked bit for bit. They
-// started out matching the old Flask server (Pillow) to within a pixel of
-// placement, which the boards showed for years. After a deliberate change to
-// the rasterizer, look at the new screens, then rewrite them with
+// Reference screens, drawn by this rasterizer and checked bit for bit. The
+// first eight started out matching the old Flask server (Pillow) to within a
+// pixel of placement, which the boards showed for years; the rest were never
+// compared with it. After a deliberate change to the rasterizer, rewrite them
+// in web/ with
 //
 //     UPDATE_RENDER_FIXTURES=1 pnpm vitest run test/render.test.ts
+//
+// and look at the screens it says it wrote before committing them.
 //
 // Each is a binary PBM (P4) file: a short header, then the screen buffer
 // exactly as the board gets it. PBM draws a set bit black, so the text shows
@@ -37,8 +40,8 @@ const cases: Case[] = [
     sizes: [114, 90],
   },
   // The widest line that still fits at full size (856 of 860 px), and one
-  // just too wide for it
-  { name: "widest-at-full-size", lines: ["AGNUS DEI", "LSB 99999"], sizes: [275, 262] },
+  // just too wide for it (863 px at full size, 860.09 at 274)
+  { name: "widest-at-full-size", lines: ["AGNUS DEI", "HYMN 100"], sizes: [275, 273] },
   { name: "punctuation", lines: ["—", "?!"], sizes: [275, 275] },
   { name: "accents", lines: ["Té Deum", "ÉÇÜ"], sizes: [275, 275] },
   // ✝ and ☩ aren't in Bebas Neue, so they're drawn as its missing-glyph shape
@@ -56,9 +59,15 @@ function readFixture(name: string): Uint8Array {
   return new Uint8Array(file.subarray(PBM_HEADER.length));
 }
 
-function writeFixture(name: string, buffer: Uint8Array) {
+/** Writes a reference screen unless it's unchanged; says whether it wrote it. */
+function writeFixture(name: string, buffer: Uint8Array): boolean {
+  const file = Buffer.concat([Buffer.from(PBM_HEADER), buffer]);
+  if (existsSync(fixtureUrl(name)) && readFileSync(fixtureUrl(name)).equals(file)) {
+    return false;
+  }
   mkdirSync(fixtures, { recursive: true });
-  writeFileSync(fixtureUrl(name), Buffer.concat([Buffer.from(PBM_HEADER), buffer]));
+  writeFileSync(fixtureUrl(name), file);
+  return true;
 }
 
 /** How many pixels differ between two screen buffers. */
@@ -84,7 +93,9 @@ describe("matches the reference screens", () => {
     expect(actual.some((byte) => byte !== 0)).toBe(true);
 
     if (update) {
-      writeFixture(name, actual);
+      if (writeFixture(name, actual)) {
+        console.log(`wrote ${name}.pbm: look at it before committing it`);
+      }
       return;
     }
     expect(
@@ -100,13 +111,18 @@ describe("matches the reference screens", () => {
   });
 });
 
+test("there's one reference screen per case, and no others", () => {
+  const files = readdirSync(fixtures).filter((file) => file.endsWith(".pbm"));
+  expect(files.toSorted()).toEqual(cases.map(({ name }) => `${name}.pbm`).toSorted());
+});
+
 test("blank lines render a blank screen", () => {
   expect(renderScreen(getFont(), "", "").every((byte) => byte === 0)).toBe(true);
 });
 
 test("line breaks and control characters render as spaces, like Flask's clean_line", () => {
   const font = getFont();
-  expect(renderScreen(font, "LSB\n657", "Kyrie \tEleison")).toEqual(
+  expect(renderScreen(font, "LSB\n657", "Kyrie\u2028\tEleison")).toEqual(
     renderScreen(font, "LSB 657", "Kyrie  Eleison"),
   );
 });
