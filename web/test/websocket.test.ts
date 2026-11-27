@@ -53,22 +53,24 @@ class Board {
 
 const sockets: Board[] = [];
 
-function upgrade(query: string, headers: Record<string, string> = { Upgrade: "websocket" }) {
-  return exports.default.fetch(new Request(`${BASE}/ws?${query}`, { headers }));
+function upgrade(
+  query: string,
+  headers: Record<string, string> = { Upgrade: "websocket" },
+  colo?: string,
+) {
+  const cf = colo === undefined ? undefined : { colo };
+  return exports.default.fetch(new Request(`${BASE}/ws?${query}`, { headers, cf }));
 }
 
 /**
- * Connects as the firmware does, with its query string (and any headers
- * Cloudflare adds on the way, like CF-Ray).
+ * Connects as the firmware does, with its query string, through the given
+ * Cloudflare data center if any.
  */
-async function connect(
-  deviceId = LEFT,
-  firmware = "v1",
-  headers: Record<string, string> = {},
-): Promise<Board> {
+async function connect(deviceId = LEFT, firmware = "v1", colo?: string): Promise<Board> {
   const res = await upgrade(
     `device_id=${deviceId}&saved_state_writes=4&watchdog_caused_reboot=0&firmware_version=${firmware}&proto=1`,
-    { Upgrade: "websocket", ...headers },
+    { Upgrade: "websocket" },
+    colo,
   );
   expect(res.status).toBe(101);
   const board = new Board(res.webSocket!);
@@ -267,10 +269,10 @@ describe("GET /ws", () => {
     const logged = spyOnLog();
     // Each connection through a different data center, so the replaced
     // socket's line must show the one its own attachment kept
-    const old = await connect(LEFT, "v1", { "CF-Ray": "8e31e5ea4a4cf507-LHR" });
+    const old = await connect(LEFT, "v1", "LHR");
     await old.next(0);
     await old.ask("ping");
-    const replacement = await connect(LEFT, "v1", { "CF-Ray": "8e31e5ea4a4cf508-ORD" });
+    const replacement = await connect(LEFT, "v1", "ORD");
     await replacement.next(0);
     await old.closed;
 
@@ -318,7 +320,7 @@ describe("GET /ws", () => {
 
   test("logs a closed socket's data center, and that it never pinged", async () => {
     const logged = spyOnLog();
-    const board = await connect(LEFT, "v1", { "CF-Ray": "8e31e5ea4a4cf507-LHR" });
+    const board = await connect(LEFT, "v1", "LHR");
     await board.next(0);
     await hangUp(board);
 
@@ -464,25 +466,13 @@ test("EXTRA_DEVICE_IDS lets a test board connect", async () => {
   expect(device(await state(), "1111111111111111")?.live).toBe(true);
 });
 
-/** A request as Cloudflare hands it on, with these headers and `cf`. */
-function cfRequest(
-  headers: Record<string, string>,
-  cf?: RequestInitCfProperties & { colo: string },
-) {
-  return new Request(BASE, { headers, cf });
-}
-
 describe("coloOf", () => {
-  test("takes Cloudflare's own colo first", () => {
-    expect(coloOf(cfRequest({ "cf-ray": "8e31e5ea4a4cf507-ORD" }, { colo: "LHR" }))).toBe("LHR");
+  test("is Cloudflare's colo", () => {
+    expect(coloOf(new Request(BASE, { cf: { colo: "LHR" } }))).toBe("LHR");
   });
 
-  test("falls back to the CF-Ray header's suffix, as behind Cloudflare's proxy", () => {
-    expect(coloOf(cfRequest({ "cf-ray": "8e31e5ea4a4cf507-ORD" }))).toBe("ORD");
-  });
-
-  test("is undefined without either", () => {
-    expect(coloOf(cfRequest({}))).toBeUndefined();
-    expect(coloOf(cfRequest({ "cf-ray": "8e31e5ea4a4cf507" }))).toBeUndefined();
+  test("is undefined without one", () => {
+    expect(coloOf(new Request(BASE))).toBeUndefined();
+    expect(coloOf(new Request(BASE, { cf: { colo: "" } }))).toBeUndefined();
   });
 });

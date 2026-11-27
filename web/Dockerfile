@@ -1,5 +1,6 @@
-# Self-hosted build: runs the Worker on workerd, Cloudflare's open-source
-# Workers runtime, with Durable Object storage on a local volume at /data.
+# The server the e2e tests run against: the built Worker on workerd,
+# Cloudflare's open-source Workers runtime, with Durable Object storage at
+# /data.
 
 FROM node:26-slim AS build
 
@@ -24,11 +25,11 @@ COPY --link web web/
 WORKDIR /app/web
 
 RUN pnpm run build \
-    && node selfhost/generate-config.mjs \
+    && node docker/generate-config.mjs \
     && cp "$(node -p 'require("workerd").default')" /app/workerd
 
-# workerd is a single binary that needs only glibc, libstdc++ and the system
-# CA certificates (for healthchecks.io pings), which is what distroless/cc is.
+# workerd is a single binary that needs only glibc and libstdc++, which is
+# what distroless/cc is.
 FROM gcr.io/distroless/cc-debian13
 
 WORKDIR /app
@@ -39,12 +40,11 @@ COPY --link --from=busybox:1.37.0-musl@sha256:f6a95d611e0a8780fabdb2aec43e31275b
 COPY --link --from=build /app/workerd /usr/local/bin/workerd
 COPY --link --from=build /app/web/dist ./dist
 
-# Mount persistent storage here (dokku storage:mount), or every deploy starts
-# with empty lines and device history.
+# Durable Object storage. Mount a volume here to keep it across containers.
 VOLUME /data
 
-# Listens on $PORT, or 8000 when it isn't set. No EXPOSE: dokku then sets PORT
-# (5000 by default) and proxies port 80 to it, as it did for the Flask app.
+# Listens on $PORT, or 8000 when it isn't set.
+EXPOSE 8000
 
 # BASIC_AUTH_USERNAME and BASIC_AUTH_PASSWORD come from the environment.
 CMD ["/usr/bin/sh", "-c", "exec workerd serve dist/workerd.capnp --socket-addr \"http=0.0.0.0:${PORT:-8000}\" --directory-path client-files=/app/dist/client --directory-path do-storage=/data"]

@@ -610,9 +610,8 @@ function seconds(ms: number): number {
 }
 
 /**
- * The Cloudflare data center a request came in through: `request.cf` on
- * Cloudflare, or the end of its CF-Ray header ("8e31e5ea4a4cf507-ORD") behind
- * Cloudflare's proxy elsewhere, as on dokku. Undefined without either.
+ * The Cloudflare data center a request came in through (`request.cf.colo`).
+ * Undefined where there's none, as in the Docker image.
  */
 export function coloOf(request: Request): string | undefined {
   const cf: unknown = request.cf;
@@ -621,7 +620,7 @@ export function coloOf(request: Request): string | undefined {
       return cf.colo;
     }
   }
-  return /-([A-Z]{3})$/.exec(request.headers.get("cf-ray") ?? "")?.[1];
+  return undefined;
 }
 
 /** Closes a socket, ignoring one that's already closed or a code it can't send. */

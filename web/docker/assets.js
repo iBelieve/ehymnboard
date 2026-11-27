@@ -1,4 +1,4 @@
-// Stands in for Workers Static Assets when self-hosting on workerd: serves the
+// Stands in for Workers Static Assets in the Docker image's workerd: serves the
 // built client from a disk directory, with the same single-page-application
 // fallback to index.html that wrangler.jsonc configures on Cloudflare.
 

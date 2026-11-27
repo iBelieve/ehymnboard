@@ -27,9 +27,8 @@ env:
   # sets both to it.
   SERVER_DIR: web
   SERVER_CONTEXT: .
-  # The image listens on $PORT. 5000 is what dokku gives it (the fallback
-  # server; production is the Cloudflare Worker).
-  SERVER_PORT: "5000"
+  # The image listens on $PORT, 8000 by default.
+  SERVER_PORT: "8000"
   ACTIONLINT_VERSION: "1.7.12"
 
 jobs:
@@ -133,7 +132,7 @@ jobs:
         if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm run build
 
-  # The server's Docker image, as dokku builds it. The e2e job runs this image.
+  # The server's Docker image, which the e2e job runs.
   server-image:
     runs-on: ubuntu-latest
     timeout-minutes: 20

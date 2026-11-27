@@ -3,11 +3,11 @@
   // Also the Cloudflare Worker's name: Workers Builds deploys master to it, the
   // production server at https://hymnboard.sonrise.io (and
   // https://hymnboard.sonrise.workers.dev; see README.md). The build writes
-  // dist/hymnboard/, which selfhost/generate-config.mjs reads.
+  // dist/hymnboard/, which docker/generate-config.mjs reads.
   "name": "hymnboard",
   "main": "src/worker/index.ts",
-  // Keep at or below the date the pinned workerd supports; the self-hosted
-  // Docker image reads it from the build output.
+  // Keep at or below the date the pinned workerd supports; the Docker image
+  // reads it from the build output.
   "compatibility_date": "2026-11-15",
   "assets": {
     "binding": "ASSETS",

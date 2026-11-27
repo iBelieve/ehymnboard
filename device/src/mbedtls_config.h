@@ -17,7 +17,7 @@
  */
 
 // mbedTLS build options for this firmware: a TLS 1.2 client for
-// hymnboard.sonrise.io (behind Cloudflare, or Let's Encrypt on dokku), with
+// hymnboard.sonrise.io (behind Cloudflare), with
 // as little else as possible. pico-sdk's pico_mbedtls includes this file by
 // name; this directory comes before pico_fota_bootloader's include directory,
 // whose mbedtls_config.h (AES and SHA-256 for the OTA image) is a subset of

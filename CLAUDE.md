@@ -3,8 +3,7 @@
 E-ink hymn board: `device/` is Raspberry Pi Pico W firmware (C++, pico-sdk,
 CMake), `web/` is the server: a Hono Worker + Durable Object + React admin,
 in production on Cloudflare Workers (`hymnboard.sonrise.io`, deployed from
-master by Workers Builds), and self-hostable on workerd via a Docker image
-deployed with dokku, which serves as the fallback (see `web/README.md`). It
+master by Workers Builds; see `web/README.md`). It
 replaced a Flask app (`server/`, last at commit 02ece7f) and keeps its device
 protocol byte-for-byte. `hardware/` is the KiCad design
 (no CI). `web/`, `e2e/` and `device/emulator/` are one pnpm workspace,
@@ -125,10 +124,10 @@ All checks below must pass; run them locally before committing.
   bytes, or the `/ws` messages (`state`, `ping`/`pong`, `shown`, close
   codes): the firmware hard-codes them. The rasterizer is compared against
   the old Flask server's output in `test/render.test.ts`
-- Docker: the image builds from the repository root, for the workspace's
-  lockfile: `docker build -f web/Dockerfile .` (`.dockerignore` at the root
-  sends only the root files and `web/`). CI builds it, and dokku builds it the
-  same way (see `web/README.md`)
+- Docker: `web/Dockerfile` runs the built Worker on workerd for the e2e
+  tests. It builds from the repository root, for the workspace's lockfile:
+  `docker build -f web/Dockerfile .` (`.dockerignore` at the root sends only
+  the root files and `web/`)
 
 ### e2e/
 

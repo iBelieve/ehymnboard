@@ -43,8 +43,7 @@ subjectAltName=$4" "$1.pem"
 }
 
 # The server's certificate (ECDSA, like Cloudflare's), then the same name
-# with an RSA key (Let's Encrypt on dokku), then a valid chain for another
-# name
+# with an RSA key, then a valid chain for another name
 ec_key server.key
 leaf server "$HOST" server.key "DNS:$HOST"
 openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out server-rsa.key
