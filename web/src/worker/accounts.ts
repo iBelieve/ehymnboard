@@ -8,6 +8,17 @@ const MIN_SECRET_LENGTH = 32;
 /** How long a first account's setup may take before another may start over. */
 const SETUP_CLAIM_MS = 60_000;
 
+/**
+ * Setup tries allowed from one address in SETUP_WINDOW_MS: as many as
+ * Better Auth allows sign-ins (3 in 10 s), so the setup password is no
+ * easier to guess than an account's.
+ */
+const SETUP_ATTEMPTS = 3;
+const SETUP_WINDOW_MS = 10_000;
+
+/** Whose address a request is: the one Cloudflare saw. */
+const IP_ADDRESS = { ipAddressHeaders: ["cf-connecting-ip"] };
+
 /** What the first account's setup needs. */
 export type FirstAccount = { name: string; email: string; password: string };
 
@@ -45,9 +56,14 @@ async function createAuth(db: D1Database, secret: string, baseURL: string) {
     // the database, since each isolate's memory sees only its own requests.
     rateLimit: { enabled: true, storage: "database" },
     advanced: {
-      ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] },
+      ipAddress: IP_ADDRESS,
       // Every deploy is served over https (localhost counts as secure too).
       useSecureCookies: true,
+      // Better Auth would otherwise read every table's columns and indexes
+      // before each instance's first query, and there's an instance per
+      // request: 11 more queries on each of the admin's. The tables are
+      // checked once, in CI, by test/account-migrations.test.ts instead.
+      database: { validateSchema: false },
     },
     telemetry: { enabled: false },
     hooks: {
@@ -164,6 +180,38 @@ export async function needsSetup(env: Env): Promise<boolean> {
 }
 
 /**
+ * Counts a try at the first account's setup from this request's address,
+ * in Better Auth's rateLimit table (which it also prunes), under a key none
+ * of its own endpoints uses. False once the address has tried too often
+ * lately. A request with no address (only tests and `wrangler dev`) isn't
+ * counted, as Better Auth doesn't count it either.
+ */
+export async function allowSetupAttempt(env: Env, request: Request): Promise<boolean> {
+  if (!request.headers.has("cf-connecting-ip")) {
+    return true;
+  }
+  // Better Auth's reading of the address, so IPv6 counts by subnet as its own
+  // limits do
+  const { getIP } = await import("better-auth/api");
+  const ip = getIP(request, { advanced: { ipAddress: IP_ADDRESS } });
+  if (!ip) {
+    return true;
+  }
+  await migrate(env);
+  const now = Date.now();
+  const count = await env.DB.prepare(
+    `INSERT INTO "rateLimit" ("id", "key", "count", "lastRequest") VALUES (?1, ?2, 1, ?3)
+     ON CONFLICT ("key") DO UPDATE SET
+       "count" = CASE WHEN "lastRequest" <= ?4 THEN 1 ELSE "count" + 1 END,
+       "lastRequest" = ?3
+     RETURNING "count"`,
+  )
+    .bind(crypto.randomUUID(), `${ip}|/api/setup`, now, now - SETUP_WINDOW_MS)
+    .first<number>("count");
+  return (count ?? 1) <= SETUP_ATTEMPTS;
+}
+
+/**
  * Creates the first account, an admin, if there's none yet. The Worker
  * checks the setup password first. False if an account already exists, or
  * why it couldn't make one (Better Auth refused it, say, as an invalid
@@ -195,8 +243,15 @@ export async function createFirstAccount(
     await auth.api.createUser({ body: { ...account, role: "admin" } });
     return true;
   } catch (error) {
-    // Let the next try go ahead at once.
-    await env.DB.prepare(`DELETE FROM "setup" WHERE "startedAt" = ?`).bind(now).run();
+    // D1 has no transactions, so Better Auth may have made the user before
+    // failing to save its password: remove it, or setup would be over with
+    // nobody able to sign in. Then let the next try go ahead at once.
+    await env.DB.batch([
+      env.DB.prepare(
+        `DELETE FROM "user" WHERE "email" = ? AND "id" NOT IN (SELECT "userId" FROM "account")`,
+      ).bind(account.email.toLowerCase()),
+      env.DB.prepare(`DELETE FROM "setup" WHERE "startedAt" = ?`).bind(now),
+    ]);
     return error instanceof Error ? error.message : String(error);
   }
 }

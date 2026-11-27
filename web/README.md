@@ -86,7 +86,8 @@ requests, so the boards' never load it.
 - Admins can make API keys on the Accounts page, for uploading firmware with
   curl (`X-Api-Key`, see `device/README.md`). A key does nothing else.
 - Sign-ins are limited per address (Better Auth's rate limit, by
-  `CF-Connecting-IP`, counted in the database). Sessions last 30 days from the last visit.
+  `CF-Connecting-IP`, counted in the database), and so are tries at the
+  setup password, three in 10 seconds. Sessions last 30 days from the last visit.
 - No email is sent yet: an admin sets a forgotten password. Emailed codes,
   passkeys and password-reset emails are Better Auth plugins away, since
   every account already has its email.

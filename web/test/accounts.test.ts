@@ -1,5 +1,8 @@
-import { exports } from "cloudflare:workers";
+import { createExecutionContext } from "cloudflare:test";
+import { env, exports } from "cloudflare:workers";
 import { expect, test } from "vitest";
+import { createFirstAccount, needsSetup } from "../src/worker/accounts";
+import worker from "../src/worker/index";
 import { ADMIN, BASE, post, signIn, signInAsAdmin } from "./signIn";
 
 function get(path: string, headers: Record<string, string> = {}) {
@@ -29,6 +32,60 @@ async function signInAsUser() {
   expect(res.status, await res.clone().text()).toBe(200);
   return signIn(email, password);
 }
+
+// These three run while there's no account yet, before the next test makes one.
+
+test("limits setup tries from one address", async () => {
+  const wrong = { ...ADMIN, setupPassword: "wrong" };
+  const statuses = [];
+  for (let i = 0; i < 4; i++) {
+    statuses.push((await post("/api/setup", wrong, { "CF-Connecting-IP": "198.51.100.7" })).status);
+  }
+  expect(statuses).toEqual([403, 403, 403, 429]);
+});
+
+test("says so when the server has no setup password", async () => {
+  const request = new Request(`${BASE}/api/setup`, {
+    method: "POST",
+    headers: { Origin: BASE, "Content-Type": "application/json" },
+    body: JSON.stringify({ ...ADMIN, setupPassword: "" }),
+  });
+  const res = await worker.fetch(
+    request,
+    { ...env, SETUP_PASSWORD: undefined },
+    createExecutionContext(),
+  );
+  expect(res.status).toBe(403);
+  expect(await res.text()).toMatch(/no SETUP_PASSWORD/);
+});
+
+/** The accounts database, where saving a password fails as D1 might. */
+function failingPasswords(db: D1Database): D1Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare") {
+        return (query: string) => {
+          if (/^insert into "account"/i.test(query)) {
+            throw new Error("D1 went away");
+          }
+          return target.prepare(query);
+        };
+      }
+      const value: unknown = Reflect.get(target, property, target);
+      if (typeof value !== "function") {
+        return value;
+      }
+      return (...args: unknown[]): unknown => Reflect.apply(value, target, args);
+    },
+  });
+}
+
+test("a first account that fails half-way leaves setup open", async () => {
+  const failing = { ...env, DB: failingPasswords(env.DB) };
+  const created = await createFirstAccount(failing, new Request(`${BASE}/api/setup`), ADMIN);
+  expect(created).toEqual(expect.any(String));
+  expect(await needsSetup(env)).toBe(true);
+});
 
 test("setup creates the first account, an admin, then refuses another", async () => {
   expect(await (await get("/api/setup")).json()).toEqual({ needed: true });

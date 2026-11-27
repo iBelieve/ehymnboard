@@ -270,6 +270,16 @@ app.post("/api/setup", async (c) => {
   if (!(await accounts.needsSetup(c.env))) {
     return c.text("An account already exists\n", 409);
   }
+  // Not "wrong": no guess can be right, so the deploy needs its secret.
+  if (!c.env.SETUP_PASSWORD) {
+    return c.text(
+      "This server has no SETUP_PASSWORD, so nobody can create the first account\n",
+      403,
+    );
+  }
+  if (!(await accounts.allowSetupAttempt(c.env, c.req.raw))) {
+    return c.text("Too many tries: wait a few seconds\n", 429);
+  }
   const body: unknown = await c.req.json().catch(() => undefined);
   const { setupPassword, name, email, password } = isRecord(body) ? body : {};
   if (!(await isSetupPassword(c.env, setupPassword))) {
@@ -294,8 +304,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Compares digests rather than the passwords, so the time it takes says
- * nothing about how much of the password was right.
+ * Compares digests, which are the same length, looking at every byte
+ * whatever the earlier ones were, so the time it takes says nothing about
+ * how much of the password was right.
  */
 async function isSetupPassword(env: Env, given: unknown): Promise<boolean> {
   const expected = env.SETUP_PASSWORD;
@@ -303,7 +314,7 @@ async function isSetupPassword(env: Env, given: unknown): Promise<boolean> {
     return false;
   }
   const [a, b] = await Promise.all([sha256(given), sha256(expected)]);
-  return a.every((byte, i) => byte === b[i]);
+  return a.reduce((differences, byte, i) => differences | (byte ^ (b[i] ?? 0)), 0) === 0;
 }
 
 async function sha256(text: string) {
