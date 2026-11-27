@@ -83,7 +83,7 @@ The messages are short text (`src/board_messages.h`):
 | From   | Message                                     | Meaning                                                                                                  |
 | ------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | server | `state 1 <etag1> <etag2> <etag3> <version>` | What each screen should show and the firmware to run (`-` for none). Sent on connect and on every change |
-| board  | `ping`                                      | Every 30 s. The server answers `pong` (on Cloudflare, without waking the Durable Object)                 |
+| board  | `ping`                                      | Every 30 s. The server answers `pong` without waking the Durable Object                                  |
 | board  | `shown <etag1> <etag2> <etag3>`             | What the panels show now (`-` for a screen never drawn)                                                  |
 
 The upgrade request carries the same query string as every other request
@@ -126,7 +126,7 @@ times, half a minute apart, it reboots to be rolled back. The devices page shows
 
 Notes:
 
-- The image is AES encrypted: it contains the WiFi passphrases, and firmware from before TLS downloads it over plain HTTP. The SHA-256 is inside the encrypted image, so a corrupted or tampered image fails the check.
+- The image is AES encrypted: it contains the WiFi passphrases, and anyone can download it (`/firmware/image` takes no login). The SHA-256 is inside the encrypted image, so a corrupted or tampered image fails the check.
 - Don't change the flash layout (`PFB_RESERVED_FILESYSTEM_SIZE_KB` in `CMakeLists.txt`) or the bootloader without reflashing every board over USB.
 - Losing power during the ~30 second slot swap can leave a board unbootable until it is reflashed over USB.
 - The emulator's `ota.test.ts` and `ota-rejects.test.ts` (see [emulator/README.md](emulator/README.md)) run the whole flow on an emulated board, bootloader included: download, swap, commit, rollback, a power cut mid-download, and bad, cut off or stalled images.
@@ -144,13 +144,16 @@ Cloudflare's edge and Let's Encrypt both serve. Later requests resume the
 first handshake's session, so a download skips the certificate check.
 
 It trusts only the root CAs in `certs/roots.pem`: every CA Cloudflare issues
-edge certificates from, and Let's Encrypt. They stay in flash and are parsed
-only for the handshake that needs one. A server whose certificate came from
-any other CA cuts the boards off until they're flashed over USB, so
-`.github/workflows/check-tls-roots.yml` checks every day that the live
-chains still verify against that file with the board's TLS settings. To add
-a root, append it with a `# Name:` line and release firmware before the
-server switches.
+edge certificates from, Let's Encrypt among them, which also lets the server
+move off Cloudflare to its own Let's Encrypt certificate without an OTA update
+first, as long as Let's Encrypt's chains end at ISRG Root X1 or X2. The roots
+stay in flash and are parsed only for the handshake that needs one. A server
+whose certificate came from any other CA cuts the boards off until they're
+flashed over USB, so `.github/workflows/check-tls-roots.yml` checks every day
+that the live chains still verify against that file with the board's TLS
+settings; it checks only the live server, so check a new one the same way
+before moving to it. To add a root, append it with a `# Name:` line and
+release firmware before the server switches.
 
 A full handshake beside the open socket peaks at about 45 KB of the 88 KB
 heap (the board logs `TLS: heap …` after each round of downloads). lwIP's

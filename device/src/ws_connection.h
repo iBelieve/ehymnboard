@@ -33,7 +33,7 @@ class ConnectionPolicy
 {
   public:
     // Send "ping" this often, and give up on the socket if "pong" doesn't come
-    // back in time. Cloudflare and nginx close sockets idle for 60-100 s.
+    // back in time. Cloudflare closes sockets idle for 100 s.
     static constexpr uint64_t PING_INTERVAL_MS = 30'000;
     static constexpr uint64_t PONG_TIMEOUT_MS = 10'000;
     // DNS, TCP, TLS, the upgrade and the first state message

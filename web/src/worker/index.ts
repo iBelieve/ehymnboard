@@ -219,25 +219,6 @@ app.get("/device_booted", async (c) => {
   return c.body(null, 204);
 });
 
-app.get("/device_healthy", async (c) => {
-  const { device_id, saved_state_writes } = deviceStatus(c);
-
-  console.log(`Device healthy: ${getDeviceName(device_id)} (${device_id})`);
-  ping(c, device_id, "", "Device healthy");
-
-  if (device_id) {
-    await board(c.env).updateDevice(device_id, {
-      saved_state_writes,
-      last_seen: new Date().toISOString(),
-      firmware_version: c.req.query("firmware_version"),
-    });
-  } else {
-    console.log("Warning: Ignoring device update without a device_id");
-  }
-
-  return c.body(null, 204);
-});
-
 // 204 if the board should keep its firmware, otherwise 200 with the version
 // it should install.
 app.get("/firmware/latest", async (c) => {

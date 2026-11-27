@@ -102,8 +102,8 @@ TEST(BuildRequestPath, ReportsFirmwareVersion)
 {
     const DeviceStatus status{"AB", 1, false, "022cdbf-dirty-20261121154951"};
 
-    EXPECT_EQ(build_request_path("/device_healthy", status),
-              "/device_healthy?device_id=AB&saved_state_writes=1&watchdog_caused_reboot=0"
+    EXPECT_EQ(build_request_path("/device_booted", status),
+              "/device_booted?device_id=AB&saved_state_writes=1&watchdog_caused_reboot=0"
               "&firmware_version=022cdbf-dirty-20261121154951");
 }
 

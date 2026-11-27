@@ -32,11 +32,6 @@ async function createAuth(sql: SqlStorage, secret: string) {
     // on several hosts (hymnboard.sonrise.io, hymnboard.mluther.org,
     // workers.dev, previews, localhost). Nothing here redirects or emails a
     // link, which is what a fixed one is for.
-    // The request's own host over https is trusted too: the self-hosted
-    // image, behind a proxy that ends TLS (dokku's nginx, behind
-    // Cloudflare), sees http:// URLs while the browser's Origin is https://,
-    // and Better Auth refuses a sign-in from an Origin it doesn't trust.
-    trustedOrigins: (request) => (request ? [`https://${new URL(request.url).host}`] : []),
     database: { dialect: new DurableObjectDialect(sql), type: "sqlite", transaction: false },
     // Admins add accounts (the admin plugin's createUser); nobody signs up.
     emailAndPassword: { enabled: true, disableSignUp: true },

@@ -18,12 +18,12 @@ beforeAll(async () => {
 });
 
 function get(path: string, headers: Record<string, string> = {}) {
-  return exports.default.fetch(new Request(`http://api.hymnboard.sonrise.io${path}`, { headers }));
+  return exports.default.fetch(new Request(`https://hymnboard.sonrise.io${path}`, { headers }));
 }
 
 function putLines(lines: string[], headers?: Record<string, string>) {
   return exports.default.fetch(
-    new Request("http://api.hymnboard.sonrise.io/api/lines", {
+    new Request("https://hymnboard.sonrise.io/api/lines", {
       method: "PUT",
       headers: { ...(headers ?? AUTH), "Content-Type": "application/json" },
       body: JSON.stringify({ lines }),
@@ -102,21 +102,19 @@ describe("GET /images/:id (device protocol)", () => {
 });
 
 describe("device status", () => {
-  test("records boots, health and image fetches", async () => {
+  test("records boots and image fetches", async () => {
     expect(
       (await get(`/device_booted?device_id=${LEFT}&saved_state_writes=3&watchdog_caused_reboot=1`))
         .status,
     ).toBe(204);
-    expect((await get(`/device_healthy?device_id=${LEFT}&saved_state_writes=4`)).status).toBe(204);
     await get(`/images/3?device_id=${LEFT}&saved_state_writes=4`);
-    await get("/device_healthy?device_id=E661A4D41787452B");
+    await get("/images/2?device_id=E661A4D41787452B");
 
     await settle();
     expect(pings.map((p) => p.url.split("hc-ping.com/")[1])).toEqual([
       "a717c5f0-8a83-45f9-92a7-c79a21a437b4/failure",
-      "a717c5f0-8a83-45f9-92a7-c79a21a437b4",
       "a717c5f0-8a83-45f9-92a7-c79a21a437b4/log",
-      "6c7ef2cb-71b8-492e-9e11-4ddfacf29d0c",
+      "6c7ef2cb-71b8-492e-9e11-4ddfacf29d0c/log",
     ]);
 
     const state = await (await get("/api/state", AUTH)).json<BoardState>();
@@ -135,7 +133,7 @@ describe("device status", () => {
     async (healthchecks) => {
       const ctx = createExecutionContext();
       const res = await worker.fetch(
-        new Request(`http://api.hymnboard.sonrise.io/device_booted?device_id=${LEFT}`),
+        new Request(`https://hymnboard.sonrise.io/device_booted?device_id=${LEFT}`),
         { ...env, HEALTHCHECKS: healthchecks },
         ctx,
       );
@@ -146,8 +144,8 @@ describe("device status", () => {
   );
 
   test("ignores a saved_state_writes that isn't an integer", async () => {
-    await get(`/device_healthy?device_id=${LEFT}&saved_state_writes=9`);
-    await get(`/device_healthy?device_id=${LEFT}&saved_state_writes=lots`);
+    await get(`/images/1?device_id=${LEFT}&saved_state_writes=9`);
+    await get(`/images/1?device_id=${LEFT}&saved_state_writes=lots`);
     const state = await (await get("/api/state", AUTH)).json<BoardState>();
     expect(state.devices[0]!.saved_state_writes).toBe(9);
   });
@@ -263,7 +261,7 @@ describe("admin API", () => {
     expect((await putLines(["1", "2"])).status).toBe(400);
     for (const body of ["null", "[]", "not json", '"lines"']) {
       const res = await exports.default.fetch(
-        new Request("http://api.hymnboard.sonrise.io/api/lines", {
+        new Request("https://hymnboard.sonrise.io/api/lines", {
           method: "PUT",
           headers: { ...AUTH, "Content-Type": "application/json" },
           body,
@@ -291,7 +289,7 @@ function upload(version: string, size: number, headers: Record<string, string> =
   form.set("version", version);
   form.set("image", new File([new Uint8Array(size).fill(7)], "fw.bin"));
   return exports.default.fetch(
-    new Request("http://api.hymnboard.sonrise.io/firmware", {
+    new Request("https://hymnboard.sonrise.io/firmware", {
       method: "POST",
       headers: { ...AUTH, ...headers },
       body: form,

@@ -1,4 +1,4 @@
-// Secrets set in the environment (dokku config or `wrangler secret put`), so
+// Secrets (`wrangler secret put`, or `.dev.vars` locally), so
 // `wrangler types` can't see them.
 interface Env {
   // Signs Better Auth's session cookies: at least 32 random characters

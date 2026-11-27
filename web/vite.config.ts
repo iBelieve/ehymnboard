@@ -20,8 +20,7 @@ export default defineConfig(({ command }) => ({
     // machine): the setup password is "dev".
     cloudflare(command === "serve" ? { config: { vars: DEV_VARS } } : {}),
   ],
-  // The Docker image's port when PORT isn't set, and the e2e tests' default.
-  // (Not 5000: macOS's AirPlay Receiver listens there.)
+  // `pnpm dev`'s port (not 5000: macOS's AirPlay Receiver listens there)
   server: { port: 8000, strictPort: true },
   build: {
     // The admin bundles opentype.js and the font for its live preview.

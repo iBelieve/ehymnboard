@@ -60,9 +60,9 @@ function signInFrom(origin: string) {
   );
 }
 
-test("signs in over https when the server sees http (behind a proxy that ends TLS)", async () => {
+test("refuses a sign-in from another site", async () => {
   await signInAsAdmin();
-  expect((await signInFrom(BASE.replace(/^http:/, "https:"))).status).toBe(200);
+  expect((await signInFrom(BASE)).status).toBe(200);
   expect((await signInFrom("https://elsewhere.example")).status).toBe(403);
 });
 

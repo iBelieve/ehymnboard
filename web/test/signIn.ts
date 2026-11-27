@@ -1,6 +1,6 @@
 import { exports } from "cloudflare:workers";
 
-export const BASE = "http://api.hymnboard.sonrise.io";
+export const BASE = "https://hymnboard.sonrise.io";
 export const ADMIN = {
   name: "Admin",
   email: "admin@example.com",
