@@ -479,7 +479,7 @@ export class HymnBoard extends DurableObject<Env> {
 
   /**
    * Closes the boards' sockets that an earlier deploy accepted, so they
-   * reconnect to this one. On Cloudflare, sockets stay open across a deploy,
+   * reconnect to this one. Sockets stay open across a deploy,
    * but the runtime stops updating their auto-response timestamps (pings
    * are still answered): seen 2026-11-24, when the alarm took both boards'
    * live sockets for silent. Called from each event that could read those
@@ -609,11 +609,7 @@ function seconds(ms: number): number {
   return Math.round(ms / 1000);
 }
 
-/**
- * The Cloudflare data center a request came in through: `request.cf` on
- * Cloudflare, or the end of its CF-Ray header ("8e31e5ea4a4cf507-ORD") behind
- * Cloudflare's proxy elsewhere, as on dokku. Undefined without either.
- */
+/** The Cloudflare data center a request came in through, from `request.cf`. */
 export function coloOf(request: Request): string | undefined {
   const cf: unknown = request.cf;
   if (typeof cf === "object" && cf !== null && "colo" in cf) {
@@ -621,7 +617,7 @@ export function coloOf(request: Request): string | undefined {
       return cf.colo;
     }
   }
-  return /-([A-Z]{3})$/.exec(request.headers.get("cf-ray") ?? "")?.[1];
+  return undefined;
 }
 
 /** Closes a socket, ignoring one that's already closed or a code it can't send. */
