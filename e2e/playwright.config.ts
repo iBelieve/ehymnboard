@@ -19,7 +19,11 @@
 // Full-stack end-to-end tests: the real firmware in the emulator talks to a
 // running hymn board server while a browser drives its admin page. Without
 // E2E_BASE_URL, the tests start the server themselves (see README.md).
+import path from "node:path";
 import { defineConfig } from "@playwright/test";
+
+/** The session signIn.setup.ts saves, which every test starts with. */
+export const SIGNED_IN = path.join(import.meta.dirname, ".auth", "signed-in.json");
 
 const executablePath = process.env.E2E_CHROMIUM_EXECUTABLE;
 // The server under test: the one E2E_BASE_URL names, or else web/'s build,
@@ -29,11 +33,14 @@ const ownServer = process.env.E2E_BASE_URL === undefined;
 // Not 8787, `wrangler dev`'s default, or 8788, `wrangler pages dev`'s: a
 // Worker another project runs on its default port would take this one
 const port = 8790;
-const username = process.env.E2E_USERNAME ?? (ownServer ? "e2e" : undefined);
-const password = process.env.E2E_PASSWORD ?? (ownServer ? "e2e-password" : undefined);
+// signIn.setup.ts creates the first account on a server of our own with
+// this setup password
+if (ownServer) {
+  process.env.E2E_SETUP_PASSWORD ??= "e2e-setup";
+}
 const vars = {
-  BASIC_AUTH_USERNAME: username,
-  BASIC_AUTH_PASSWORD: password,
+  BETTER_AUTH_SECRET: "e2e-only-secret-of-at-least-32-characters",
+  SETUP_PASSWORD: process.env.E2E_SETUP_PASSWORD,
   EXTRA_DEVICE_IDS: "0000000000000000",
   // Production's wrangler.jsonc turns these on: never ping the real boards' checks
   HEALTHCHECKS: "off",
@@ -81,8 +88,11 @@ export default defineConfig({
     : undefined,
   use: {
     baseURL: process.env.E2E_BASE_URL ?? `http://127.0.0.1:${port}`,
-    httpCredentials: username && password ? { username, password, send: "always" } : undefined,
     trace: "retain-on-failure",
     launchOptions: executablePath ? { executablePath } : {},
   },
+  projects: [
+    { name: "sign in", testMatch: "signIn.setup.ts" },
+    { name: "e2e", dependencies: ["sign in"], use: { storageState: SIGNED_IN } },
+  ],
 });

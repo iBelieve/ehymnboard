@@ -1,6 +1,6 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { exports } from "cloudflare:workers";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import type { BoardState } from "../src/shared/api";
 import {
   CLOSE_OUTDATED,
@@ -13,14 +13,20 @@ import {
 } from "../src/worker/hymn-board";
 import { REDRAW_HOUR, localHour } from "../src/worker/redraw";
 import { type Ping, recordPings } from "./healthchecks";
+import { signInAsAdmin } from "./signIn";
 
 const LEFT = "E6614103E71F8D26";
 const RIGHT = "E661A4D41787452B";
 const LEFT_PING = "https://hc-ping.com/a717c5f0-8a83-45f9-92a7-c79a21a437b4";
 const RIGHT_PING = "https://hc-ping.com/6c7ef2cb-71b8-492e-9e11-4ddfacf29d0c";
-const AUTH = { Authorization: `Basic ${btoa("admin:secret")}` };
 const BASE = "https://hymnboard.sonrise.io";
 const STATE = /^state 1 ([0-9a-f]{40}) ([0-9a-f]{40}) ([0-9a-f]{40}) (\S+)$/;
+/** The session cookie of the first account, an admin. */
+let AUTH: Record<string, string>;
+
+beforeAll(async () => {
+  AUTH = await signInAsAdmin();
+});
 
 /** A board's end of its WebSocket, collecting what the server sends. */
 class Board {

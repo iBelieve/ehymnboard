@@ -11,6 +11,7 @@ web/worker-configuration.d.ts
 web/test/fixtures
 e2e/test-results/
 e2e/playwright-report/
+e2e/.auth/
 device/emulator/autobahn/reports/
 *.tsbuildinfo
 

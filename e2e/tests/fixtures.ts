@@ -40,6 +40,11 @@ export const FIRMWARE =
 
 export const LINE_COUNT = 6;
 
+/** A server on this machine, rather than far away (a Cloudflare preview). */
+function isLocal(origin: string) {
+  return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname);
+}
+
 /** Publishes a firmware release the way a release is published (`POST /firmware`). */
 export async function publishRelease(
   request: APIRequestContext,
@@ -211,8 +216,7 @@ export class Board {
     const verbose = !!process.env.EMULATOR_VERBOSE;
     // A server far away (a Cloudflare preview) takes a few hundred ms to
     // answer, which the default hold of the board's clock doesn't cover
-    const local = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(backend).hostname);
-    const toServer = tunnelTo(backend, local ? {} : { holdMs: 3_000 });
+    const toServer = tunnelTo(backend, isLocal(backend) ? {} : { holdMs: 3_000 });
     this.emu = new Emulator({
       firmware: FIRMWARE,
       backend,
@@ -317,6 +321,21 @@ export class Board {
  * a release left over on the server can't update a board by surprise.
  */
 export const test = base.extend<{ admin: AdminPage; backend: string; board: Board }>({
+  // Signed in with the browser's session (see signIn.setup.ts), as the page
+  // is. Its cookie is Secure, so away from this machine it's only sent over
+  // https, which the browser upgrades a preview's http:// URL to itself.
+  request: async ({ context, backend, playwright }, use) => {
+    if (isLocal(backend)) {
+      await use(context.request);
+      return;
+    }
+    const request = await playwright.request.newContext({
+      baseURL: backend.replace(/^http:/, "https:"),
+      storageState: await context.storageState(),
+    });
+    await use(request);
+    await request.dispose();
+  },
   admin: async ({ page, backend }, use) => {
     // Stay hermetic: the pages load web fonts and scripts from CDNs. The
     // browser may upgrade the server to https itself (*.workers.dev is on

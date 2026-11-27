@@ -116,10 +116,11 @@ malloc or free runs.
 
 #### Releasing an update
 
-Build, then upload the encrypted image and its version:
+Build, then upload the encrypted image and its version, with an admin's API
+key (from your Profile page in the admin, as an admin):
 
 ```sh
-curl -u "$BASIC_AUTH_USERNAME:$BASIC_AUTH_PASSWORD" \
+curl -H "X-Api-Key: $HYMNBOARD_API_KEY" \
   -F image=@build/ehymnboard_fota_image_encrypted.bin \
   -F version="$(cat build/firmware_version.txt)" \
   https://hymnboard.sonrise.io/firmware

@@ -39,6 +39,12 @@ in order, Apply and Clear buttons, a line per board ("… (last seen …") and a
 SVG picture of the board with one `<image>` per screen. A new admin page
 that keeps those passes unchanged.
 
+Before the tests, `signIn.setup.ts` signs in on the page (Email, Password,
+Sign in), or, on a server with no accounts yet, creates the first one with
+the server's setup password (Setup password, Your name, Email, New password,
+Create account). Every test starts with that session, and publishes firmware
+with it too, so the account must be an admin, as the first one is.
+
 ## Run them
 
 Build the firmware (see [device/README.md](../device/README.md)), then
@@ -53,16 +59,17 @@ pnpm test
 ```
 
 `pnpm test` builds `web/`, starts it with `wrangler dev` on port 8790 with
-empty data, basic auth `e2e`/`e2e-password`, `HEALTHCHECKS` off and the
+empty data, `SETUP_PASSWORD` `e2e-setup` (and a test-only
+`BETTER_AUTH_SECRET`), `HEALTHCHECKS` off and the
 emulated board allowed (`EXTRA_DEVICE_IDS=0000000000000000`), runs the
 tests and stops it. The server's state is kept in
 `web/.wrangler/e2e-state` until the next run. In CI its log is printed with
 the tests' (prefixed `[WebServer]`).
 
-To test another server instead, set `E2E_BASE_URL` (and `E2E_USERNAME` and
-`E2E_PASSWORD` for its basic auth); the tests then start nothing. That can be
-`pnpm dev` in `web/` (`http://localhost:8000`, with `EXTRA_DEVICE_IDS` and
-the login in `web/.dev.vars`) or a Cloudflare preview of a branch (its
+To test another server instead, set `E2E_BASE_URL`, and `E2E_SETUP_PASSWORD`
+if it has no accounts yet; the tests then start nothing. That can be
+`pnpm dev` in `web/` (`http://localhost:8000`, with `EXTRA_DEVICE_IDS` in
+`web/.dev.vars`; its setup password is `dev`) or a Cloudflare preview of a branch (its
 `http://…workers.dev` URL, plain HTTP; previews accept the emulated board). The board's
 clock waits longer for a server that isn't local.
 
@@ -71,13 +78,14 @@ them at a server in use. Each test publishes the build under test as the server'
 before its board boots and again when it ends, so a release left on the
 server can't update a board by surprise.
 
-| Variable                       | Default                                                    |
-| ------------------------------ | ---------------------------------------------------------- |
-| `E2E_BASE_URL`                 | none: the tests start `web/` on `http://127.0.0.1:8790`    |
-| `E2E_USERNAME`, `E2E_PASSWORD` | `e2e`, `e2e-password` for their own server; none otherwise |
-| `FIRMWARE_UF2`                 | `../device/build/ehymnboard.uf2`                           |
-| `E2E_CHROMIUM_EXECUTABLE`      | Playwright's own Chromium                                  |
-| `EMULATOR_VERBOSE=1`           | prints the firmware's serial output                        |
+| Variable                    | Default                                                 |
+| --------------------------- | ------------------------------------------------------- |
+| `E2E_BASE_URL`              | none: the tests start `web/` on `http://127.0.0.1:8790` |
+| `E2E_EMAIL`, `E2E_PASSWORD` | `e2e@example.com`, `e2e-password`                       |
+| `E2E_SETUP_PASSWORD`        | `e2e-setup` for their own server; none otherwise        |
+| `FIRMWARE_UF2`              | `../device/build/ehymnboard.uf2`                        |
+| `E2E_CHROMIUM_EXECUTABLE`   | Playwright's own Chromium                               |
+| `EMULATOR_VERBOSE=1`        | prints the firmware's serial output                     |
 
 `FIRMWARE_UF2` must sit in its build directory, which also holds the
 bootloader, `firmware_version.txt` and the encrypted OTA image. The OTA test
@@ -95,7 +103,7 @@ pnpm run lint           # oxlint, type-aware rules via tsrs
 ## Testing a replacement server
 
 Run it and point `E2E_BASE_URL` at it. It must serve the device API and the
-admin page there, with basic auth (or none), and accept the emulated board's
+admin page there, with the same sign-in page (`signIn.setup.ts`), and accept the emulated board's
 ID on `/ws`. To make CI test it, change the `webServer` entry in
 `playwright.config.ts` to start it: its `command`, the `cwd` that runs in
 (`../web` now) and the `url` Playwright waits on until the server is ready
