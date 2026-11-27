@@ -90,6 +90,9 @@ struct Screens
     ScreenEtags shown;
     // The etag the server's last state message asked for
     ScreenEtags wanted;
+    // The screens to download and draw again though they show what the server
+    // wants: it asked for a redraw ("redraw"), and a full refresh clears ghosting
+    std::array<bool, SCREEN_COUNT> redraw{};
     // When to retry after a failed download
     uint64_t retry_at_ms = 0;
     // Since when downloads have kept failing, if they have
@@ -113,8 +116,26 @@ struct Board
 
 static void service(Board &board);
 
+// Whether a screen needs downloading and drawing
+static bool needs_drawing(const Screens &screens, std::size_t i)
+{
+    return screens.redraw.at(i) || screens.shown.at(i) != screens.wanted.at(i);
+}
+
+static bool any_needs_drawing(const Screens &screens)
+{
+    for (std::size_t i = 0; i < SCREEN_COUNT; i++)
+    {
+        if (needs_drawing(screens, i))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Downloads and draws every screen that doesn't show what the server wants,
-// keeping the socket serviced in between. Returns true if any download got
+// or that it asked to redraw, keeping the socket serviced in between. Returns true if any download got
 // an answer (a new image or a 304), so the server should hear what's shown.
 static bool update_screens(Board &board)
 {
@@ -126,14 +147,22 @@ static bool update_screens(Board &board)
 
     for (std::size_t i = 0; i < SCREEN_COUNT; i++)
     {
-        if (screens.shown.at(i) == screens.wanted.at(i))
+        if (!needs_drawing(screens, i))
         {
             continue;
         }
-        const auto ret = refresh_screen(static_cast<int>(i + 1), *screens.panels.at(i), screens.shown.at(i));
+        // A redraw asks without the ETag, so the server sends the image again
+        std::string etag = screens.redraw.at(i) ? std::string() : screens.shown.at(i);
+        const auto ret = refresh_screen(static_cast<int>(i + 1), *screens.panels.at(i), etag);
         if (ret == FetchImageResult::NEW_IMAGE || ret == FetchImageResult::NO_CHANGE)
         {
-            any_updated = any_updated || ret == FetchImageResult::NEW_IMAGE;
+            // An image without an ETag keeps the one the screen had, as before
+            if (!etag.empty() && etag != screens.shown.at(i))
+            {
+                screens.shown.at(i) = etag;
+                any_updated = true;
+            }
+            screens.redraw.at(i) = false;
             any_answered = true;
             // The server's answer is current: a 304 means the state message
             // was older than the image, and an image without a usable ETag
@@ -157,7 +186,7 @@ static bool update_screens(Board &board)
     bool still_failing = false;
     for (std::size_t i = 0; i < SCREEN_COUNT; i++)
     {
-        still_failing = still_failing || (failed.at(i) && screens.wanted.at(i) != screens.shown.at(i));
+        still_failing = still_failing || (failed.at(i) && needs_drawing(screens, i));
     }
     if (still_failing)
     {
@@ -240,12 +269,22 @@ static void service(Board &board)
         board.offered_version = events.state->firmware_version;
 
         // Let the server know what the panels show, if they're current. Then
-        // nothing needs downloading, so no download is failing either
+        // nothing needs downloading (unless for a redraw), so no download is
+        // failing either
         if (screens.wanted == screens.shown)
         {
-            screens.failing_since_ms.reset();
+            if (!any_needs_drawing(screens))
+            {
+                screens.failing_since_ms.reset();
+            }
             board.link.client().send_text(format_shown_message(screens.shown));
         }
+    }
+    if (events.redraw)
+    {
+        printf("Server asked for every screen to be redrawn\n");
+        screens.redraw.fill(true);
+        screens.retry_at_ms = now;
     }
     if (events.pong)
     {
@@ -359,7 +398,7 @@ int main()
 
         const auto now = now_ms();
         const bool live = board.policy.state() == ConnectionPolicy::State::LIVE;
-        if (live && screens.wanted != screens.shown && now >= screens.retry_at_ms && update_screens(board))
+        if (live && any_needs_drawing(screens) && now >= screens.retry_at_ms && update_screens(board))
         {
             board.link.client().send_text(format_shown_message(screens.shown));
         }

@@ -34,7 +34,13 @@ attachment. Applying lines or uploading firmware sends every board the new
 otherwise), plus any in `EXTRA_DEVICE_IDS` (comma separated, for the e2e
 tests' emulated board; leave it unset in production). While any board is
 connected, an alarm every 10 minutes pings each live board's
-healthchecks.io check and closes sockets that stopped pinging. Sockets stay
+healthchecks.io check and closes sockets that stopped pinging. The first
+alarm after 3 AM in a board's time zone (the one Cloudflare places its IP
+address in, `request.cf.timezone` on its upgrade request; UTC if unknown)
+sends the board `redraw`, and the board downloads and redraws every screen
+with a full refresh (see `src/worker/redraw.ts`). Those downloads, of images
+the board said it shows, count as redraws: they don't change its "last
+updated" time or count towards flagging it for not keeping its ETag. Sockets stay
 open across a deploy, but their ping times stop updating, so after a deploy
 the boards' sockets from before it are closed (code 4002) by whichever comes
 first: the admin's next look at the boards, a board connecting or sending

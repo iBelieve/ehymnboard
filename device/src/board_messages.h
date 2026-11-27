@@ -26,6 +26,8 @@
 //   server -> board  "state 1 <etag1> <etag2> <etag3> <firmware version or ->"
 //   board -> server  "ping"  (answered "pong" without waking the server)
 //   board -> server  "shown <etag1> <etag2> <etag3>"
+//   server -> board  "redraw"  (nightly: download and redraw every panel with
+//                               a full refresh, which clears any ghosting)
 //
 // Unknown messages, and state messages of another version, are ignored, so
 // the server can add to the protocol without breaking older boards.
@@ -43,6 +45,7 @@ inline constexpr std::size_t MAX_BOARD_MESSAGE = 256;
 
 inline constexpr std::string_view PING_MESSAGE = "ping";
 inline constexpr std::string_view PONG_MESSAGE = "pong";
+inline constexpr std::string_view REDRAW_MESSAGE = "redraw";
 
 using ScreenEtags = std::array<std::string, SCREEN_COUNT>;
 

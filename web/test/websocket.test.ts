@@ -9,7 +9,9 @@ import {
   HEALTH_INTERVAL_MS,
   SOCKET_SILENT_MS,
   coloOf,
+  timeZoneOf,
 } from "../src/worker/hymn-board";
+import { REDRAW_HOUR, localHour } from "../src/worker/redraw";
 import { type Ping, recordPings } from "./healthchecks";
 
 const LEFT = "E6614103E71F8D26";
@@ -53,24 +55,26 @@ class Board {
 
 const sockets: Board[] = [];
 
+/** What Cloudflare says about a request: its data center and time zone. */
+type Cf = { colo?: string; timezone?: string };
+
 function upgrade(
   query: string,
   headers: Record<string, string> = { Upgrade: "websocket" },
-  colo?: string,
+  cf?: Cf,
 ) {
-  const cf = colo === undefined ? undefined : { colo };
   return exports.default.fetch(new Request(`${BASE}/ws?${query}`, { headers, cf }));
 }
 
 /**
  * Connects as the firmware does, with its query string (and the data center
- * Cloudflare says it came in through, if any).
+ * Cloudflare says it came in through, if any, or what else `cf` says).
  */
-async function connect(deviceId = LEFT, firmware = "v1", colo?: string): Promise<Board> {
+async function connect(deviceId = LEFT, firmware = "v1", cf?: string | Cf): Promise<Board> {
   const res = await upgrade(
     `device_id=${deviceId}&saved_state_writes=4&watchdog_caused_reboot=0&firmware_version=${firmware}&proto=1`,
     { Upgrade: "websocket" },
-    colo,
+    typeof cf === "string" ? { colo: cf } : cf,
   );
   expect(res.status).toBe(101);
   const board = new Board(res.webSocket!);
@@ -135,6 +139,17 @@ async function hangUp(board: Board) {
   board.ws.close(1000, "bye");
   await board.closed;
   await settle();
+}
+
+/** Connects, and says the board shows the screens its state names. */
+async function connectShowing(): Promise<{ board: Board; etags: string[] }> {
+  const board = await connect();
+  const etags = STATE.exec(await board.next(0))!.slice(1, 4);
+  board.ws.send(`shown ${etags.join(" ")}`);
+  // A ping round trip orders it after the message
+  await board.ask("ping");
+  await runInDurableObject(env.HYMN_BOARD.getByName("main"), () => undefined);
+  return { board, etags };
 }
 
 /** The next alarm pings nobody and schedules no other. */
@@ -228,12 +243,7 @@ describe("GET /ws", () => {
   });
 
   test("records what the board shows", async () => {
-    const board = await connect();
-    const etags = STATE.exec(await board.next(0))!.slice(1, 4);
-    board.ws.send(`shown ${etags.join(" ")}`);
-    // A ping round trip orders it after the message
-    await board.ask("ping");
-    await runInDurableObject(env.HYMN_BOARD.getByName("main"), () => undefined);
+    const { etags } = await connectShowing();
     expect(JSON.parse(device(await state())!.shown_etags!)).toEqual(etags);
   });
 
@@ -460,6 +470,66 @@ describe("GET /ws", () => {
   });
 });
 
+/**
+ * A fixed-offset time zone where it's `hour` o'clock now, or isn't when
+ * `hour` is negative ("Etc/GMT-5" is five hours ahead of UTC).
+ */
+function zoneWhereItIs(hour: number): string {
+  for (let offset = -12; offset <= 14; offset++) {
+    const zone = offset === 0 ? "Etc/GMT" : `Etc/GMT${offset > 0 ? "-" : "+"}${Math.abs(offset)}`;
+    if ((localHour(Date.now(), zone) === hour) === hour >= 0) {
+      return zone;
+    }
+  }
+  throw new Error(`no zone where it's ${hour}`);
+}
+
+describe("the nightly redraw", () => {
+  test("the alarm asks a board to redraw in its redraw hour, once", async () => {
+    const board = await connect(LEFT, "v1", { timezone: zoneWhereItIs(REDRAW_HOUR) });
+    await board.next(0);
+    const logged = spyOnLog();
+
+    expect(await runDurableObjectAlarm(env.HYMN_BOARD.getByName("main"))).toBe(true);
+    expect(await board.next(1)).toBe("redraw");
+    expect(logged()).toContainEqual(
+      expect.stringMatching(/^Asked Left Hymn Board \(E6614103E71F8D26\) to redraw/),
+    );
+
+    // The next alarm in the same hour, even on a new socket, doesn't ask again
+    const again = await connect(LEFT, "v1", { timezone: zoneWhereItIs(REDRAW_HOUR) });
+    await again.next(0);
+    expect(await runDurableObjectAlarm(env.HYMN_BOARD.getByName("main"))).toBe(true);
+    expect(await again.ask("ping")).toBe("pong");
+    expect(again.messages).toEqual([expect.stringMatching(STATE), "pong"]);
+  });
+
+  test("the alarm doesn't ask outside the redraw hour", async () => {
+    const board = await connect(LEFT, "v1", { timezone: zoneWhereItIs(-1) });
+    await board.next(0);
+    expect(await runDurableObjectAlarm(env.HYMN_BOARD.getByName("main"))).toBe(true);
+    expect(await board.ask("ping")).toBe("pong");
+    expect(board.messages).toEqual([expect.stringMatching(STATE), "pong"]);
+  });
+
+  test("a board's download of an image it shows is a redraw, not an update", async () => {
+    const { etags } = await connectShowing();
+    const logged = spyOnLog();
+
+    // Without its ETag, as the board redraws, more times than flag a stuck board
+    for (let i = 0; i < 4; i++) {
+      const res = await exports.default.fetch(`${BASE}/images/2?device_id=${LEFT}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Etag")).toBe(etags[1]);
+    }
+    expect(device(await state())).toMatchObject({ last_updated_at: null, etag_stuck_at: null });
+    expect(logged()).toContainEqual(
+      `Device Left Hymn Board (${LEFT}) redrawing image 2 (${etags[1]})`,
+    );
+    expect(pings.filter((p) => p.url.endsWith("/log") || p.url.endsWith("/failure"))).toEqual([]);
+  });
+});
+
 test("EXTRA_DEVICE_IDS lets a test board connect", async () => {
   const board = await connect("1111111111111111");
   expect(STATE.test(await board.next(0))).toBe(true);
@@ -474,5 +544,16 @@ describe("coloOf", () => {
   test("is undefined without one", () => {
     expect(coloOf(new Request(BASE))).toBeUndefined();
     expect(coloOf(new Request(BASE, { cf: { colo: "" } }))).toBeUndefined();
+  });
+});
+
+describe("timeZoneOf", () => {
+  test("takes Cloudflare's time zone", () => {
+    const cf = { colo: "ORD", timezone: "America/Chicago" };
+    expect(timeZoneOf(new Request(BASE, { cf }))).toBe("America/Chicago");
+  });
+
+  test("is undefined without one", () => {
+    expect(timeZoneOf(new Request(BASE, { cf: { colo: "ORD" } }))).toBeUndefined();
   });
 });

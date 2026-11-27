@@ -117,10 +117,16 @@ app.get("/images/:id{[0-9]+}", async (c) => {
     return c.body(null, 304);
   }
 
-  console.log(
-    `Device ${getDeviceName(status.device_id)} (${status.device_id}) updating image ${id} from ${etag} to ${result.etag}`,
-  );
-  ping(c, status.device_id, "/log", `Updating image ${id}`);
+  if (result.redraw) {
+    console.log(
+      `Device ${getDeviceName(status.device_id)} (${status.device_id}) redrawing image ${id} (${result.etag})`,
+    );
+  } else {
+    console.log(
+      `Device ${getDeviceName(status.device_id)} (${status.device_id}) updating image ${id} from ${etag} to ${result.etag}`,
+    );
+    ping(c, status.device_id, "/log", `Updating image ${id}`);
+  }
 
   if (result.etagStuck) {
     console.log(

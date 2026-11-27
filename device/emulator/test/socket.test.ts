@@ -283,3 +283,76 @@ test("keeps pinging while it downloads screens one after another", () => {
   emu.waitForSerial("Refreshing screen 3 failed", 60_000, first);
   assert.equal(emu.server.sockets.length, 1, "the socket stayed up");
 });
+
+test("redraws every screen with a full update when the server asks, without saving to flash", () => {
+  const { emu, at } = bootLive();
+  const [socket] = emu.server.sockets;
+  const requests = emu.net.requests.length;
+  const shown = socket.received.filter((m) => m.startsWith("shown ")).length;
+  const saves = count(emu, "State saved to flash");
+  const flashWrites = emu.board.flashWrites;
+
+  socket.sendText("redraw");
+  const asked = emu.waitForSerial("Server asked for every screen to be redrawn", 5_000, at);
+  emu.waitFor("three more displays", () => emu.displays.length === 6, 60_000);
+
+  // Downloaded again without the ETag, so the server sends each image again
+  const since = emu.net.requests.slice(requests);
+  assert.deepEqual(
+    since.map((r) => [r.path, r.query.etag]),
+    [
+      ["/images/1", undefined],
+      ["/images/2", undefined],
+      ["/images/3", undefined],
+    ],
+  );
+  // The same images, each with the full update (0xF7)
+  assert.deepEqual(
+    emu.displays.slice(3).map((d) => [d.screen, d.updateControl]),
+    [
+      [1, 0xf7],
+      [2, 0xf7],
+      [3, 0xf7],
+    ],
+  );
+  for (const d of emu.displays.slice(3)) {
+    assert.deepEqual(d.frame, emu.displays[d.screen - 1].frame, `screen ${d.screen}`);
+  }
+  // Nothing changed, so nothing to save; the server hears what's shown
+  emu.waitFor(
+    "the shown message",
+    () => socket.received.filter((m) => m.startsWith("shown ")).length > shown,
+    5_000,
+  );
+  assert.equal(count(emu, "State saved to flash"), saves);
+  assert.equal(emu.board.flashWrites, flashWrites);
+  assert.equal(socket.received.at(-1), "shown v1-1 v1-2 v1-3");
+
+  // And it's done: no more downloads
+  emu.run(60_000);
+  assert.equal(emu.net.requests.length, requests + 3);
+  assert.ok(emu.serial.indexOf("Refreshing screen", asked) >= 0);
+});
+
+test("a redraw whose download fails is tried again", () => {
+  const { emu } = bootLive();
+  const [socket] = emu.server.sockets;
+  let fail = true;
+  emu.server.override = (req) => {
+    if (req.path === "/images/2" && fail) {
+      fail = false;
+      return { status: 500 };
+    }
+    return undefined;
+  };
+  socket.sendText("redraw");
+  const failed = emu.waitForSerial("Refreshing screen 2 failed", 60_000);
+  // Only screen 2 again, after the retry delay
+  emu.waitForSerial("New image for screen 2", 30_000, failed);
+  emu.waitFor("screen 2's redraw", () => emu.displays.length === 6, 10_000);
+  assert.deepEqual(
+    emu.displays.slice(3).map((d) => d.screen),
+    [1, 3, 2],
+  );
+  assert.equal(emu.reboots, 0);
+});

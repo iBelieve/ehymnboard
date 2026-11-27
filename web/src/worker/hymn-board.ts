@@ -5,6 +5,7 @@ import { EMPTY_LINES, isLines, linesForScreen, SCREEN_COUNT, type Lines } from "
 import type { Device, DeviceStatusParams, FirmwareInfo } from "../shared/api";
 import { getDeviceName, healthchecksOn, pingHealthcheck } from "./devices";
 import { migrate } from "./migrations";
+import { REDRAW_HOUR, redrawDue } from "./redraw";
 
 // Column names are interpolated into SQL, so only these are accepted.
 const DEVICE_FIELDS = new Set([
@@ -26,9 +27,13 @@ const DEVICE_FIELDS = new Set([
 // 30 s (answered with "pong" by the runtime, without waking this object) and
 // "shown <etag1> <etag2> <etag3>" with what its panels show, after a state
 // it already shows and after each update (even one some screens failed).
+// Once a night the server sends "redraw" (see redraw.ts): the board downloads
+// every screen again and redraws it with a full refresh. Boards from before
+// it ignore it, as they do any message they don't know.
 const STATE_VERSION = 1;
 const PING = "ping";
 const PONG = "pong";
+const REDRAW = "redraw";
 const NO_FIRMWARE = "-";
 /** Close code for a socket that a newer one from the same board replaced. */
 export const CLOSE_REPLACED = 4000;
@@ -48,14 +53,17 @@ export const HEALTH_INTERVAL_MS = 10 * 60_000;
 /**
  * What each socket remembers through hibernation: `version` is the deploy
  * that accepted it (unset before 2026-11-24), `colo` the Cloudflare data
- * center the board's connection came in through (see coloOf()), and `gone`
- * is set once the socket's close is dealt with, so it's dealt with once.
+ * center the board's connection came in through (see coloOf()), `timeZone`
+ * the time zone Cloudflare places the board's IP address in (see
+ * timeZoneOf(); it sets the hour of the nightly redraw), and `gone` is set
+ * once the socket's close is dealt with, so it's dealt with once.
  */
 type SocketAttachment = {
   deviceId: string;
   connectedAt: number;
   version?: string;
   colo?: string;
+  timeZone?: string;
   gone?: boolean;
 };
 
@@ -77,6 +85,8 @@ export type ImageResult =
       buffer: ArrayBuffer;
       /** True only on the download that newly flags the board as stuck. */
       etagStuck: boolean;
+      /** The board already shows this image: it's redrawing it (see REDRAW). */
+      redraw: boolean;
     };
 
 /**
@@ -169,18 +179,36 @@ export class HymnBoard extends DurableObject<Env> {
     const updated = etag !== screen.etag;
 
     let etagStuck = false;
+    let redraw = false;
     if (status.device_id) {
+      // A board downloads, without its ETag, an image it said it shows only
+      // to redraw it: neither a new image nor a sign it lost its ETag
+      redraw = updated && this.shownEtag(status.device_id, id) === screen.etag;
+      const changed = updated && !redraw;
       this.updateDevice(status.device_id, {
         saved_state_writes: status.saved_state_writes,
         last_seen: now,
-        last_updated_at: updated ? now : undefined,
+        last_updated_at: changed ? now : undefined,
       });
-      etagStuck = this.trackDownload(status.device_id, id, updated ? screen.etag : undefined, now);
+      etagStuck = this.trackDownload(status.device_id, id, changed ? screen.etag : undefined, now);
     }
 
     return updated
-      ? { status: 200, etag: screen.etag, buffer: screen.buffer, etagStuck }
+      ? { status: 200, etag: screen.etag, buffer: screen.buffer, etagStuck, redraw }
       : { status: 304, etag: screen.etag };
+  }
+
+  /** The etag the board last said its screen `id` shows ("shown"), if any. */
+  private shownEtag(deviceId: string, id: number): string | undefined {
+    const row = this.sql
+      .exec<{ shown_etags: string | null }>(
+        "SELECT shown_etags FROM devices WHERE id = ?",
+        deviceId,
+      )
+      .toArray()[0];
+    const shown: unknown = row?.shown_etags ? JSON.parse(row.shown_etags) : undefined;
+    const etag: unknown = Array.isArray(shown) ? shown[id - 1] : undefined;
+    return typeof etag === "string" ? etag : undefined;
   }
 
   /**
@@ -364,6 +392,7 @@ export class HymnBoard extends DurableObject<Env> {
       connectedAt: now,
       version: this.env.CF_VERSION_METADATA.id,
       colo,
+      timeZone: timeZoneOf(request),
     } satisfies SocketAttachment);
 
     const at = new Date(now).toISOString();
@@ -449,8 +478,8 @@ export class HymnBoard extends DurableObject<Env> {
 
   /**
    * Every 10 minutes while any board is connected: pings healthchecks.io for
-   * each live board (the board itself no longer does), and closes sockets
-   * that stopped pinging.
+   * each live board (the board itself no longer does), closes sockets that
+   * stopped pinging, and asks each board due its nightly redraw for it.
    */
   override async alarm(): Promise<void> {
     // First, as these sockets' ping times would fool the check below
@@ -466,6 +495,7 @@ export class HymnBoard extends DurableObject<Env> {
         continue;
       }
       live.add(attachment.deviceId);
+      this.redrawIfDue(ws, attachment);
     }
     const at = new Date().toISOString();
     for (const deviceId of live) {
@@ -475,6 +505,31 @@ export class HymnBoard extends DurableObject<Env> {
     if (this.openSockets().length > 0) {
       await this.ctx.storage.setAlarm(Date.now() + HEALTH_INTERVAL_MS);
     }
+  }
+
+  /**
+   * Asks the board on a live socket to redraw its panels, if it's the redraw
+   * hour where it is and it hasn't been asked in that hour already. When it
+   * was last asked is kept per board, as a board can reconnect meanwhile.
+   */
+  private redrawIfDue(ws: WebSocket, { deviceId, timeZone }: SocketAttachment): void {
+    const key = `redraw_at:${deviceId}`;
+    const last = this.ctx.storage.kv.get<number>(key);
+    const now = Date.now();
+    if (!redrawDue(now, timeZone, last)) {
+      return;
+    }
+    try {
+      ws.send(REDRAW);
+    } catch {
+      // Closing; the next alarm in the redraw hour asks again
+      return;
+    }
+    this.ctx.storage.kv.put(key, now);
+    const where = timeZone ?? "UTC, as its time zone isn't known";
+    console.log(
+      `Asked ${getDeviceName(deviceId)} (${deviceId}) to redraw its panels (${REDRAW_HOUR}:00 ${where})`,
+    );
   }
 
   /**
@@ -598,6 +653,10 @@ function attachmentOf(ws: WebSocket): SocketAttachment | undefined {
           : undefined,
       colo:
         "colo" in attachment && typeof attachment.colo === "string" ? attachment.colo : undefined,
+      timeZone:
+        "timeZone" in attachment && typeof attachment.timeZone === "string"
+          ? attachment.timeZone
+          : undefined,
       gone: "gone" in attachment && attachment.gone === true,
     };
   }
@@ -611,13 +670,24 @@ function seconds(ms: number): number {
 
 /** The Cloudflare data center a request came in through, from `request.cf`. */
 export function coloOf(request: Request): string | undefined {
+  return cfString(request, "colo");
+}
+
+/**
+ * The time zone Cloudflare places a request's IP address in, from
+ * `request.cf` (an IANA name such as "America/Chicago").
+ */
+export function timeZoneOf(request: Request): string | undefined {
+  return cfString(request, "timezone");
+}
+
+function cfString(request: Request, key: "colo" | "timezone"): string | undefined {
   const cf: unknown = request.cf;
-  if (typeof cf === "object" && cf !== null && "colo" in cf) {
-    if (typeof cf.colo === "string" && cf.colo !== "") {
-      return cf.colo;
-    }
+  if (typeof cf !== "object" || cf === null) {
+    return undefined;
   }
-  return undefined;
+  const value: unknown = Object.entries(cf).find(([name]) => name === key)?.[1];
+  return typeof value === "string" && value !== "" ? value : undefined;
 }
 
 /** Closes a socket, ignoring one that's already closed or a code it can't send. */
