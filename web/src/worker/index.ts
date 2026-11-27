@@ -46,27 +46,36 @@ app.use("*", async (c, next) => {
   return next();
 });
 
-/** The admin's API: anyone signed in. */
+/**
+ * Who's asking: the account of an API key, for scripts and workflows (in
+ * X-Api-Key, or Authorization: Bearer), or else whoever's signed in. A key
+ * acts as its account, with its role, but only on the routes below: never
+ * on Better Auth's own, so it can't manage accounts or keys.
+ */
+async function authenticate(c: AppContext): Promise<Viewer | Response> {
+  const bearer = /^Bearer\s+(\S+)$/i.exec(c.req.header("Authorization") ?? "")?.[1];
+  const key = c.req.header("X-Api-Key") ?? bearer;
+  const viewer = key
+    ? await accounts.apiKeyViewer(c.env, c.req.raw, key)
+    : await accounts.viewer(c.env, c.req.raw);
+  return viewer ?? c.text(key ? "Invalid API key\n" : "Sign in first\n", 401);
+}
+
+/** The lines and screens: any account. */
 const requireViewer: MiddlewareHandler<AppEnv> = async (c, next) => {
-  const viewer = await accounts.viewer(c.env, c.req.raw);
-  if (!viewer) {
-    return c.text("Sign in first\n", 401);
+  const viewer = await authenticate(c);
+  if (viewer instanceof Response) {
+    return viewer;
   }
   c.set("viewer", viewer);
   return next();
 };
 
-/**
- * Firmware: admins only, signed in or with an API key in X-Api-Key (for
- * curl, as device/README.md uploads it).
- */
+/** Firmware: admins only (device/README.md uploads it with curl and a key). */
 const requireAdmin: MiddlewareHandler<AppEnv> = async (c, next) => {
-  const key = c.req.header("X-Api-Key");
-  const viewer = key
-    ? await accounts.apiKeyViewer(c.env, c.req.raw, key)
-    : await accounts.viewer(c.env, c.req.raw);
-  if (!viewer) {
-    return c.text(key ? "Invalid API key\n" : "Sign in first\n", 401);
+  const viewer = await authenticate(c);
+  if (viewer instanceof Response) {
+    return viewer;
   }
   if (viewer.role !== "admin") {
     return c.text("Only admins can do that\n", 403);

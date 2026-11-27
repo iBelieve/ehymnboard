@@ -13,7 +13,7 @@ import { ConfirmButton, Section, SettingsPage } from "./Settings";
 import { useList } from "./useList";
 import { ActionForm, Field } from "./SignIn";
 
-/** Your own account: your name and password, and for admins, your API keys. */
+/** Your own account: your name, your password and your API keys. */
 export function ProfilePage({ viewer }: { viewer: Viewer }) {
   return (
     <SettingsPage title="Profile">
@@ -23,7 +23,7 @@ export function ProfilePage({ viewer }: { viewer: Viewer }) {
       <Section title="Your password">
         <ChangePassword />
       </Section>
-      {viewer.role === "admin" && <ApiKeys />}
+      <ApiKeys role={viewer.role} />
     </SettingsPage>
   );
 }
@@ -85,13 +85,15 @@ function ChangePassword() {
   );
 }
 
-function ApiKeys() {
+function ApiKeys({ role }: { role: Viewer["role"] }) {
   const keys = useList(listApiKeys);
   return (
     <Section title="Your API keys">
       <p className="mb-4 text-sm">
-        For uploading firmware with curl: send the key in an <code>X-Api-Key</code> header. A key
-        acts as you, and only uploads firmware.
+        For scripts and workflows that set the lines
+        {role === "admin" && " or upload firmware"}: send the key in an{" "}
+        <code>Authorization: Bearer</code> (or <code>X-Api-Key</code>) header. A key acts as you,
+        but can&apos;t manage accounts or keys.
       </p>
       {keys.error && <div className="text-error text-sm">{keys.error}</div>}
       <ul className="divide-base-200 mb-6 divide-y">

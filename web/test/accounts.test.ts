@@ -182,24 +182,56 @@ test("users change lines; only admins upload firmware or manage accounts", async
   expect((await upload(await signInAsAdmin())).status).toBe(201);
 });
 
-test("an admin's API key uploads firmware, and only that", async () => {
-  const admin = await signInAsAdmin();
-  const res = await post("/api/auth/api-key/create", { name: "curl" }, admin);
+/** A new API key of the account signed in with `session`. */
+async function createKey(session: Record<string, string>): Promise<string> {
+  const res = await post("/api/auth/api-key/create", { name: "a workflow" }, session);
   expect(res.status, await res.clone().text()).toBe(200);
-  const { key } = await res.json<{ key: string }>();
+  return (await res.json<{ key: string }>()).key;
+}
+
+function putLines(headers: Record<string, string>, lines = ["1", "2", "3", "4", "5", "6"]) {
+  return exports.default.fetch(
+    new Request(`${BASE}/api/lines`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify({ lines }),
+    }),
+  );
+}
+
+test("an admin's API key uploads firmware and sets the lines", async () => {
+  const key = await createKey(await signInAsAdmin());
   expect(key).toMatch(/^hb_/);
 
   expect((await upload({ "X-Api-Key": key })).status).toBe(201);
+  expect((await upload({ Authorization: `Bearer ${key}` })).status).toBe(201);
   expect((await upload({ "X-Api-Key": `${key}x` })).status).toBe(401);
-  // Not a session: the rest of the admin still needs signing in.
-  expect((await get("/api/state", { "X-Api-Key": key })).status).toBe(401);
+  expect((await putLines({ "X-Api-Key": key })).status).toBe(200);
+  expect((await get("/api/state", { Authorization: `Bearer ${key}` })).status).toBe(200);
+  expect((await get("/api/screens/1", { "X-Api-Key": key })).status).toBe(200);
+});
 
-  // A user's key is a user's: no firmware.
-  const user = await signInAsUser();
-  const userKey = await (
-    await post("/api/auth/api-key/create", { name: "x" }, user)
-  ).json<{ key: string }>();
-  expect((await upload({ "X-Api-Key": userKey.key })).status).toBe(403);
+test("a user's API key sets the lines, but uploads no firmware", async () => {
+  const key = await createKey(await signInAsUser());
+  const res = await putLines({ Authorization: `Bearer ${key}` }, ["Hymn 334", "", "", "", "", ""]);
+  expect(res.status, await res.clone().text()).toBe(200);
+  expect(await res.json()).toMatchObject({ lines: ["Hymn 334", "", "", "", "", ""] });
+  expect((await upload({ "X-Api-Key": key })).status).toBe(403);
+  expect((await putLines({ Authorization: "Bearer hb_not-a-key" })).status).toBe(401);
+});
+
+test("an API key can't manage accounts or keys", async () => {
+  const key = await createKey(await signInAsAdmin());
+  const ways: Record<string, string>[] = [{ "X-Api-Key": key }, { Authorization: `Bearer ${key}` }];
+  for (const headers of ways) {
+    const create = await post(
+      "/api/auth/admin/create-user",
+      { name: "Someone", email: "keyed@example.com", password: "a fine password", role: "admin" },
+      headers,
+    );
+    expect(create.status).toBe(401);
+    expect((await post("/api/auth/api-key/create", { name: "more" }, headers)).status).toBe(401);
+  }
 });
 
 test("a banned admin's API key stops working", async () => {
@@ -212,12 +244,7 @@ test("a banned admin's API key stops working", async () => {
     admin,
   );
   const { user } = await created.json<{ user: { id: string } }>();
-  const keyRes = await post(
-    "/api/auth/api-key/create",
-    { name: "curl" },
-    await signIn(email, password),
-  );
-  const { key } = await keyRes.json<{ key: string }>();
+  const key = await createKey(await signIn(email, password));
   expect((await upload({ "X-Api-Key": key })).status).toBe(201);
 
   const ban = await post("/api/auth/admin/ban-user", { userId: user.id }, admin);

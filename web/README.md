@@ -85,8 +85,21 @@ requests, so the boards' never load it.
   their name in the menu); only admins get the Accounts page (`#accounts`).
 - Until the first account exists, the admin page offers to create it, an
   admin, to whoever knows the deploy's `SETUP_PASSWORD`.
-- Admins can make API keys on their Profile page, for uploading firmware with
-  curl (`X-Api-Key`, see `device/README.md`). A key does nothing else.
+- Everyone can make API keys on their Profile page, for scripts and
+  workflows. A key acts as its account, with its role, on `/api/state`,
+  `/api/lines`, `/api/screens/N` and (an admin's) `/firmware` (see
+  `device/README.md`), sent as `Authorization: Bearer <key>` or
+  `X-Api-Key: <key>`. It can't manage accounts or keys. Setting the lines:
+
+  ```sh
+  curl -X PUT https://hymnboard.sonrise.io/api/lines \
+    -H "Authorization: Bearer $HYMNBOARD_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"lines": ["Hymn 334", "Psalm 23", "Hymn 685", "", "", ""]}'
+  ```
+
+  It answers with the board's state, as `GET /api/state` does.
+
 - Sign-ins are limited per address (Better Auth's rate limit, by
   `CF-Connecting-IP`, counted in the database), and so are tries at the
   setup password, three in 10 seconds. Sessions last 30 days from the last visit.
