@@ -15,6 +15,7 @@
     "test/websocket.test.ts",
     "test/healthchecks.ts",
     "test/accounts.test.ts",
+    "test/account-migrations.test.ts",
     "test/signIn.ts"
   ]
 }

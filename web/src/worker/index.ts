@@ -10,8 +10,8 @@ import {
 } from "./devices";
 
 import { STUCK_ETAG_DOWNLOADS } from "./hymn-board";
+import * as accounts from "./accounts";
 
-export { Accounts } from "./accounts";
 export { HymnBoard } from "./hymn-board";
 
 // Must match the device: OTA images are written to flash in 256-byte pages,
@@ -32,11 +32,6 @@ function board(env: Env) {
   return env.HYMN_BOARD.getByName("main");
 }
 
-/** Every account and session, for every board, in one instance. */
-function accounts(env: Env) {
-  return env.ACCOUNTS.getByName("accounts");
-}
-
 /**
  * A browser sends its cookies with a cross-site form post too, so changes
  * must come from the admin page itself (or from a tool like curl, which sends
@@ -53,8 +48,7 @@ app.use("*", async (c, next) => {
 
 /** The admin's API: anyone signed in. */
 const requireViewer: MiddlewareHandler<AppEnv> = async (c, next) => {
-  const cookie = c.req.header("Cookie");
-  const viewer = cookie ? await accounts(c.env).viewer(cookie) : null;
+  const viewer = await accounts.viewer(c.env, c.req.raw);
   if (!viewer) {
     return c.text("Sign in first\n", 401);
   }
@@ -68,9 +62,9 @@ const requireViewer: MiddlewareHandler<AppEnv> = async (c, next) => {
  */
 const requireAdmin: MiddlewareHandler<AppEnv> = async (c, next) => {
   const key = c.req.header("X-Api-Key");
-  const cookie = c.req.header("Cookie");
-  const stub = accounts(c.env);
-  const viewer = key ? await stub.apiKeyViewer(key) : cookie ? await stub.viewer(cookie) : null;
+  const viewer = key
+    ? await accounts.apiKeyViewer(c.env, c.req.raw, key)
+    : await accounts.viewer(c.env, c.req.raw);
   if (!viewer) {
     return c.text(key ? "Invalid API key\n" : "Sign in first\n", 401);
   }
@@ -264,17 +258,16 @@ app.get("/firmware/image", async (c) => {
 // ---------------------------------------------------------------------------
 
 // Better Auth: signing in and out, the session, managing accounts and API keys
-app.all("/api/auth/*", (c) => accounts(c.env).fetch(c.req.raw));
+app.all("/api/auth/*", (c) => accounts.handleAuthRequest(c.env, c.req.raw));
 
 // Until the first account exists, the admin page offers to create it, an
 // admin, for whoever knows the deploy's SETUP_PASSWORD.
-app.get("/api/setup", async (c) => c.json({ needed: await accounts(c.env).needsSetup() }));
+app.get("/api/setup", async (c) => c.json({ needed: await accounts.needsSetup(c.env) }));
 
 app.post("/api/setup", async (c) => {
-  const stub = accounts(c.env);
   // Once there's an account the setup password does nothing, so don't tell
   // anyone guessing it whether a guess was right.
-  if (!(await stub.needsSetup())) {
+  if (!(await accounts.needsSetup(c.env))) {
     return c.text("An account already exists\n", 409);
   }
   const body: unknown = await c.req.json().catch(() => undefined);
@@ -285,7 +278,11 @@ app.post("/api/setup", async (c) => {
   if (typeof name !== "string" || typeof email !== "string" || typeof password !== "string") {
     return c.text("Expected { setupPassword, name, email, password }\n", 400);
   }
-  const created = await stub.createFirstAccount({ name, email, password });
+  const created = await accounts.createFirstAccount(c.env, c.req.raw, {
+    name,
+    email,
+    password,
+  });
   if (typeof created === "string") {
     return c.text(`${created}\n`, 400);
   }

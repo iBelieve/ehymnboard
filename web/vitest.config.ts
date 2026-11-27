@@ -27,7 +27,7 @@ export default defineConfig({
         ],
         test: {
           name: "worker",
-          // Loading Better Auth into the Accounts object takes a few seconds
+          // Loading Better Auth takes a few seconds
           // the first time in each file (the bundled Worker doesn't).
           testTimeout: 20_000,
           hookTimeout: 20_000,
@@ -36,6 +36,7 @@ export default defineConfig({
             "test/migrations.test.ts",
             "test/websocket.test.ts",
             "test/accounts.test.ts",
+            "test/account-migrations.test.ts",
           ],
         },
       },

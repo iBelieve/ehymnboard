@@ -274,9 +274,6 @@ importers:
       hono:
         specifier: ^4.13.19
         version: 4.13.19
-      kysely:
-        specifier: ^0.29.9
-        version: 0.29.9
       opentype.js:
         specifier: ^2.0.0
         version: 2.0.0

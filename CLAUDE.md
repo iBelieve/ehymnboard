@@ -1,7 +1,7 @@
 # eHymnBoard
 
 E-ink hymn board: `device/` is Raspberry Pi Pico W firmware (C++, pico-sdk,
-CMake), `web/` is the server: a Hono Worker + Durable Object + React admin,
+CMake), `web/` is the server: a Hono Worker + Durable Object + D1 + React admin,
 in production on Cloudflare Workers (`hymnboard.sonrise.io`, deployed from
 master by Workers Builds). It replaced a Flask app
 (`server/`, last at commit 02ece7f) and its device endpoints
@@ -119,11 +119,14 @@ All checks below must pass; run them locally before committing.
   `pnpm run build`; formatting is checked once for the whole repository
 - After changing `wrangler.jsonc`, regenerate `worker-configuration.d.ts`
   with `pnpm exec wrangler types`
-- Accounts are Better Auth's, in the `Accounts` Durable Object (see
+- Accounts are Better Auth's, in the D1 database bound as `DB` (see
   `web/README.md`, "Accounts"): its tables are `ACCOUNT_MIGRATIONS` in
-  `src/worker/migrations.ts`, so a Better Auth upgrade or plugin that adds
-  fields needs a migration step there (compare with Better Auth's generated
-  SQL). Every deploy needs `BETTER_AUTH_SECRET` and `SETUP_PASSWORD`
+  `src/worker/account-migrations.ts`, which the Worker applies itself, so a
+  Better Auth upgrade or plugin that adds fields needs a migration step there
+  (`test/account-migrations.test.ts` fails until it has one). Don't keep a
+  Better Auth instance or promise across requests: a Worker can't await one
+  another request made. Every deploy needs `BETTER_AUTH_SECRET` and
+  `SETUP_PASSWORD`
 - Don't change the device endpoints' paths, query parameters or response
   bytes, or the `/ws` messages (`state`, `ping`/`pong`, `shown`, close
   codes): the firmware hard-codes them. The rasterizer is checked bit for bit

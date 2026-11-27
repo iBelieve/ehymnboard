@@ -66,14 +66,17 @@ secrets as always set).
 ## Accounts
 
 The admin is for signed-in accounts only, each with an email and password,
-through [Better Auth](https://better-auth.com). Its tables live in their own
-Durable Object, `Accounts` (one instance, `accounts`, for every board), apart
-from the boards' `HymnBoard`: someone signs in before we know which boards
-they look after. Better Auth has no adapter for Durable Object storage, so
-`src/worker/durable-object-dialect.ts` gives its Kysely adapter one, and its
-tables are created by the same hand-written migrations as the boards'
-(`ACCOUNT_MIGRATIONS` in `src/worker/migrations.ts`). Better Auth itself is
-loaded only by that object, so the boards' requests never load it.
+through [Better Auth](https://better-auth.com). Its tables live in a D1
+database (the `DB` binding: `hymnboard` for production, `hymnboard-previews`
+for every preview), apart from the boards' `HymnBoard` object: someone signs
+in before we know which boards they look after, and accounts, like the
+churches and memberships to come, are rows to look up across everything
+rather than one object's state. The Worker brings the tables up to date
+itself, the first time an isolate needs them, from hand-written versioned
+steps (`ACCOUNT_MIGRATIONS` in `src/worker/account-migrations.ts`), so a
+deploy needs no `wrangler d1 migrations apply`; a test checks they hold
+everything Better Auth wants. Better Auth is loaded only by the admin's
+requests, so the boards' never load it.
 
 - An account is an **admin**, who also manages accounts (on the admin's
   Accounts page: add, remove, set a password) and uploads firmware, or a
@@ -83,7 +86,7 @@ loaded only by that object, so the boards' requests never load it.
 - Admins can make API keys on the Accounts page, for uploading firmware with
   curl (`X-Api-Key`, see `device/README.md`). A key does nothing else.
 - Sign-ins are limited per address (Better Auth's rate limit, by
-  `CF-Connecting-IP`). Sessions last 30 days from the last visit.
+  `CF-Connecting-IP`, counted in the database). Sessions last 30 days from the last visit.
 - No email is sent yet: an admin sets a forgotten password. Emailed codes,
   passkeys and password-reset emails are Better Auth plugins away, since
   every account already has its email.
@@ -143,17 +146,19 @@ Every push to another branch that changes the web app gets its own
 of its own, shown in a comment on the pull request, with its own empty Durable
 Object, so a branch never touches the main deploy's data or another branch's.
 Previews don't inherit bindings or vars, so `wrangler.jsonc`'s `previews`
-block repeats the Durable Object binding; it has no `HEALTHCHECKS`,
+block repeats the Durable Object binding and binds the previews' own D1
+database; it has no `HEALTHCHECKS`,
 so previews never ping healthchecks.io. It sets `EXTRA_DEVICE_IDS` to the
 emulated board's ID, so the e2e tests can run against a preview. Workers Builds runs the same build
 command and variable for previews, with `pnpm exec wrangler preview` as the
 preview command.
 
-Each preview has its own accounts, so it needs both secrets, set once in
-the Previews base config (`pnpm exec wrangler preview base-config secret put
-BETTER_AUTH_SECRET`, and the same for `SETUP_PASSWORD`); new previews start
-with them. Open a new preview and create its first account with the setup
-password.
+Every preview shares one accounts database, `hymnboard-previews`, never
+production's, so an account made on one preview signs in on all of them. They
+need both secrets, set once in the Previews base config
+(`pnpm exec wrangler preview base-config secret put BETTER_AUTH_SECRET`, and
+the same for `SETUP_PASSWORD`); new previews start with them. Create the
+previews' first account on any preview with the setup password.
 
 ### Boards on TLS
 
