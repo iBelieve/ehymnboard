@@ -89,7 +89,7 @@ The messages are short text (`src/board_messages.h`):
 
 The nightly redraw is for the panels: Waveshare's manual says to refresh them
 at least once every 24 hours, or old images can stick, and a full refresh
-clears any ghosting. The server sends it at 3 AM where the board is (see
+clears any ghosting. The server sends it between 3 AM and 5 AM where the board is (see
 `web/README.md`), so nobody sees the panels flash.
 
 The upgrade request carries the same query string as every other request

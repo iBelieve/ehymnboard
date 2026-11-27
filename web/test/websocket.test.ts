@@ -142,8 +142,8 @@ async function hangUp(board: Board) {
 }
 
 /** Connects, and says the board shows the screens its state names. */
-async function connectShowing(): Promise<{ board: Board; etags: string[] }> {
-  const board = await connect();
+async function connectShowing(cf?: Cf): Promise<{ board: Board; etags: string[] }> {
+  const board = await connect(LEFT, "v1", cf);
   const etags = STATE.exec(await board.next(0))!.slice(1, 4);
   board.ws.send(`shown ${etags.join(" ")}`);
   // A ping round trip orders it after the message
@@ -471,13 +471,13 @@ describe("GET /ws", () => {
 });
 
 /**
- * A fixed-offset time zone where it's `hour` o'clock now, or isn't when
- * `hour` is negative ("Etc/GMT-5" is five hours ahead of UTC).
+ * A fixed-offset time zone where it's `hour` o'clock now ("Etc/GMT-5" is
+ * five hours ahead of UTC).
  */
 function zoneWhereItIs(hour: number): string {
   for (let offset = -12; offset <= 14; offset++) {
     const zone = offset === 0 ? "Etc/GMT" : `Etc/GMT${offset > 0 ? "-" : "+"}${Math.abs(offset)}`;
-    if ((localHour(Date.now(), zone) === hour) === hour >= 0) {
+    if (localHour(Date.now(), zone) === hour) {
       return zone;
     }
   }
@@ -485,6 +485,13 @@ function zoneWhereItIs(hour: number): string {
 }
 
 describe("the nightly redraw", () => {
+  // Storage outlives a test, and the board was asked in an earlier one
+  beforeEach(async () => {
+    await runInDurableObject(env.HYMN_BOARD.getByName("main"), (_, ctx) => {
+      ctx.storage.kv.delete(`redraw_at:${LEFT}`);
+    });
+  });
+
   test("the alarm asks a board to redraw in its redraw hour, once", async () => {
     const board = await connect(LEFT, "v1", { timezone: zoneWhereItIs(REDRAW_HOUR) });
     await board.next(0);
@@ -505,7 +512,8 @@ describe("the nightly redraw", () => {
   });
 
   test("the alarm doesn't ask outside the redraw hour", async () => {
-    const board = await connect(LEFT, "v1", { timezone: zoneWhereItIs(-1) });
+    // Twelve hours from the redraw hour, so never in it
+    const board = await connect(LEFT, "v1", { timezone: zoneWhereItIs((REDRAW_HOUR + 12) % 24) });
     await board.next(0);
     expect(await runDurableObjectAlarm(env.HYMN_BOARD.getByName("main"))).toBe(true);
     expect(await board.ask("ping")).toBe("pong");
@@ -513,7 +521,9 @@ describe("the nightly redraw", () => {
   });
 
   test("a board's download of an image it shows is a redraw, not an update", async () => {
-    const { etags } = await connectShowing();
+    const { board, etags } = await connectShowing({ timezone: zoneWhereItIs(REDRAW_HOUR) });
+    expect(await runDurableObjectAlarm(env.HYMN_BOARD.getByName("main"))).toBe(true);
+    expect(await board.next(2)).toBe("redraw");
     const logged = spyOnLog();
 
     // Without its ETag, as the board redraws, more times than flag a stuck board
@@ -527,6 +537,24 @@ describe("the nightly redraw", () => {
       `Device Left Hymn Board (${LEFT}) redrawing image 2 (${etags[1]})`,
     );
     expect(pings.filter((p) => p.url.endsWith("/log") || p.url.endsWith("/failure"))).toEqual([]);
+  });
+
+  test("a download of an image the board shows, unasked, counts towards a stuck ETag", async () => {
+    await connectShowing();
+    for (let i = 0; i < 3; i++) {
+      expect((await exports.default.fetch(`${BASE}/images/2?device_id=${LEFT}`)).status).toBe(200);
+    }
+    expect(device(await state())?.last_updated_at).toBeTruthy();
+    expect(device(await state())?.etag_stuck_at).toBeTruthy();
+  });
+
+  test("a download of an image the board shows, with another ETag, is an update", async () => {
+    await connectShowing();
+    // As from a board that lost the saved state it had told the server of
+    const stale = "0".repeat(40);
+    const res = await exports.default.fetch(`${BASE}/images/2?device_id=${LEFT}&etag=${stale}`);
+    expect(res.status).toBe(200);
+    expect(device(await state())?.last_updated_at).toBeTruthy();
   });
 });
 

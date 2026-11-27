@@ -5,7 +5,7 @@ import { EMPTY_LINES, isLines, linesForScreen, SCREEN_COUNT, type Lines } from "
 import type { Device, DeviceStatusParams, FirmwareInfo } from "../shared/api";
 import { getDeviceName, healthchecksOn, pingHealthcheck } from "./devices";
 import { migrate } from "./migrations";
-import { REDRAW_HOUR, redrawDue } from "./redraw";
+import { REDRAW_DOWNLOADS_MS, REDRAW_HOUR, redrawDue } from "./redraw";
 
 // Column names are interpolated into SQL, so only these are accepted.
 const DEVICE_FIELDS = new Set([
@@ -181,9 +181,13 @@ export class HymnBoard extends DurableObject<Env> {
     let etagStuck = false;
     let redraw = false;
     if (status.device_id) {
-      // A board downloads, without its ETag, an image it said it shows only
-      // to redraw it: neither a new image nor a sign it lost its ETag
-      redraw = updated && this.shownEtag(status.device_id, id) === screen.etag;
+      // A board asked to redraw downloads, without its ETag, the image it
+      // said it shows: neither a new image nor a sign it lost its ETag
+      redraw =
+        updated &&
+        etag === undefined &&
+        this.askedToRedraw(status.device_id) &&
+        this.shownEtag(status.device_id, id) === screen.etag;
       const changed = updated && !redraw;
       this.updateDevice(status.device_id, {
         saved_state_writes: status.saved_state_writes,
@@ -196,6 +200,12 @@ export class HymnBoard extends DurableObject<Env> {
     return updated
       ? { status: 200, etag: screen.etag, buffer: screen.buffer, etagStuck, redraw }
       : { status: 304, etag: screen.etag };
+  }
+
+  /** Whether the board was asked to redraw (see redrawIfDue) within the last hour. */
+  private askedToRedraw(deviceId: string): boolean {
+    const at = this.ctx.storage.kv.get<number>(redrawKey(deviceId));
+    return at !== undefined && Date.now() - at < REDRAW_DOWNLOADS_MS;
   }
 
   /** The etag the board last said its screen `id` shows ("shown"), if any. */
@@ -509,11 +519,11 @@ export class HymnBoard extends DurableObject<Env> {
 
   /**
    * Asks the board on a live socket to redraw its panels, if it's the redraw
-   * hour where it is and it hasn't been asked in that hour already. When it
+   * window where it is and it hasn't been asked in this one already. When it
    * was last asked is kept per board, as a board can reconnect meanwhile.
    */
   private redrawIfDue(ws: WebSocket, { deviceId, timeZone }: SocketAttachment): void {
-    const key = `redraw_at:${deviceId}`;
+    const key = redrawKey(deviceId);
     const last = this.ctx.storage.kv.get<number>(key);
     const now = Date.now();
     if (!redrawDue(now, timeZone, last)) {
@@ -522,13 +532,13 @@ export class HymnBoard extends DurableObject<Env> {
     try {
       ws.send(REDRAW);
     } catch {
-      // Closing; the next alarm in the redraw hour asks again
+      // Closing; the next alarm in the redraw window asks again
       return;
     }
     this.ctx.storage.kv.put(key, now);
     const where = timeZone ?? "UTC, as its time zone isn't known";
     console.log(
-      `Asked ${getDeviceName(deviceId)} (${deviceId}) to redraw its panels (${REDRAW_HOUR}:00 ${where})`,
+      `Asked ${getDeviceName(deviceId)} (${deviceId}) to redraw its panels (after ${REDRAW_HOUR} AM ${where})`,
     );
   }
 
@@ -632,6 +642,11 @@ export class HymnBoard extends DurableObject<Env> {
       buffer,
     );
   }
+}
+
+/** Where the Durable Object's storage keeps when a board was last asked to redraw. */
+function redrawKey(deviceId: string): string {
+  return `redraw_at:${deviceId}`;
 }
 
 function attachmentOf(ws: WebSocket): SocketAttachment | undefined {
