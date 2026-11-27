@@ -7,8 +7,8 @@ packages:
 # linter and compiler stay in lockstep: tsrs is built against one
 # TypeScript release, and the configs at the root are written for these.
 catalog:
-  "@types/node": ^26.6.6
-  oxlint: 1.94.0
+  "@types/node": ^26.6.11
+  oxlint: 1.95.0
   tsrs: 7.1.0-beta.tsrs5
   typescript: 7.0.2
 
