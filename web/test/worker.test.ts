@@ -12,12 +12,12 @@ const LEFT = "E6614103E71F8D26";
 const AUTH = { Authorization: `Basic ${btoa("admin:secret")}` };
 
 function get(path: string, headers: Record<string, string> = {}) {
-  return exports.default.fetch(new Request(`http://api.hymnboard.sonrise.io${path}`, { headers }));
+  return exports.default.fetch(new Request(`https://hymnboard.sonrise.io${path}`, { headers }));
 }
 
 function putLines(lines: string[], headers: Record<string, string> = AUTH) {
   return exports.default.fetch(
-    new Request("http://api.hymnboard.sonrise.io/api/lines", {
+    new Request("https://hymnboard.sonrise.io/api/lines", {
       method: "PUT",
       headers: { ...headers, "Content-Type": "application/json" },
       body: JSON.stringify({ lines }),
@@ -129,7 +129,7 @@ describe("device status", () => {
     async (healthchecks) => {
       const ctx = createExecutionContext();
       const res = await worker.fetch(
-        new Request(`http://api.hymnboard.sonrise.io/device_booted?device_id=${LEFT}`),
+        new Request(`https://hymnboard.sonrise.io/device_booted?device_id=${LEFT}`),
         { ...env, HEALTHCHECKS: healthchecks },
         ctx,
       );
@@ -256,7 +256,7 @@ describe("admin API", () => {
     expect((await putLines(["1", "2"])).status).toBe(400);
     for (const body of ["null", "[]", "not json", '"lines"']) {
       const res = await exports.default.fetch(
-        new Request("http://api.hymnboard.sonrise.io/api/lines", {
+        new Request("https://hymnboard.sonrise.io/api/lines", {
           method: "PUT",
           headers: { ...AUTH, "Content-Type": "application/json" },
           body,
@@ -284,7 +284,7 @@ function upload(version: string, size: number, headers: Record<string, string> =
   form.set("version", version);
   form.set("image", new File([new Uint8Array(size).fill(7)], "fw.bin"));
   return exports.default.fetch(
-    new Request("http://api.hymnboard.sonrise.io/firmware", {
+    new Request("https://hymnboard.sonrise.io/firmware", {
       method: "POST",
       headers: { ...AUTH, ...headers },
       body: form,
