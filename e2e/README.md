@@ -7,8 +7,10 @@ admin page with [Playwright](https://playwright.dev). The tests never reach
 into the server: the usher's side goes through the page, as a person would,
 and the board's side is the firmware's own HTTP client. A server rewrite is
 held to the same tests as the server it replaces: if it behaves the same,
-the tests pass unchanged. CI (the `e2e` job in `.github/workflows/ci.yml`) runs them
-against the server's Docker image.
+the tests pass unchanged. They start the server themselves: `web/`'s build,
+run locally by `wrangler dev` (the Workers runtime under Miniflare, as in
+production), so they need nothing running first. CI (the `e2e` job in
+`.github/workflows/ci.yml`) runs them the same way.
 
 | Test file       | Covers                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -39,42 +41,43 @@ that keeps those passes unchanged.
 
 ## Run them
 
-Build the firmware (see [device/README.md](../device/README.md)) and start
-a server, then (`pnpm install` installs the whole workspace, the emulator
+Build the firmware (see [device/README.md](../device/README.md)), then
+(`pnpm install` installs the whole workspace, the emulator and `web/`
 included):
 
 ```sh
 cd e2e
 pnpm install
 pnpm exec playwright install chromium
-E2E_BASE_URL=http://localhost:8000 E2E_USERNAME=e2e E2E_PASSWORD=e2e-password pnpm test
+pnpm test
 ```
 
-To start the server for this, run its Docker image, as CI does (built from
-the repository root), or `pnpm dev` in `web/` (both listen on port 8000):
+`pnpm test` builds `web/`, starts it with `wrangler dev` on port 8787 with
+empty data, basic auth `e2e`/`e2e-password`, `HEALTHCHECKS` off and the
+emulated board allowed (`EXTRA_DEVICE_IDS=0000000000000000`), runs the
+tests and stops it. The server's state is kept in
+`web/.wrangler/e2e-state` until the next run. In CI its log is printed with
+the tests' (prefixed `[WebServer]`).
 
-```sh
-docker build -t hymnboard -f web/Dockerfile . && docker run --rm -p 8000:8000 \
-  -e BASIC_AUTH_USERNAME=e2e -e BASIC_AUTH_PASSWORD=e2e-password \
-  -e EXTRA_DEVICE_IDS=0000000000000000 hymnboard
-```
-
-They also run against a Cloudflare preview of a branch: set `E2E_BASE_URL`
-to its `http://…workers.dev` URL (previews accept the emulated board). The
-board's clock waits longer for a server that isn't local.
+To test another server instead, set `E2E_BASE_URL` (and `E2E_USERNAME` and
+`E2E_PASSWORD` for its basic auth); the tests then start nothing. That can be
+`pnpm dev` in `web/` (`http://localhost:8000`, with `EXTRA_DEVICE_IDS` and
+the login in `web/.dev.vars`) or a Cloudflare preview of a branch (its
+`http://…workers.dev` URL, plain HTTP; previews accept the emulated board). The board's
+clock waits longer for a server that isn't local.
 
 The tests change the server's lines and published firmware, so don't point
 them at a server in use. Each test publishes the build under test as the server's firmware release
 before its board boots and again when it ends, so a release left on the
 server can't update a board by surprise.
 
-| Variable                       | Default                              |
-| ------------------------------ | ------------------------------------ |
-| `E2E_BASE_URL`                 | `http://localhost:8000` (plain HTTP) |
-| `E2E_USERNAME`, `E2E_PASSWORD` | none: the server's basic auth, if on |
-| `FIRMWARE_UF2`                 | `../device/build/ehymnboard.uf2`     |
-| `E2E_CHROMIUM_EXECUTABLE`      | Playwright's own Chromium            |
-| `EMULATOR_VERBOSE=1`           | prints the firmware's serial output  |
+| Variable                       | Default                                                    |
+| ------------------------------ | ---------------------------------------------------------- |
+| `E2E_BASE_URL`                 | none: the tests start `web/` on `http://127.0.0.1:8787`    |
+| `E2E_USERNAME`, `E2E_PASSWORD` | `e2e`, `e2e-password` for their own server; none otherwise |
+| `FIRMWARE_UF2`                 | `../device/build/ehymnboard.uf2`                           |
+| `E2E_CHROMIUM_EXECUTABLE`      | Playwright's own Chromium                                  |
+| `EMULATOR_VERBOSE=1`           | prints the firmware's serial output                        |
 
 `FIRMWARE_UF2` must sit in its build directory, which also holds the
 bootloader, `firmware_version.txt` and the encrypted OTA image. The OTA test
@@ -91,8 +94,7 @@ pnpm run lint           # oxlint, type-aware rules via tsrs
 
 ## Testing a replacement server
 
-Point `SERVER_DIR`, `SERVER_CONTEXT` and `SERVER_PORT` in `ci.yml` at
-it (the directory with its Dockerfile, the image's build context, usually that
-same directory, and the port its image listens on). The image must serve the device API and the admin page on that port,
-with basic auth from `BASIC_AUTH_USERNAME` and `BASIC_AUTH_PASSWORD`, and
-answer `GET /ok` once it's ready.
+Run it and point `E2E_BASE_URL` at it. It must serve the device API and the
+admin page there, with basic auth (or none), and accept the emulated board's
+ID on `/ws`. To make CI test it, change the `webServer` command in
+`playwright.config.ts` to start it.
