@@ -3,11 +3,11 @@
 E-ink hymn board: `device/` is Raspberry Pi Pico W firmware (C++, pico-sdk,
 CMake), `web/` is the server: a Hono Worker + Durable Object + React admin,
 in production on Cloudflare Workers (`hymnboard.sonrise.io`, deployed from
-master by Workers Builds; see `web/README.md`). It
-replaced a Flask app (`server/`, last at commit 02ece7f) and keeps its device
-protocol byte-for-byte. `hardware/` is the KiCad design
-(no CI). `web/`, `e2e/` and `device/emulator/` are one pnpm workspace,
-rooted at the repository root (see "pnpm workspace" below).
+master by Workers Builds; see `web/README.md`). It replaced a Flask app
+(`server/`, last at commit 02ece7f) and keeps its device protocol
+byte-for-byte. `hardware/` is the KiCad design (no CI). `web/`, `e2e/` and
+`device/emulator/` are one pnpm workspace, rooted at the repository root (see
+"pnpm workspace" below).
 
 ## CI
 

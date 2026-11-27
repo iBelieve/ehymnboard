@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The boards' server, and the Worker it moves to
+        # The boards' server, and the Worker's workers.dev name
         host: [hymnboard.sonrise.io, hymnboard.sonrise.workers.dev]
     steps:
       - uses: actions/checkout@v7

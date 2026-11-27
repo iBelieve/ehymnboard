@@ -138,13 +138,13 @@ through lwIP's `altcp_tls` on mbedTLS (`src/tls.cpp`, configured in
 `src/mbedtls_config.h`). The board checks the server's certificate chain and
 its name; it doesn't check dates, since it has no clock it could trust before
 the handshake. It offers only ECDHE key exchange with AES-128-GCM or
-ChaCha20-Poly1305, on P-256 or P-384, with ECDSA or RSA certificates, which
-Cloudflare's edge and Let's Encrypt both serve. Later requests resume the
-first handshake's session, so a download skips the certificate check.
+ChaCha20-Poly1305, on P-256 or P-384, with ECDSA or RSA certificates, both
+of which Cloudflare's edge serves. Later requests resume the first
+handshake's session, so a download skips the certificate check.
 
 It trusts only the root CAs in `certs/roots.pem`: every CA Cloudflare issues
-edge certificates from, and Let's Encrypt. They stay in flash and are parsed
-only for the handshake that needs one. A server whose certificate came from
+edge certificates from. They stay in flash and are parsed only for the
+handshake that needs one. A server whose certificate came from
 any other CA cuts the boards off until they're flashed over USB, so
 `.github/workflows/check-tls-roots.yml` checks every day that the live
 chains still verify against that file with the board's TLS settings. To add

@@ -1,6 +1,7 @@
 // Writes dist/workerd.capnp (plus the assets Worker it embeds), the workerd
-// config the Docker image runs the built Worker with (see Dockerfile). Compatibility settings come from the build's
-// wrangler.json, so they can't drift from what Cloudflare would run.
+// config the Docker image runs the built Worker with (see Dockerfile).
+// Compatibility settings come from the build's wrangler.json, so they can't
+// drift from what Cloudflare would run.
 
 import { randomUUID } from "node:crypto";
 import { copyFileSync, readFileSync, writeFileSync } from "node:fs";
