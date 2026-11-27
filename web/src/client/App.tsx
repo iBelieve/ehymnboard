@@ -129,10 +129,14 @@ export function App({ viewer }: { viewer: Viewer }) {
       <header className="z-10 flex flex-wrap items-center justify-between gap-x-8 gap-y-4">
         <h1 className="font-display text-5xl tracking-wide text-white">Hymn Board</h1>
         <nav className="flex items-center gap-1 text-sm text-white">
-          <span className="mr-2 opacity-75">{viewer.name}</span>
-          <a className="btn btn-ghost btn-sm text-white" href="#accounts">
-            Accounts
+          <a className="btn btn-ghost btn-sm text-white" href="#profile" title="Your profile">
+            {viewer.name}
           </a>
+          {viewer.role === "admin" && (
+            <a className="btn btn-ghost btn-sm text-white" href="#accounts">
+              Accounts
+            </a>
+          )}
           <button
             className="btn btn-ghost btn-sm text-white"
             type="button"

@@ -69,6 +69,11 @@ export async function signOut(): Promise<void> {
   unwrap(await client.signOut());
 }
 
+/** Changes your own name; who's signed in updates with it. */
+export async function updateName(name: string): Promise<void> {
+  unwrap(await client.updateUser({ name }));
+}
+
 export async function changePassword(currentPassword: string, newPassword: string) {
   unwrap(await client.changePassword({ currentPassword, newPassword, revokeOtherSessions: true }));
 }

@@ -80,10 +80,12 @@ requests, so the boards' never load it.
 
 - An account is an **admin**, who also manages accounts (on the admin's
   Accounts page: add, remove, set a password) and uploads firmware, or a
-  **user**, who changes the lines. Nobody signs themselves up.
+  **user**, who changes the lines. Nobody signs themselves up. Everyone
+  changes their own name and password on their Profile page (`#profile`,
+  their name in the menu); only admins get the Accounts page (`#accounts`).
 - Until the first account exists, the admin page offers to create it, an
   admin, to whoever knows the deploy's `SETUP_PASSWORD`.
-- Admins can make API keys on the Accounts page, for uploading firmware with
+- Admins can make API keys on their Profile page, for uploading firmware with
   curl (`X-Api-Key`, see `device/README.md`). A key does nothing else.
 - Sign-ins are limited per address (Better Auth's rate limit, by
   `CF-Connecting-IP`, counted in the database), and so are tries at the

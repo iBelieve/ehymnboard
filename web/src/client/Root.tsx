@@ -2,9 +2,13 @@ import { useEffect, useState } from "react";
 import { AccountsPage } from "./AccountsPage";
 import { App } from "./App";
 import { useViewer } from "./auth";
+import { ProfilePage } from "./ProfilePage";
 import { Background, SignIn } from "./SignIn";
 
-/** Signing in, then the hymn board, or the accounts at #accounts. */
+/**
+ * Signing in, then the hymn board, your profile at #profile, or for admins,
+ * everyone's accounts at #accounts.
+ */
 export function Root() {
   const viewer = useViewer();
   const [hash, setHash] = useState(() => location.hash);
@@ -20,5 +24,11 @@ export function Root() {
   if (viewer === null) {
     return <SignIn />;
   }
-  return hash === "#accounts" ? <AccountsPage viewer={viewer} /> : <App viewer={viewer} />;
+  if (hash === "#profile") {
+    return <ProfilePage viewer={viewer} />;
+  }
+  if (hash === "#accounts" && viewer.role === "admin") {
+    return <AccountsPage viewer={viewer} />;
+  }
+  return <App viewer={viewer} />;
 }

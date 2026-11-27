@@ -111,7 +111,7 @@ malloc or free runs.
 #### Releasing an update
 
 Build, then upload the encrypted image and its version, with an admin's API
-key (from the admin's Accounts page):
+key (from your Profile page in the admin, as an admin):
 
 ```sh
 curl -H "X-Api-Key: $HYMNBOARD_API_KEY" \
