@@ -89,7 +89,8 @@ requests, so the boards' never load it.
   workflows. A key acts as its account, with its role, on `/api/state`,
   `/api/lines`, `/api/screens/N` and (an admin's) `/firmware` (see
   `device/README.md`), sent as `Authorization: Bearer <key>` or
-  `X-Api-Key: <key>`. It can't manage accounts or keys. Setting the lines:
+  `X-Api-Key: <key>`. It can't manage accounts or keys. An admin setting an
+  account's password, or removing it, deletes its keys. Setting the lines:
 
   ```sh
   curl -X PUT https://hymnboard.sonrise.io/api/lines \

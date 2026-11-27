@@ -36,7 +36,14 @@ function ChangeName({ viewer }: { viewer: Viewer }) {
       submit="Save name"
       onSubmit={async () => {
         setDone(false);
-        await updateName(name);
+        // Spaces alone pass the field's `required`, but would leave the
+        // menu's link here with no text to click.
+        const trimmed = name.trim();
+        if (!trimmed) {
+          throw new Error("Your name can't be blank");
+        }
+        await updateName(trimmed);
+        setName(trimmed);
         setDone(true);
       }}
     >

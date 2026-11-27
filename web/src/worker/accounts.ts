@@ -49,7 +49,7 @@ async function createAuth(db: D1Database, secret: string, baseURL: string) {
     plugins: [
       // Roles ("admin" or "user"), and managing accounts and passwords
       admin(),
-      // For uploading firmware with curl (see apiKeyViewer)
+      // For scripts and workflows: the lines, and firmware uploads (see apiKeyViewer)
       apiKey({ defaultPrefix: "hb_", rateLimit: { enabled: false } }),
     ],
     // Counts sign-in attempts per address, by the address Cloudflare saw. In
@@ -90,9 +90,27 @@ async function createAuth(db: D1Database, secret: string, baseURL: string) {
         }
         return Promise.resolve();
       }),
+      // An admin setting someone's password (to lock out whoever learned the
+      // old one) or removing them also deletes their API keys, which would
+      // otherwise go on setting the lines.
+      after: createAuthMiddleware(async (ctx) => {
+        const body: unknown = ctx.body;
+        const userId =
+          typeof body === "object" && body !== null && "userId" in body ? body.userId : undefined;
+        if (
+          KEY_REVOKING_PATHS.has(ctx.path) &&
+          typeof userId === "string" &&
+          !(ctx.context.returned instanceof APIError)
+        ) {
+          await db.prepare(`DELETE FROM "apikey" WHERE "referenceId" = ?`).bind(userId).run();
+        }
+      }),
     },
   });
 }
+
+/** The admin plugin's routes after which an account's API keys are deleted. */
+const KEY_REVOKING_PATHS = new Set(["/admin/set-user-password", "/admin/remove-user"]);
 
 type Auth = Awaited<ReturnType<typeof createAuth>>;
 

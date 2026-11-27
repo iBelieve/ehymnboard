@@ -218,6 +218,8 @@ test("a user's API key sets the lines, but uploads no firmware", async () => {
   expect(await res.json()).toMatchObject({ lines: ["Hymn 334", "", "", "", "", ""] });
   expect((await upload({ "X-Api-Key": key })).status).toBe(403);
   expect((await putLines({ Authorization: "Bearer hb_not-a-key" })).status).toBe(401);
+  // An empty X-Api-Key (an unset variable) doesn't hide the key in Authorization.
+  expect((await putLines({ "X-Api-Key": "", Authorization: `Bearer ${key}` })).status).toBe(200);
 });
 
 test("an API key can't manage accounts or keys", async () => {
@@ -250,4 +252,42 @@ test("a banned admin's API key stops working", async () => {
   const ban = await post("/api/auth/admin/ban-user", { userId: user.id }, admin);
   expect(ban.status, await ban.clone().text()).toBe(200);
   expect((await upload({ "X-Api-Key": key })).status).toBe(401);
+});
+
+/** A new "user" account, made by `admin`, with an API key that sets the lines. */
+async function volunteerWithKey(admin: Record<string, string>, email: string) {
+  const password = "a volunteer password";
+  const created = await post(
+    "/api/auth/admin/create-user",
+    { name: "Volunteer", email, password, role: "user" },
+    admin,
+  );
+  const { user } = await created.json<{ user: { id: string } }>();
+  const key = await createKey(await signIn(email, password));
+  expect((await putLines({ "X-Api-Key": key })).status).toBe(200);
+  return { id: user.id, key };
+}
+
+test("setting an account's password, or removing it, deletes its API keys", async () => {
+  const admin = await signInAsAdmin();
+  const reset = await volunteerWithKey(admin, "reset@example.com");
+  const removed = await volunteerWithKey(admin, "removed@example.com");
+  // A refused request leaves the keys alone.
+  const short = { userId: reset.id, newPassword: "short" };
+  expect((await post("/api/auth/admin/set-user-password", short, admin)).status).toBe(400);
+  expect((await putLines({ "X-Api-Key": reset.key })).status).toBe(200);
+
+  const set = { userId: reset.id, newPassword: "a brand new password" };
+  expect((await post("/api/auth/admin/set-user-password", set, admin)).status).toBe(200);
+  expect((await putLines({ "X-Api-Key": reset.key })).status).toBe(401);
+  expect((await post("/api/auth/admin/remove-user", { userId: removed.id }, admin)).status).toBe(
+    200,
+  );
+  expect((await putLines({ "X-Api-Key": removed.key })).status).toBe(401);
+  const left = await env.DB.prepare(
+    `SELECT count(*) AS n FROM "apikey" WHERE "referenceId" IN (?, ?)`,
+  )
+    .bind(reset.id, removed.id)
+    .first<{ n: number }>();
+  expect(left?.n).toBe(0);
 });

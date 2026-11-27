@@ -259,6 +259,9 @@ describe("admin API", () => {
 
   test("rejects anything but six strings", async () => {
     expect((await putLines(["1", "2"])).status).toBe(400);
+    const long = await putLines(["x".repeat(101), "", "", "", "", ""]);
+    expect(long.status).toBe(400);
+    expect(await long.text()).toBe("Each line is at most 100 characters\n");
     for (const body of ["null", "[]", "not json", '"lines"']) {
       const res = await exports.default.fetch(
         new Request("https://hymnboard.sonrise.io/api/lines", {

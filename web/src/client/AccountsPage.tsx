@@ -99,6 +99,9 @@ function AccountRow({
             onChange={setPassword}
             autoComplete="new-password"
           />
+          <p className="text-sm opacity-60">
+            Signs them out everywhere and deletes their API keys.
+          </p>
         </ActionForm>
       )}
     </li>

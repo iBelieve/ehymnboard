@@ -54,7 +54,9 @@ app.use("*", async (c, next) => {
  */
 async function authenticate(c: AppContext): Promise<Viewer | Response> {
   const bearer = /^Bearer\s+(\S+)$/i.exec(c.req.header("Authorization") ?? "")?.[1];
-  const key = c.req.header("X-Api-Key") ?? bearer;
+  // `||`, not `??`: an empty X-Api-Key (an unset variable in a script) mustn't
+  // hide the key in Authorization.
+  const key = c.req.header("X-Api-Key") || bearer;
   const viewer = key
     ? await accounts.apiKeyViewer(c.env, c.req.raw, key)
     : await accounts.viewer(c.env, c.req.raw);
@@ -331,7 +333,7 @@ async function sha256(text: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Admin (signed in)
+// Admin (signed in, or with an API key)
 // ---------------------------------------------------------------------------
 
 async function getState(env: Env): Promise<BoardState> {
@@ -359,8 +361,11 @@ app.put("/api/lines", requireViewer, async (c) => {
   const body: unknown = await c.req.json().catch(() => undefined);
   const lines =
     typeof body === "object" && body !== null && "lines" in body ? body.lines : undefined;
-  if (!isLines(lines) || lines.some((line) => line.length > MAX_LINE_LENGTH)) {
-    return c.text("Expected { lines: [six strings] }", 400);
+  if (!isLines(lines)) {
+    return c.text("Expected { lines: [six strings] }\n", 400);
+  }
+  if (lines.some((line) => line.length > MAX_LINE_LENGTH)) {
+    return c.text(`Each line is at most ${MAX_LINE_LENGTH} characters\n`, 400);
   }
   await board(c.env).setLines(trimLines(lines));
   return c.json(await getState(c.env));

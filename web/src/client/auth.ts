@@ -102,7 +102,10 @@ export async function removeAccount(userId: string): Promise<void> {
   unwrap(await client.admin.removeUser({ userId }));
 }
 
-/** Sets someone's password, and signs them out everywhere, as changing your own does elsewhere. */
+/**
+ * Sets someone's password, and signs them out everywhere, as changing your own
+ * does elsewhere. The server deletes their API keys too.
+ */
 export async function setAccountPassword(userId: string, newPassword: string): Promise<void> {
   unwrap(await client.admin.setUserPassword({ userId, newPassword }));
   unwrap(await client.admin.revokeUserSessions({ userId }));
