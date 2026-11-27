@@ -96,21 +96,19 @@ describe("GET /images/:id (device protocol)", () => {
 });
 
 describe("device status", () => {
-  test("records boots, health and image fetches", async () => {
+  test("records boots and image fetches", async () => {
     expect(
       (await get(`/device_booted?device_id=${LEFT}&saved_state_writes=3&watchdog_caused_reboot=1`))
         .status,
     ).toBe(204);
-    expect((await get(`/device_healthy?device_id=${LEFT}&saved_state_writes=4`)).status).toBe(204);
     await get(`/images/3?device_id=${LEFT}&saved_state_writes=4`);
-    await get("/device_healthy?device_id=E661A4D41787452B");
+    await get("/images/2?device_id=E661A4D41787452B");
 
     await settle();
     expect(pings.map((p) => p.url.split("hc-ping.com/")[1])).toEqual([
       "a717c5f0-8a83-45f9-92a7-c79a21a437b4/failure",
-      "a717c5f0-8a83-45f9-92a7-c79a21a437b4",
       "a717c5f0-8a83-45f9-92a7-c79a21a437b4/log",
-      "6c7ef2cb-71b8-492e-9e11-4ddfacf29d0c",
+      "6c7ef2cb-71b8-492e-9e11-4ddfacf29d0c/log",
     ]);
 
     const state = await (await get("/api/state", AUTH)).json<BoardState>();
@@ -140,8 +138,8 @@ describe("device status", () => {
   );
 
   test("ignores a saved_state_writes that isn't an integer", async () => {
-    await get(`/device_healthy?device_id=${LEFT}&saved_state_writes=9`);
-    await get(`/device_healthy?device_id=${LEFT}&saved_state_writes=lots`);
+    await get(`/images/1?device_id=${LEFT}&saved_state_writes=9`);
+    await get(`/images/1?device_id=${LEFT}&saved_state_writes=lots`);
     const state = await (await get("/api/state", AUTH)).json<BoardState>();
     expect(state.devices[0]!.saved_state_writes).toBe(9);
   });
