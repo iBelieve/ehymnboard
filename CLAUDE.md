@@ -122,7 +122,7 @@ All checks below must pass; run them locally before committing.
 - Don't change the device endpoints' paths, query parameters or response
   bytes, or the `/ws` messages (`state`, `ping`/`pong`, `shown`, close
   codes): the firmware hard-codes them. The rasterizer is compared against
-  the old Flask server's output in `test/render.test.ts`
+  reference images in `test/render.test.ts`
 
 ### e2e/
 

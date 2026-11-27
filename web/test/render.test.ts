@@ -5,14 +5,15 @@ import { getFont } from "../src/shared/font";
 import { fitFontSize, renderScreen } from "../src/shared/render";
 import { SCREEN_BYTES, SCREEN_HEIGHT, SCREEN_WIDTH } from "../src/shared/screen";
 
-// Rendered by the old Flask server (server/app.py at commit 02ece7f, Pillow)
-// for the same lines. Regenerate with test/fixtures/flask/generate.py.
-const fixtures = new URL("./fixtures/flask/", import.meta.url);
+// Reference images: how the boards draw these lines today (drawn with Pillow,
+// which the renderer was made to match). If the rendering changes on purpose,
+// replace them with renderScreen()'s own output.
+const fixtures = new URL("./fixtures/reference/", import.meta.url);
 type Case = { lines: [string, string]; sizes: [number | null, number | null] };
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- our own fixture
 const cases = JSON.parse(readFileSync(new URL("cases.json", fixtures), "utf8")) as Case[];
 
-function flaskBuffer(i: number): Uint8Array {
+function referenceBuffer(i: number): Uint8Array {
   return new Uint8Array(gunzipSync(readFileSync(new URL(`case${i}.bin.gz`, fixtures))));
 }
 
@@ -46,11 +47,11 @@ function popcount(buffer: Uint8Array) {
   return count;
 }
 
-describe("matches the Flask server's rendering", () => {
+describe("matches the reference images", () => {
   const font = getFont();
 
   test.each(cases.map((c, i) => [i, c] as const))("case %i %j", (i, { lines, sizes }) => {
-    const expected = flaskBuffer(i);
+    const expected = referenceBuffer(i);
     const actual = renderScreen(font, lines[0], lines[1]);
 
     expect(actual.length).toBe(SCREEN_BYTES);
@@ -72,8 +73,8 @@ describe("matches the Flask server's rendering", () => {
       a.forEach((value, k) => expect(Math.abs(value - e[k]!)).toBeLessThanOrEqual(1));
     }
 
-    // Same shapes: Pillow uses FreeType's hinted rasterizer, so edges differ
-    // by a pixel here and there, but nothing more.
+    // Same shapes: Pillow drew the references with FreeType's hinted
+    // rasterizer, so edges differ by a pixel here and there, but nothing more.
     const diff = actual.map((byte, k) => byte ^ expected[k]!);
     expect(popcount(diff)).toBeLessThan(popcount(expected) * 0.08);
   });
@@ -83,7 +84,7 @@ test("blank lines render a blank screen", () => {
   expect(renderScreen(getFont(), "", "").every((byte) => byte === 0)).toBe(true);
 });
 
-test("line breaks and control characters render as spaces, like Flask's clean_line", () => {
+test("line breaks and control characters render as spaces", () => {
   const font = getFont();
   expect(renderScreen(font, "LSB\n657", "Kyrie \tEleison")).toEqual(
     renderScreen(font, "LSB 657", "Kyrie  Eleison"),

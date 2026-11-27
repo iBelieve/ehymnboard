@@ -14,7 +14,7 @@ Cloudflare as the Worker `hymnboard`, at `hymnboard.sonrise.io` (see
 | `src/worker/` | Hono routes (`index.ts`), the `HymnBoard` Durable Object, device names and healthchecks.io pings             |
 | `src/client/` | The React admin: line editor, live board preview, device status                                              |
 | `src/shared/` | Code both sides run: screen geometry, API types, and the 1-bit text rasterizer (opentype.js + scanline fill) |
-| `test/`       | Rasterizer tests against Flask's output (`fixtures/flask/`) and endpoint tests in the Workers runtime        |
+| `test/`       | Rasterizer tests against reference images (`fixtures/reference/`) and endpoint tests in the Workers runtime  |
 
 The device protocol keeps the endpoints of the old Flask server (`server/` at
 commit 02ece7f) byte for byte: `GET /images/{1,2,3}` returns the raw
