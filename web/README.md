@@ -16,11 +16,11 @@ Cloudflare as the Worker `hymnboard`, at `hymnboard.sonrise.io` (see
 | `src/shared/` | Code both sides run: screen geometry, API types, and the 1-bit text rasterizer (opentype.js + scanline fill) |
 | `test/`       | Rasterizer tests against reference screens (`fixtures/render/`) and endpoint tests in the Workers runtime    |
 
-The device protocol keeps the endpoints of the old Flask server (`server/` at
-commit 02ece7f) byte for byte: `GET /images/{1,2,3}` returns the raw
+The device endpoints answer byte for byte as the old Flask server's did
+(`server/` at commit 02ece7f): `GET /images/{1,2,3}` returns the raw
 81,600-byte buffer with a bare SHA-1 `ETag` (or 304 for a matching `?etag=`),
-plus `/device_booted`, `/device_healthy` (which no board calls now), `/ok`,
-and the OTA endpoints `/firmware/latest` and `/firmware/image`.
+plus `/device_booted`, `/ok` and the OTA endpoints `/firmware/latest` and
+`/firmware/image`.
 
 Boards also keep a WebSocket open at `GET /ws` (the messages are in
 [device/README.md](../device/README.md#talking-to-the-server)), so the
@@ -34,14 +34,13 @@ attachment. Applying lines or uploading firmware sends every board the new
 otherwise), plus any in `EXTRA_DEVICE_IDS` (comma separated, for the e2e
 tests' emulated board; leave it unset in production). While any board is
 connected, an alarm every 10 minutes pings each live board's
-healthchecks.io check (so the boards needn't call `/device_healthy`) and
-closes sockets that stopped pinging. Sockets stay open across a deploy, but
-their ping times stop updating, so after a deploy the boards' sockets from
-before it are closed (code 4002) by whichever comes first: the admin's next
-look at the boards, a board connecting or sending `shown` (its pings don't
-wake the Durable Object), or the alarm, and the boards reconnect. A socket
-opening and closing is logged
-to the board's check too (pings need `HEALTHCHECKS=on`, which the production
+healthchecks.io check and closes sockets that stopped pinging. Sockets stay
+open across a deploy, but their ping times stop updating, so after a deploy
+the boards' sockets from before it are closed (code 4002) by whichever comes
+first: the admin's next look at the boards, a board connecting or sending
+`shown` (its pings don't wake the Durable Object), or the alarm, and the
+boards reconnect. A socket opening and closing is logged to the board's check
+too (pings need `HEALTHCHECKS=on`, which the production
 Worker and the Worker tests (with `fetch` mocked) set, and previews,
 `pnpm dev` and the e2e tests' server don't), and the admin shows each board as
 Live or Offline.
