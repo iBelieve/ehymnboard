@@ -16,11 +16,11 @@ Cloudflare as the Worker `hymnboard`, at `hymnboard.sonrise.io` (see
 | `src/shared/` | Code both sides run: screen geometry, API types, and the 1-bit text rasterizer (opentype.js + scanline fill) |
 | `test/`       | Rasterizer tests against Flask's output (`fixtures/flask/`) and endpoint tests in the Workers runtime        |
 
-The device protocol keeps the Flask server's endpoints byte for byte:
-`GET /images/{1,2,3}` returns the raw 81,600-byte buffer with a bare SHA-1
-`ETag` (or 304 for a matching `?etag=`), plus `/device_booted`,
-`/device_healthy` (for firmware from before the WebSocket), `/ok`, and the
-OTA endpoints `/firmware/latest` and `/firmware/image`.
+The device protocol keeps the endpoints of the old Flask server (`server/` at
+commit 02ece7f) byte for byte: `GET /images/{1,2,3}` returns the raw
+81,600-byte buffer with a bare SHA-1 `ETag` (or 304 for a matching `?etag=`),
+plus `/device_booted`, `/device_healthy` (which no board calls now), `/ok`,
+and the OTA endpoints `/firmware/latest` and `/firmware/image`.
 
 Boards also keep a WebSocket open at `GET /ws` (the messages are in
 [device/README.md](../device/README.md#talking-to-the-server)), so the
