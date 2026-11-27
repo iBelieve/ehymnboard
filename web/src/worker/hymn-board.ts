@@ -479,7 +479,7 @@ export class HymnBoard extends DurableObject<Env> {
 
   /**
    * Closes the boards' sockets that an earlier deploy accepted, so they
-   * reconnect to this one. On Cloudflare, sockets stay open across a deploy,
+   * reconnect to this one. Sockets stay open across a deploy,
    * but the runtime stops updating their auto-response timestamps (pings
    * are still answered): seen 2026-11-24, when the alarm took both boards'
    * live sockets for silent. Called from each event that could read those

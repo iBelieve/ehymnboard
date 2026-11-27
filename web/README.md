@@ -35,11 +35,12 @@ otherwise), plus any in `EXTRA_DEVICE_IDS` (comma separated, for the e2e
 tests' emulated board; leave it unset in production). While any board is
 connected, an alarm every 10 minutes pings each live board's
 healthchecks.io check (so the boards needn't call `/device_healthy`) and
-closes sockets that stopped pinging. After a deploy, the boards' sockets from
+closes sockets that stopped pinging. Sockets stay open across a deploy, but
+their ping times stop updating, so after a deploy the boards' sockets from
 before it are closed (code 4002) by whichever comes first: the admin's next
-look at the boards, a board connecting or sending a message, or the alarm,
-and the boards reconnect. Those sockets stay open across a deploy, but their
-ping times stop updating. A socket opening and closing is logged
+look at the boards, a board connecting or sending `shown` (its pings don't
+wake the Durable Object), or the alarm, and the boards reconnect. A socket
+opening and closing is logged
 to the board's check too (pings need `HEALTHCHECKS=on`, which the production
 Worker and the Worker tests (with `fetch` mocked) set, and previews,
 `pnpm dev` and the e2e tests' server don't), and the admin shows each board as

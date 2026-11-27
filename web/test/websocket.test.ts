@@ -363,8 +363,8 @@ describe("GET /ws", () => {
     expect(pings).toHaveLength(1);
   });
 
-  // On Cloudflare, a deploy stops the auto-response timestamps of the
-  // sockets from before it, so the server closes them instead of judging them
+  // A deploy stops the auto-response timestamps of the sockets from before
+  // it, so the server closes them instead of judging them
   test("the admin's next look closes a socket from an earlier deploy", async () => {
     const board = await connect();
     await board.next(0);
