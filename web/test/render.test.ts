@@ -10,15 +10,22 @@ import { SCREEN_BYTES, SCREEN_HEIGHT, SCREEN_WIDTH } from "../src/shared/screen"
 // compared with it. After a deliberate change to the rasterizer, rewrite them
 // in web/ with
 //
-//     UPDATE_RENDER_FIXTURES=1 pnpm vitest run test/render.test.ts
+//     UPDATE_RENDER_FIXTURES=1 pnpm vitest run --silent=false test/render.test.ts
 //
-// and look at the screens it says it wrote before committing them.
+// (without --silent=false Vitest hides a passing test's output) and look at
+// the screens it says it wrote before committing them. It doesn't rewrite the
+// font sizes in `cases`: if those change too, correct them by hand first.
 //
 // Each is a binary PBM (P4) file: a short header, then the screen buffer
 // exactly as the board gets it. PBM draws a set bit black, so the text shows
 // black on white in an image viewer.
 const fixtures = new URL("./fixtures/render/", import.meta.url);
 const update = process.env["UPDATE_RENDER_FIXTURES"] === "1";
+if (update && process.env["CI"]) {
+  throw new Error(
+    "UPDATE_RENDER_FIXTURES=1 rewrites the reference screens instead of checking them, so it is for local runs, not CI",
+  );
+}
 const PBM_HEADER = `P4\n${SCREEN_WIDTH} ${SCREEN_HEIGHT}\n`;
 
 type Case = { name: string; lines: [string, string]; sizes: [number | null, number | null] };

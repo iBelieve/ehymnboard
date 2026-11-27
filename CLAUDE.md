@@ -123,8 +123,9 @@ All checks below must pass; run them locally before committing.
   bytes, or the `/ws` messages (`state`, `ping`/`pong`, `shown`, close
   codes): the firmware hard-codes them. The rasterizer is checked bit for bit
   against reference screens in `test/fixtures/render/` (`test/render.test.ts`);
-  regenerate them with `UPDATE_RENDER_FIXTURES=1` only after a deliberate
-  rendering change, and look at them first
+  regenerate them only after a deliberate rendering change, with
+  `UPDATE_RENDER_FIXTURES=1 pnpm vitest run --silent=false test/render.test.ts`
+  in `web/`, and look at the screens it wrote before committing them
 
 ### e2e/
 
