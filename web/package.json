@@ -14,7 +14,7 @@
   "dependencies": {
     "@better-auth/api-key": "^1.7.28",
     "better-auth": "^1.7.28",
-    "hono": "^4.13.22",
+    "hono": "^4.13.23",
     "opentype.js": "^2.0.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
@@ -29,12 +29,12 @@
     "@types/react": "^19.3.3",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
-    "daisyui": "^5.8.2",
+    "daisyui": "^5.8.3",
     "oxlint": "catalog:",
     "tailwindcss": "^4.3.5",
     "tsrs": "catalog:",
     "typescript": "catalog:",
-    "vite": "^8.3.8",
+    "vite": "^8.4.0",
     "vitest": "^5.1.2",
     "wrangler": "^4.168.0"
   }
