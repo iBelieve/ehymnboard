@@ -149,7 +149,8 @@ still chains to a root the boards trust.
 - `hymnboard.mluther.org`, the address the church uses for the admin, is a
   custom domain of the Worker too.
 - The zone's **WebSockets** setting must stay on for the boards' sockets.
-- On Cloudflare the boards' sockets hibernate, so the Durable Object only runs
-  for a change, a `shown` message, a socket opening or closing, and the 10
-  minute alarm.
+- On Cloudflare the boards' sockets hibernate, so they only wake the Durable
+  Object for a `shown` message or a socket opening or closing. Otherwise it
+  runs for HTTP requests (the admin's, and the boards' at boot, after a
+  change and for the hourly firmware check) and the 10 minute alarm.
 - Keep the ETag unquoted: the firmware stores the header value as is.
