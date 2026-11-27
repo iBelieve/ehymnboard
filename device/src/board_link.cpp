@@ -54,6 +54,10 @@ void BoardLink::on_message(ws::Opcode opcode, const uint8_t *data, std::size_t l
     {
         events_.pong = true;
     }
+    else if (type == REDRAW_MESSAGE)
+    {
+        events_.redraw = true;
+    }
     else if (type == "state")
     {
         auto state = parse_state_message(message);

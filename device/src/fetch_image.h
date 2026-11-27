@@ -34,4 +34,6 @@ enum class FetchImageResult : uint8_t
 
 inline std::array<uint8_t, 81600> image_buffer;
 
-FetchImageResult fetch_image(int image, std::string &etag);
+// Downloads a screen's image unless `etag` is current (a 304). A redraw
+// (`redraw`, see "redraw" in board_messages.h) asks for it even then.
+FetchImageResult fetch_image(int image, std::string &etag, bool redraw);

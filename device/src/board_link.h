@@ -37,6 +37,8 @@ class BoardLink : private WsClient::Listener
         // The latest state message, if any arrived
         std::optional<BoardState> state;
         bool pong = false;
+        // The server asked for every panel to be redrawn
+        bool redraw = false;
         bool closed = false;
     };
 

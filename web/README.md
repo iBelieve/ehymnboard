@@ -18,7 +18,8 @@ Cloudflare as the Worker `hymnboard`, at `hymnboard.sonrise.io` (see
 
 The device endpoints answer byte for byte as the old Flask server's did
 (`server/` at commit 02ece7f): `GET /images/{1,2,3}` returns the raw
-81,600-byte buffer with a bare SHA-1 `ETag` (or 304 for a matching `?etag=`),
+81,600-byte buffer with a bare SHA-1 `ETag` (or 304 for a matching `?etag=`,
+unless `&redraw=1`, which newer boards add when redrawing; see below),
 plus `/device_booted`, `/ok` and the OTA endpoints `/firmware/latest` and
 `/firmware/image`.
 
@@ -34,7 +35,15 @@ attachment. Applying lines or uploading firmware sends every board the new
 otherwise), plus any in `EXTRA_DEVICE_IDS` (comma separated, for the e2e
 tests' emulated board; leave it unset in production). While any board is
 connected, an alarm every 10 minutes pings each live board's
-healthchecks.io check and closes sockets that stopped pinging. Sockets stay
+healthchecks.io check and closes sockets that stopped pinging. The first
+alarm between 3 AM and 5 AM in a board's time zone (the one Cloudflare places
+its IP address in, `request.cf.timezone` on its upgrade request, or
+America/Chicago if it isn't known, as 3 AM UTC is an American evening)
+sends the board `redraw`, once a night, and the board downloads and
+redraws every screen with a full refresh (see `src/worker/redraw.ts`). It
+asks for each image with its ETag and `redraw=1`, and gets it even though it's
+current. That download isn't an update: it doesn't change the board's "last
+updated" time or count towards flagging it for not keeping its ETag. Sockets stay
 open across a deploy, but their ping times stop updating, so after a deploy
 the boards' sockets from before it are closed (code 4002) by whichever comes
 first: the admin's next look at the boards, a board connecting or sending

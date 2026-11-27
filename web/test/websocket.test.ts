@@ -9,7 +9,9 @@ import {
   HEALTH_INTERVAL_MS,
   SOCKET_SILENT_MS,
   coloOf,
+  timeZoneOf,
 } from "../src/worker/hymn-board";
+import { REDRAW_HOUR, localHour } from "../src/worker/redraw";
 import { type Ping, recordPings } from "./healthchecks";
 
 const LEFT = "E6614103E71F8D26";
@@ -53,24 +55,26 @@ class Board {
 
 const sockets: Board[] = [];
 
+/** What Cloudflare says about a request: its data center and time zone. */
+type Cf = { colo?: string; timezone?: string };
+
 function upgrade(
   query: string,
   headers: Record<string, string> = { Upgrade: "websocket" },
-  colo?: string,
+  cf?: Cf,
 ) {
-  const cf = colo === undefined ? undefined : { colo };
   return exports.default.fetch(new Request(`${BASE}/ws?${query}`, { headers, cf }));
 }
 
 /**
  * Connects as the firmware does, with its query string (and the data center
- * Cloudflare says it came in through, if any).
+ * Cloudflare says it came in through, if any, or what else `cf` says).
  */
-async function connect(deviceId = LEFT, firmware = "v1", colo?: string): Promise<Board> {
+async function connect(deviceId = LEFT, firmware = "v1", cf?: string | Cf): Promise<Board> {
   const res = await upgrade(
     `device_id=${deviceId}&saved_state_writes=4&watchdog_caused_reboot=0&firmware_version=${firmware}&proto=1`,
     { Upgrade: "websocket" },
-    colo,
+    typeof cf === "string" ? { colo: cf } : cf,
   );
   expect(res.status).toBe(101);
   const board = new Board(res.webSocket!);
@@ -460,6 +464,93 @@ describe("GET /ws", () => {
   });
 });
 
+/**
+ * A fixed-offset time zone where it's `hour` o'clock now ("Etc/GMT-5" is
+ * five hours ahead of UTC).
+ */
+function zoneWhereItIs(hour: number): string {
+  for (let offset = -12; offset <= 14; offset++) {
+    const zone = offset === 0 ? "Etc/GMT" : `Etc/GMT${offset > 0 ? "-" : "+"}${Math.abs(offset)}`;
+    if (localHour(Date.now(), zone) === hour) {
+      return zone;
+    }
+  }
+  throw new Error(`no zone where it's ${hour}`);
+}
+
+describe("the nightly redraw", () => {
+  // Storage outlives a test, and the board was asked in an earlier one
+  beforeEach(async () => {
+    await runInDurableObject(env.HYMN_BOARD.getByName("main"), (_, ctx) => {
+      ctx.storage.kv.delete(`redraw_at:${LEFT}`);
+    });
+  });
+
+  test("the alarm asks a board to redraw in its redraw hour, once", async () => {
+    const board = await connect(LEFT, "v1", { timezone: zoneWhereItIs(REDRAW_HOUR) });
+    await board.next(0);
+    const logged = spyOnLog();
+
+    expect(await runDurableObjectAlarm(env.HYMN_BOARD.getByName("main"))).toBe(true);
+    expect(await board.next(1)).toBe("redraw");
+    expect(logged()).toContainEqual(
+      expect.stringMatching(/^Asked Left Hymn Board \(E6614103E71F8D26\) to redraw/),
+    );
+
+    // The next alarm in the same hour, even on a new socket, doesn't ask again
+    const again = await connect(LEFT, "v1", { timezone: zoneWhereItIs(REDRAW_HOUR) });
+    await again.next(0);
+    expect(await runDurableObjectAlarm(env.HYMN_BOARD.getByName("main"))).toBe(true);
+    expect(await again.ask("ping")).toBe("pong");
+    expect(again.messages).toEqual([expect.stringMatching(STATE), "pong"]);
+  });
+
+  test("the alarm doesn't ask outside the redraw hour", async () => {
+    // Twelve hours from the redraw hour, so never in it
+    const board = await connect(LEFT, "v1", { timezone: zoneWhereItIs((REDRAW_HOUR + 12) % 24) });
+    await board.next(0);
+    expect(await runDurableObjectAlarm(env.HYMN_BOARD.getByName("main"))).toBe(true);
+    expect(await board.ask("ping")).toBe("pong");
+    expect(board.messages).toEqual([expect.stringMatching(STATE), "pong"]);
+  });
+
+  test("a redraw's download of the image the board has is sent again, not an update", async () => {
+    const etag = (await exports.default.fetch(`${BASE}/images/2`)).headers.get("Etag")!;
+    // Storage outlives a test, so an earlier one may have updated the board
+    const updatedAt = device(await state())?.last_updated_at ?? null;
+    const logged = spyOnLog();
+    // More times than flag a board that doesn't keep its ETag
+    for (let i = 0; i < 4; i++) {
+      const res = await exports.default.fetch(
+        `${BASE}/images/2?device_id=${LEFT}&etag=${etag}&redraw=1`,
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get("Etag")).toBe(etag);
+      expect((await res.arrayBuffer()).byteLength).toBe(81_600);
+    }
+    // Without redraw=1, it's current
+    expect((await exports.default.fetch(`${BASE}/images/2?etag=${etag}`)).status).toBe(304);
+    expect(device(await state())).toMatchObject({
+      last_updated_at: updatedAt,
+      etag_stuck_at: null,
+    });
+    expect(logged()).toContainEqual(`Device Left Hymn Board (${LEFT}) redrawing image 2 (${etag})`);
+    await settle();
+    expect(pings.filter((p) => p.url.endsWith("/log") || p.url.endsWith("/failure"))).toEqual([]);
+  });
+
+  test("a redraw's download with an outdated etag is an update", async () => {
+    const stale = "0".repeat(40);
+    const logged = spyOnLog();
+    const res = await exports.default.fetch(
+      `${BASE}/images/2?device_id=${LEFT}&etag=${stale}&redraw=1`,
+    );
+    expect(res.status).toBe(200);
+    expect(device(await state())?.last_updated_at).toBeTruthy();
+    expect(logged()).toContainEqual(expect.stringMatching(/ updating image 2 from 0{40} to /));
+  });
+});
+
 test("EXTRA_DEVICE_IDS lets a test board connect", async () => {
   const board = await connect("1111111111111111");
   expect(STATE.test(await board.next(0))).toBe(true);
@@ -474,5 +565,16 @@ describe("coloOf", () => {
   test("is undefined without one", () => {
     expect(coloOf(new Request(BASE))).toBeUndefined();
     expect(coloOf(new Request(BASE, { cf: { colo: "" } }))).toBeUndefined();
+  });
+});
+
+describe("timeZoneOf", () => {
+  test("takes Cloudflare's time zone", () => {
+    const cf = { colo: "ORD", timezone: "America/Chicago" };
+    expect(timeZoneOf(new Request(BASE, { cf }))).toBe("America/Chicago");
+  });
+
+  test("is undefined without one", () => {
+    expect(timeZoneOf(new Request(BASE, { cf: { colo: "ORD" } }))).toBeUndefined();
   });
 });
