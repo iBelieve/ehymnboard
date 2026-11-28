@@ -449,6 +449,12 @@ export class Emulator {
     this.board.powerCycle();
   }
 
+  /** Crashes the firmware where it is running (see Board.hardFault()). */
+  hardFault() {
+    this.#log(`[board ${this.#stamp()}ms] hard fault`);
+    this.board.hardFault();
+  }
+
   /** Drops the WiFi link, as if the AP went away. */
   dropLink() {
     this.board.chip.setLinkDown();

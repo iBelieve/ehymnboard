@@ -34,6 +34,7 @@
 #include <string_view>
 #include <vector>
 
+#include "diagnostics.h"
 #include "lwip/altcp.h"
 #include "lwip/ip_addr.h"
 #include "ws_frame.h"
@@ -49,9 +50,9 @@ class WsClient : private ws::FrameSink
         virtual void on_open() = 0;
         // A complete text or binary message
         virtual void on_message(ws::Opcode opcode, const uint8_t *data, std::size_t length) = 0;
-        // The connection ended or never got going: once per connect() that
-        // returned true, unless abort() ended it
-        virtual void on_closed() = 0;
+        // The connection ended or never got going, and why: once per
+        // connect() that returned true, unless abort() ended it
+        virtual void on_closed(const SocketEndInfo &end) = 0;
     };
 
     // Messages are assembled in `buffer`; a bigger one fails the connection
@@ -123,9 +124,13 @@ class WsClient : private ws::FrameSink
     void start_closing(uint16_t code);
     bool flush();
     void clear_tx();
+    // Asks for the pcb to be dropped on the next lwIP callback, for `end`
+    void request_abort(const SocketEndInfo &end);
+    // Why the connection ended, once the server's end closed it
+    SocketEndInfo closed_by_server() const;
     // Ends the connection (closing or aborting the pcb) and tells the
-    // listener. Returns ERR_ABRT if it aborted the pcb.
-    err_t finish(bool abort_pcb);
+    // listener why. Returns ERR_ABRT if it aborted the pcb.
+    err_t finish(bool abort_pcb, const SocketEndInfo &end);
     void detach();
 
     Listener &listener_;
@@ -140,8 +145,13 @@ class WsClient : private ws::FrameSink
     std::string key_;
     std::string head_;
     bool close_sent_ = false;
-    // A protocol error or bad handshake asked for the pcb to be dropped
+    // The close code the server sent, if it sent a close frame
+    int32_t close_received_ = -1;
+    // The close code the board sent over a protocol error, if it did
+    int32_t protocol_error_ = -1;
+    // A protocol error or bad handshake asked for the pcb to be dropped, and why
     bool abort_requested_ = false;
+    SocketEndInfo abort_reason_;
     uint32_t closing_deadline_ms_ = 0;
 
     std::vector<uint8_t> tx_;

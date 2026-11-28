@@ -54,6 +54,10 @@ void BoardLink::on_message(ws::Opcode opcode, const uint8_t *data, std::size_t l
     {
         events_.pong = true;
     }
+    else if (type == DIAG_MESSAGE)
+    {
+        events_.diag = true;
+    }
     else if (type == REDRAW_MESSAGE)
     {
         events_.redraw = true;
@@ -72,7 +76,8 @@ void BoardLink::on_message(ws::Opcode opcode, const uint8_t *data, std::size_t l
     }
 }
 
-void BoardLink::on_closed()
+void BoardLink::on_closed(const SocketEndInfo &end)
 {
-    events_.closed = true;
+    printf("WS: socket ended: %s (%ld)\n", socket_end_name(end.reason), static_cast<long>(end.detail));
+    events_.closed = end;
 }

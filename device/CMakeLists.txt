@@ -111,6 +111,8 @@ add_executable(ehymnboard
         src/main.cpp
         src/board_link.cpp
         src/board_messages.cpp
+        src/diagnostics.cpp
+        src/diagnostics_board.cpp
         src/fetch_image.cpp
         src/healthchecks.cpp
         src/http_headers.cpp
@@ -195,6 +197,8 @@ pico_add_extra_outputs(ehymnboard)
 # emulator/autobahn/README.md). Not for real boards.
 add_executable(ehymnboard_autobahn
         src/autobahn_main.cpp
+        src/diagnostics.cpp
+        src/diagnostics_board.cpp
         src/http_headers.cpp
         src/long_watchdog.cpp
         src/malloc_lock.cpp

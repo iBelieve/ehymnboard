@@ -18,6 +18,7 @@
 
 #include "long_watchdog.h"
 
+#include "diagnostics_board.h"
 #include "hardware/watchdog.h"
 #include "pico/stdlib.h"
 #include <stdio.h>
@@ -28,6 +29,9 @@ static uint8_t long_watchdog_timeout_seconds = 0;
 static uint8_t seconds_until_watchdog_reset = 0;
 
 static repeating_timer_t watcher_timer;
+// Whether the long watchdog expired and recorded a hang, which stands unless
+// the main loop feeds it again before the hardware watchdog fires
+static bool expired = false;
 
 static bool watchdog_task([[maybe_unused]] repeating_timer_t *rt)
 {
@@ -35,10 +39,20 @@ static bool watchdog_task([[maybe_unused]] repeating_timer_t *rt)
     {
         seconds_until_watchdog_reset -= 1;
         watchdog_update();
+        if (expired)
+        {
+            expired = false;
+            diag_cancel_hang();
+        }
     }
     else
     {
         printf("Long watchdog expired, not updating watchdog, should reboot soon!\n");
+        if (!expired)
+        {
+            expired = true;
+            diag_record_reset(ResetReason::HANG);
+        }
     }
 
     return true;

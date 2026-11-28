@@ -29,6 +29,8 @@
 //   server -> board  "redraw"  (nightly: download every panel's image again,
 //                               with &redraw=1, and redraw it with a full
 //                               refresh, which clears any ghosting)
+//   server -> board  "diag"  (the admin's "Refresh now")
+//   board -> server  "diag uptime=<s> rssi=<dBm> ..." (see diagnostics.h)
 //
 // Unknown messages, and state messages of another version, are ignored, so
 // the server can add to the protocol without breaking older boards.

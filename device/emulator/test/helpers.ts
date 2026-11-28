@@ -38,6 +38,11 @@ export function waitForFirstImages(emu: Emulator, ms = 40_000) {
   return emu.waitForSerial("State saved to flash", ms, emu.waitForSerial("WS: live", ms));
 }
 
+/** The board's /device_booted requests, oldest first. */
+export function bootReports(emu: Emulator) {
+  return emu.net.requests.filter((r) => r.path === "/device_booted");
+}
+
 /** Counts how many times text occurs in the serial output. */
 export function count(emu: Emulator, text: string) {
   return emu.serial.split(text).length - 1;

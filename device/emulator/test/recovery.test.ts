@@ -18,7 +18,7 @@
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { boot, waitForFirstImages } from "./helpers.ts";
+import { boot, count, waitForFirstImages } from "./helpers.ts";
 
 test("after losing WiFi for good it reboots, rejoins and keeps its saved ETags", () => {
   const emu = boot();
@@ -45,6 +45,14 @@ test("after losing WiFi for good it reboots, rejoins and keeps its saved ETags",
   const booted = emu.net.requests.filter((r) => r.path === "/device_booted").at(-1);
   assert.ok(booted);
   assert.equal(booted.query.watchdog_caused_reboot, "1");
+  assert.equal(booted.query.reset, "no_socket", "and why it rebooted");
+  assert.equal(booted.query.reset_phase, "running");
+  assert.ok(
+    Number(booted.query.reset_uptime) >= 180,
+    `rebooted after ${booted.query.reset_uptime} s`,
+  );
+  // WiFi went down once before the reboot
+  assert.equal(count(emu, "WiFi: link down"), 1);
   assert.equal(
     emu.net.requests.filter((r) => r.path.startsWith("/images/")).length,
     3,

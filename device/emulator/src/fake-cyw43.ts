@@ -64,6 +64,7 @@ const DATA_HEADER = 2;
 const WLC_UP = 2;
 const WLC_SET_SSID = 26;
 const WLC_DISASSOC = 52;
+const WLC_GET_RSSI = 127;
 const WLC_GET_VAR = 262;
 const WLC_SET_VAR = 263;
 const WLC_SET_WSEC_PMK = 268;
@@ -515,6 +516,8 @@ export class FakeCYW43 {
       this.startJoin(new TextDecoder().decode(data.subarray(4, 4 + ssidLen)), iface);
     } else if (cmd === WLC_DISASSOC) {
       this.setLinkDown();
+    } else if (cmd === WLC_GET_RSSI) {
+      response = this.rssiResponse(len);
     }
     if (this.trace) {
       this.log(`ioctl ${cmd}${name ? ` "${name}"` : ""} len ${len} itf ${iface}`);
@@ -528,6 +531,13 @@ export class FakeCYW43 {
     bv.setUint32(12, 0, true); // status OK
     body.set(response, 16);
     this.queueForHost(this.sdpcmPacket(CONTROL_HEADER, body));
+  }
+
+  /** WLC_GET_RSSI: the joined AP's signal (dBm, as in its scan result), or 0. */
+  rssiResponse(len: number) {
+    const out = new Uint8Array(Math.max(len, 4));
+    new DataView(out.buffer).setInt32(0, this.joined ? (this.joined.rssi ?? -50) : 0, true);
+    return out.subarray(0, len);
   }
 
   getVar(name: string, len: number) {

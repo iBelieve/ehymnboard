@@ -143,7 +143,7 @@ void Waveshare13K::waitUntilIdle()
         {
             printf("Timeout waiting for busy pin to go low\n");
             shutdown();
-            reset_pico();
+            reset_pico(ResetReason::PANEL_BUSY, static_cast<uint32_t>(id));
         }
     }
 }

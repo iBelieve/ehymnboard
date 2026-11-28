@@ -128,7 +128,7 @@ All checks below must pass; run them locally before committing.
   another request made. Every deploy needs `BETTER_AUTH_SECRET` and
   `SETUP_PASSWORD`
 - Don't change the device endpoints' paths, query parameters or response
-  bytes, or the `/ws` messages (`state`, `ping`/`pong`, `shown`, `redraw`, close
+  bytes, or the `/ws` messages (`state`, `ping`/`pong`, `shown`, `redraw`, `diag`, close
   codes): the firmware hard-codes them. The rasterizer is checked bit for bit
   against reference screens in `test/fixtures/render/` (`test/render.test.ts`);
   regenerate them only after a deliberate rendering change, with

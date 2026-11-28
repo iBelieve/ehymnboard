@@ -63,6 +63,6 @@ void SavedState::save()
     if (res != PICO_OK)
     {
         printf("Failed to save state: %d\n", res);
-        reset_pico();
+        reset_pico(ResetReason::FLASH_SAVE_FAILED, static_cast<uint32_t>(res));
     }
 }

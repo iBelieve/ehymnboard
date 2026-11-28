@@ -19,7 +19,15 @@
 // The eHymnBoard around the Pico W: an emulated RP2040 with the fake CYW43,
 // three e-paper panels on SPI0, and flash that survives reboots. A watchdog
 // reset rebuilds the RP2040 from the same flash, like a real reboot.
-import { ConsoleLogger, GPIOPinState, LogLevel, RP2040, Simulator, USBCDC } from "rp2040js";
+import {
+  BasePeripheral,
+  ConsoleLogger,
+  GPIOPinState,
+  LogLevel,
+  RP2040,
+  Simulator,
+  USBCDC,
+} from "rp2040js";
 import { elfSymbols } from "./elf.ts";
 import { EPaperPanel } from "./epaper.ts";
 import { type AccessPoint, FakeCYW43 } from "./fake-cyw43.ts";
@@ -45,6 +53,10 @@ interface WatchdogInternals {
 
 const FLASH_BASE = 0x10000000;
 const WATCHDOG_BASE = 0x40058;
+const VREG_AND_CHIP_RESET_BASE = 0x40064;
+const CHIP_RESET = 0x08;
+const CHIP_RESET_HAD_POR = 1 << 8;
+const EXC_HARDFAULT = 3;
 const GSPI_NANOS_PER_BYTE = 8 * 32; // ~31 MHz bus clock
 
 // Pins from main.cpp for screens 1-3
@@ -74,6 +86,17 @@ function clockInternals(clock: SimulationClock): ClockInternals {
 function watchdogOf(mcu: RP2040): WatchdogInternals {
   // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- an RPWatchdog, see WatchdogInternals
   return mcu.peripherals[WATCHDOG_BASE] as unknown as WatchdogInternals;
+}
+
+/**
+ * VREG_AND_CHIP_RESET, which rp2040js leaves unimplemented, for its
+ * CHIP_RESET register: the chip last came out of a power-on reset. A
+ * watchdog reset doesn't touch this block, so that stays true through one.
+ */
+class ChipReset extends BasePeripheral {
+  override readUint32(offset: number) {
+    return offset === CHIP_RESET ? CHIP_RESET_HAD_POR : super.readUint32(offset);
+  }
 }
 
 /** Finds a function in the bootrom's lookup table by its two-letter code. */
@@ -217,6 +240,7 @@ export class Board {
     );
     mcu.flash.set(this.flash);
     mcu.logger = new ConsoleLogger(LogLevel.Error);
+    mcu.peripherals[VREG_AND_CHIP_RESET_BASE] = new ChipReset(mcu, "VREG_AND_CHIP_RESET");
 
     // rp2040js runs PIO on its own timer, far slower than the CPU; run() below
     // steps it in lockstep instead.
@@ -293,6 +317,16 @@ export class Board {
   powerCycle() {
     this.pendingReboot = 0;
     this.powerOn(0);
+  }
+
+  /**
+   * Faults the CPU where it is, as a bad pointer or a stack overflow would:
+   * the firmware's HardFault handler takes over. rp2040js never raises one
+   * itself.
+   */
+  hardFault() {
+    this.mcu.core.waiting = false;
+    this.mcu.core.exceptionEntry(EXC_HARDFAULT);
   }
 
   /** Connects the panels to a new RP2040's pins and SPI0. */

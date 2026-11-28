@@ -1,7 +1,7 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
-import type { BoardState } from "../src/shared/api";
+import type { BoardState, HealthSample } from "../src/shared/api";
 import { getFont } from "../src/shared/font";
 import { renderScreen } from "../src/shared/render";
 import { SCREEN_BYTES } from "../src/shared/screen";
@@ -321,5 +321,67 @@ describe("OTA firmware", () => {
     const image = await get(`/firmware/image?device_id=${LEFT}&target_version=v2`);
     expect(image.status).toBe(200);
     expect((await image.arrayBuffer()).byteLength).toBe(512);
+  });
+});
+
+describe("diagnostics", () => {
+  test("a boot says why the board reset, for the admin and healthchecks.io", async () => {
+    const res = await get(
+      `/device_booted?device_id=${LEFT}&saved_state_writes=3&watchdog_caused_reboot=1` +
+        "&reset=crash&reset_phase=running&reset_detail=268440116&reset_extra=268457593&reset_uptime=3600&uptime=4&rssi=-70",
+    );
+    expect(res.status).toBe(204);
+    await settle();
+    expect(pings.at(-1)?.body).toBe(
+      "Watchdog caused reboot (reset: crash while running after 3600 s at 0x10001234 from 0x10005679)",
+    );
+    const state = await (await get("/api/state", AUTH)).json<BoardState>();
+    const left = state.devices.find((d) => d.id === LEFT);
+    expect(left).toMatchObject({
+      rssi: -70,
+      uptime_s: 4,
+      last_reset: {
+        reason: "crash",
+        phase: "running",
+        detail: 268440116,
+        extra: 268457593,
+        uptime_s: 3600,
+      },
+    });
+    expect(left?.last_reset?.at).toBe(left?.booted_at);
+  });
+
+  test("the hourly version check carries the board's health, kept as history", async () => {
+    await get(`/firmware/latest?device_id=${LEFT}&version=v1`);
+    await get(
+      `/firmware/latest?device_id=${LEFT}&version=v1&uptime=3600&rssi=-66&heap_free=90000&heap_min=45000` +
+        "&drops=2&connect_fails=3&pong_timeouts=1&image_fails=0&wifi_drops=0&tls_oom=0",
+    );
+
+    const state = await (await get("/api/state", AUTH)).json<BoardState>();
+    expect(state.devices.find((d) => d.id === LEFT)).toMatchObject({
+      firmware_version: "v1",
+      rssi: -66,
+      uptime_s: 3600,
+      health: { heap_free: 90000, heap_min: 45000, drops: 2, connect_fails: 3 },
+    });
+    // The first check, from firmware without diagnostics, added no history
+    const history = await (await get(`/api/devices/${LEFT}/health`, AUTH)).json<HealthSample[]>();
+    expect(history.map(({ at, ...sample }) => [Date.parse(at) > 0, sample])).toEqual([
+      [true, { rssi: -66, uptime_s: 3600, heap_min: 45000 }],
+    ]);
+    expect((await get(`/api/devices/${LEFT}/health`)).status).toBe(401);
+  });
+
+  test("an unknown board's health isn't kept", async () => {
+    await get("/firmware/latest?device_id=X&version=v1&uptime=3600&rssi=-66&heap_free=90000");
+    const state = await (await get("/api/state", AUTH)).json<BoardState>();
+    expect(state.devices.find((d) => d.id === "X")).toMatchObject({
+      firmware_version: "v1",
+      rssi: null,
+      health: null,
+    });
+    const history = await (await get("/api/devices/X/health", AUTH)).json<HealthSample[]>();
+    expect(history).toEqual([]);
   });
 });

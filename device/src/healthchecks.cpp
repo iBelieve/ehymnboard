@@ -20,6 +20,7 @@
 
 #include <string>
 
+#include "diagnostics_board.h"
 #include "lwip/apps/http_client.h"
 #include "ota.h"
 #include "pico/async_context.h"
@@ -132,11 +133,12 @@ static void send_healthcheck_request(const std::string &path, const std::string 
 
 void report_device_booted()
 {
-    std::string extra_query;
+    // Why the board reset, then the signal it joined WiFi with
+    std::string extra_query = reset_query(diag_boot_reset()) + link_query(diag_health());
 
     if (!ota_boot_status.empty())
     {
-        extra_query = "&ota_status=" + ota_boot_status + "&ota_version=" + ota_boot_version;
+        extra_query += "&ota_status=" + ota_boot_status + "&ota_version=" + ota_boot_version;
     }
 
     send_healthcheck_request("/device_booted", extra_query);

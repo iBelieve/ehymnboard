@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { BoardState, DeviceWithName } from "../shared/api";
 import { fetchState } from "./api";
+import { BoardDetails } from "./BoardDetails";
 import { prettyDate } from "./prettyDate";
 import { Section, SettingsPage } from "./Settings";
 
@@ -52,7 +53,17 @@ export function BoardsPage() {
         {state && state.devices.length === 0 && (
           <p className="opacity-75">No boards have checked in yet.</p>
         )}
-        {state && state.devices.length > 0 && <BoardTable devices={state.devices} now={now} />}
+        {state && state.devices.length > 0 && (
+          <BoardTable
+            devices={state.devices}
+            now={now}
+            // "Refresh now" answers with the state, the board's new report in it
+            onState={(next) => {
+              setState(next);
+              setNow(new Date());
+            }}
+          />
+        )}
         {state?.firmware && (
           <p className="mt-4 text-sm opacity-75">
             Latest firmware {state.firmware.version} (uploaded{" "}
@@ -76,7 +87,23 @@ const STACKED_ON_PHONES = [
   "max-sm:[&_td[data-label]]:before:opacity-60 max-sm:[&_td[data-label]]:before:content-[attr(data-label)]",
 ].join(" ");
 
-function BoardTable({ devices, now }: { devices: DeviceWithName[]; now: Date }) {
+function BoardTable({
+  devices,
+  now,
+  onState,
+}: {
+  devices: DeviceWithName[];
+  now: Date;
+  onState: (state: BoardState) => void;
+}) {
+  // The boards whose diagnostics are open, each in a row under its own
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (id: string) =>
+    setOpen((was) => {
+      const next = new Set(was);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
   return (
     // On a phone each board is a block of labelled lines instead, since six
     // columns don't fit across one.
@@ -94,40 +121,57 @@ function BoardTable({ devices, now }: { devices: DeviceWithName[]; now: Date }) 
         </thead>
         <tbody>
           {devices.map((device) => (
-            <tr key={device.id}>
-              <td>
-                <div className="font-medium">{device.name}</div>
-                {device.name !== device.id && (
-                  <div className="font-mono text-xs opacity-60">{device.id}</div>
-                )}
-              </td>
-              <td data-label="Status">
-                <Status device={device} now={now} />
-              </td>
-              <td data-label="Last seen">
-                {/* Always shown, like the old admin's line (whose template
-                    failed outright on a board that had never been seen). */}
-                {device.last_seen ? <When iso={device.last_seen} now={now} /> : "never"}
-              </td>
-              <td data-label="Last updated">
-                <When iso={device.last_updated_at} now={now} />
-              </td>
-              <td data-label="Booted">
-                <When iso={device.booted_at} now={now} />
-              </td>
-              <td data-label="Firmware">
-                <div className="max-sm:text-right">
-                  {device.firmware_version || <Blank />}
-                  {device.ota_status === "rolled_back" && device.ota_at && (
-                    <div>
-                      <span className="badge badge-warning badge-sm h-auto py-0.5">
-                        Rolled back {device.ota_version} {prettyDate(device.ota_at, now)}
-                      </span>
-                    </div>
+            <Fragment key={device.id}>
+              <tr>
+                <td>
+                  <div className="font-medium">{device.name}</div>
+                  {device.name !== device.id && (
+                    <div className="font-mono text-xs opacity-60">{device.id}</div>
                   )}
-                </div>
-              </td>
-            </tr>
+                  <button
+                    type="button"
+                    className="btn btn-link btn-xs h-auto min-h-0 px-0"
+                    aria-expanded={open.has(device.id)}
+                    onClick={() => toggle(device.id)}
+                  >
+                    {open.has(device.id) ? "Hide details" : "Details"}
+                  </button>
+                </td>
+                <td data-label="Status">
+                  <Status device={device} now={now} />
+                </td>
+                <td data-label="Last seen">
+                  {/* Always shown, like the old admin's line (whose template
+                    failed outright on a board that had never been seen). */}
+                  {device.last_seen ? <When iso={device.last_seen} now={now} /> : "never"}
+                </td>
+                <td data-label="Last updated">
+                  <When iso={device.last_updated_at} now={now} />
+                </td>
+                <td data-label="Booted">
+                  <When iso={device.booted_at} now={now} />
+                </td>
+                <td data-label="Firmware">
+                  <div className="max-sm:text-right">
+                    {device.firmware_version || <Blank />}
+                    {device.ota_status === "rolled_back" && device.ota_at && (
+                      <div>
+                        <span className="badge badge-warning badge-sm h-auto py-0.5">
+                          Rolled back {device.ota_version} {prettyDate(device.ota_at, now)}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </td>
+              </tr>
+              {open.has(device.id) && (
+                <tr>
+                  <td colSpan={6} className="bg-base-200/50">
+                    <BoardDetails device={device} now={now} onState={onState} />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
           ))}
         </tbody>
       </table>

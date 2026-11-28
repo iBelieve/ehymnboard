@@ -23,6 +23,7 @@
 #include <optional>
 #include <string>
 
+#include "diagnostics_board.h"
 #include "firmware_version.h"
 #include "long_watchdog.h"
 #include "lwip/apps/http_client.h"
@@ -141,7 +142,9 @@ std::optional<std::string> fetch_target_version()
     settings.headers_done_fn = tls_remember_httpc_session;
     settings.altcp_allocator = server_tls_allocator();
 
-    const std::string path = "/firmware/latest" + ota_query();
+    // The hourly check carries the board's health (see diagnostics.h)
+    const std::string path = "/firmware/latest" + ota_query() + health_query(diag_health());
+    const PhaseScope phase(Phase::OTA_CHECK);
 
     cyw43_arch_lwip_begin();
     const auto ret = httpc_get_file_dns(SERVER_HOST, SERVER_PORT, path.c_str(), &settings, on_version_check_data,
@@ -431,6 +434,7 @@ size_t stream_download()
 // written, or 0 on failure
 size_t download_image(const std::string &version)
 {
+    const PhaseScope phase(Phase::OTA_DOWNLOAD);
     if (!start_download(version))
     {
         return 0;
@@ -551,7 +555,7 @@ static bool commit_check_passed()
     if (++failures >= MAX_FAILURES)
     {
         printf("OTA: new firmware can't make requests, rebooting to roll it back\n");
-        reset_pico();
+        reset_pico(ResetReason::OTA_UNHEALTHY);
     }
     return false;
 }
@@ -620,6 +624,7 @@ static bool ota_check_for_update()
     pfb_mark_download_slot_as_valid();
 
     // Reboots into the bootloader, which swaps in the new firmware
+    diag_record_reset(ResetReason::OTA_INSTALL);
     pfb_perform_update();
     return true;
 }
