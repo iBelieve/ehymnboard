@@ -24,7 +24,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { RAM_BYTES, ROW_BYTES } from "../src/epaper.ts";
 import type { Emulator } from "../src/emulator.ts";
-import { assertNoPanelFaults, boot, waitForFirstImages } from "./helpers.ts";
+import { assertHeapHeadroom, assertNoPanelFaults, boot, waitForFirstImages } from "./helpers.ts";
 
 const FULL = 0xf7;
 const PARTIAL = 0xcf;
@@ -41,11 +41,26 @@ function hymn(n: number) {
   return image;
 }
 
+/**
+ * A busy screen: 80 rows of 38 short black strokes, about 6 KB packed, so
+ * three of them nearly fill the board's budget.
+ */
+function busy(n: number) {
+  const image = new Uint8Array(RAM_BYTES).fill(0xff);
+  for (let line = 0; line < 80; line++) {
+    const row = 100 + line * 6;
+    for (let stroke = 0; stroke < 38; stroke++) {
+      image[row * ROW_BYTES + 2 + stroke * 2 + ((n + line) % 2)] = 0x00;
+    }
+  }
+  return image;
+}
+
 let version = 0;
 
 /** Gives `screen` a new image and returns how the board drew it. */
-function change(emu: Emulator, screen: number) {
-  const image = hymn(++version);
+function change(emu: Emulator, screen: number, draw = hymn) {
+  const image = draw(++version);
   const before = emu.displays.length;
   emu.server.setImageBody(screen, `h${version}-${screen}`, image);
   emu.waitFor(`screen ${screen} drawn`, () => emu.displays.length > before, 60_000);
@@ -128,5 +143,22 @@ test("is off unless the server turns it on, and a reboot starts with full update
   emu.waitForSerial("Partial refresh turned on", 60_000, cycled);
   assert.equal(change(emu, 1), FULL);
   assert.equal(change(emu, 1), PARTIAL);
+  assertNoPanelFaults(emu);
+});
+
+test("keeps enough heap for TLS with busy screens near the budget", () => {
+  const { emu } = bootPartial();
+  // Each panel's image is kept in turn, so all three are held by the end
+  for (let round = 0; round < 3; round++) {
+    for (const screen of [1, 2, 3]) change(emu, screen, busy);
+  }
+  const kept = [
+    ...emu.serial.matchAll(/kept for partial refresh \(\d+ bytes packed, (\d+) in all\)/g),
+  ];
+  const most = Math.max(...kept.map(([, all]) => Number(all)));
+  assert.ok(most > 17 * 1024, `the images came near the budget (${most} bytes)`);
+  // A busy update after all three are kept is still partial
+  assert.equal(change(emu, 2, busy), PARTIAL);
+  assertHeapHeadroom(emu);
   assertNoPanelFaults(emu);
 });

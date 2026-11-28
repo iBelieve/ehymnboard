@@ -60,8 +60,8 @@ struct BoardState
     // Empty when the server has no firmware uploaded
     std::string firmware_version;
     // Whether the server lets this board update its panels with a partial
-    // refresh (a per-board setting in the admin, so it can be rolled out and
-    // back without a firmware release)
+    // refresh (a per-board Flagship flag on the server, so it can be rolled
+    // out and back without a firmware release)
     bool partial_refresh = false;
 
     bool operator==(const BoardState &other) const

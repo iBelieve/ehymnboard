@@ -193,7 +193,9 @@ the binding `FLAGS` in `wrangler.jsonc` (production and previews share the app
 **hymnboard**, in Compute > Flagship), read in `src/worker/flags.ts`. A flag is
 evaluated with the board's `deviceId` (also the `targetingKey`, for
 percentage rollouts) and its name as `board`, so a rule can turn it on for one
-board, a few, or a share of them. A flag that can't be evaluated is off. Locally
+board, a few, or a share of them. A flag that isn't in the app is off; while
+Flagship can't evaluate one, a connected board keeps what it was last told, and
+a board connecting gets it off. Locally
 (`pnpm dev`, the tests and the e2e tests' server) the binding is Wrangler's
 own store, empty, so every flag is off; the Worker tests put flags in it
 through its admin API.

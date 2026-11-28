@@ -46,11 +46,12 @@ TEST(BoardMessages, IgnoresWordsAddedLater)
 TEST(BoardMessages, ParsesThePartialOption)
 {
     const auto base = "state 1 " + E1 + " " + E2 + " " + E3 + " v1";
-    EXPECT_FALSE(parse_state_message(base)->partial_refresh);
-    EXPECT_TRUE(parse_state_message(base + " partial")->partial_refresh);
+    // value(): a message that stopped parsing fails the test, not dereferences nothing
+    EXPECT_FALSE(parse_state_message(base).value().partial_refresh);
+    EXPECT_TRUE(parse_state_message(base + " partial").value().partial_refresh);
     // Among options added later, in any order
-    EXPECT_TRUE(parse_state_message(base + " later partial")->partial_refresh);
-    EXPECT_FALSE(parse_state_message(base + " partially")->partial_refresh);
+    EXPECT_TRUE(parse_state_message(base + " later partial").value().partial_refresh);
+    EXPECT_FALSE(parse_state_message(base + " partially").value().partial_refresh);
 }
 
 TEST(BoardMessages, RejectsOtherMessages)

@@ -166,7 +166,7 @@ function Status({ device, now }: { device: DeviceWithName; now: Date }) {
       {device.partial_refresh && (
         <span
           className="badge badge-info"
-          title="Changes its panels without flashing: Flagship's partial-refresh flag is on for this board"
+          title="Flagship's partial-refresh flag is on for this board, so it may change its panels without flashing (firmware from before partial refresh ignores it)"
         >
           Partial refresh
         </span>

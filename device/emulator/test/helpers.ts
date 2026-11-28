@@ -65,3 +65,17 @@ export function assertNoPanelFaults(emu: Emulator) {
     assert.deepEqual(panel.faults, [], `screen ${panel.id} faults`);
   }
 }
+
+/** Free heap the board must keep at its busiest, for what TLS hasn't needed yet. */
+const HEAP_HEADROOM = 24 * 1024;
+
+/** Checks the heap never came within HEAP_HEADROOM of running out. */
+export function assertHeapHeadroom(emu: Emulator) {
+  const reports = [...emu.serial.matchAll(/TLS: heap \d+ in use, peak (\d+) of (\d+)/g)];
+  assert.ok(reports.length > 0, "the board reported its heap");
+  for (const [, peak, size] of reports) {
+    const free = Number(size) - Number(peak);
+    assert.ok(free >= HEAP_HEADROOM, `only ${free} bytes free at the peak`);
+  }
+  assert.equal(count(emu, "TLS: out of memory"), 0);
+}

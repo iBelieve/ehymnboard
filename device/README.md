@@ -103,7 +103,7 @@ The controller compares the new image (BW RAM) with the old one (RED RAM),
 but the board cuts the panel's power after every update, which loses both,
 so the board keeps what each panel shows, packed as runs of pixels
 (`src/shown_images.cpp`): a screen of hymn numbers packs to a few KB, and
-all three get at most 24 KB of RAM. An image that doesn't fit is let go and
+all three get at most 20 KB of RAM, which leaves TLS the spare heap it needs. An image that doesn't fit is let go and
 that panel's next update is a full one. So is the first update after a boot
 or after the server turns the option on, every fifth update (to clear any
 ghosting), and the nightly `redraw`. Older firmware ignores the option.

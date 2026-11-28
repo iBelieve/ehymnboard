@@ -54,9 +54,10 @@ bool unpack_pixel_runs(const std::vector<uint8_t> &packed, std::size_t size,
 class ShownImages
 {
   public:
-    // All three packed images together stay under this, so the downloads'
-    // TLS keeps the heap it needs (about 45 KB is free beside it)
-    static constexpr std::size_t BUDGET_BYTES = 24 * 1024;
+    // All three packed images together stay under this, so a download's TLS
+    // still has the 24 KB of spare heap the emulator's tests ask for at its
+    // peak (about 46 KB is free there without the images)
+    static constexpr std::size_t BUDGET_BYTES = 20 * 1024;
     // Partial updates leave a little ghosting behind, so every fifth update
     // of a panel is a full one (Waveshare's manual says to fully refresh
     // after about five partial ones)

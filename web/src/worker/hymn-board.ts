@@ -408,7 +408,10 @@ export class HymnBoard extends DurableObject<Env> {
     console.log(`Device socket connected: ${name} (${deviceId}) via ${colo ?? "?"}`);
     this.ctx.waitUntil(this.ping(deviceId, "", "Socket connected"));
 
-    await this.sendState(server, await this.stateMessage());
+    // The flag first: the state is built after the wait (see sendState)
+    // Off if Flagship can't say: nothing is known about the panels yet
+    const partial = (await partialRefreshFor(this.env.FLAGS, deviceId)) ?? false;
+    this.sendState(server, await this.stateMessage(), partial);
     if ((await this.ctx.storage.getAlarm()) === null) {
       await this.ctx.storage.setAlarm(now + HEALTH_INTERVAL_MS);
     }
@@ -433,33 +436,48 @@ export class HymnBoard extends DurableObject<Env> {
     if (sockets.length === 0) {
       return;
     }
+    // The flags first: the state is built after the wait (see sendState)
+    const partial = await Promise.all(sockets.map((ws) => this.partialRefreshOf(ws)));
     const message = await this.stateMessage();
-    await Promise.all(sockets.map((ws) => this.sendState(ws, message)));
+    for (const [i, ws] of sockets.entries()) {
+      this.sendState(ws, message, partial[i] ?? false);
+    }
+  }
+
+  /**
+   * Flagship's partial refresh flag for the board on a socket (none without
+   * one), or what the board was last told if Flagship can't say.
+   */
+  private async partialRefreshOf(ws: WebSocket): Promise<boolean | undefined> {
+    const attachment = attachmentOf(ws);
+    if (!attachment) {
+      return undefined;
+    }
+    const partial = await partialRefreshFor(this.env.FLAGS, attachment.deviceId);
+    // Read again after the wait: a broadcast may have told it since
+    return partial ?? attachmentOf(ws)?.partialRefresh;
   }
 
   /**
    * Sends a board the state, with "partial" if Flagship lets it update its
-   * panels partially, and notes on its socket which it was told. `partial`
-   * is the flag's value if it was just evaluated.
+   * panels partially (`partial`, the flag just evaluated for its board), and
+   * notes on its socket which it was told. Synchronous, so called once the
+   * flag is in hand: a state built before a wait on Flagship could reach the
+   * board after a newer one, and the note could be of what it wasn't told.
    */
-  private async sendState(ws: WebSocket, message: string, partial?: boolean): Promise<void> {
-    const attachment = attachmentOf(ws);
-    if (!attachment) {
-      ws.send(message);
-      return;
-    }
-    const { deviceId } = attachment;
-    const on = partial ?? (await partialRefreshFor(this.env.FLAGS, deviceId));
+  private sendState(ws: WebSocket, message: string, partial: boolean): void {
     try {
-      ws.send(on ? `${message} ${PARTIAL_OPTION}` : message);
+      ws.send(partial ? `${message} ${PARTIAL_OPTION}` : message);
     } catch {
       // Closing; the board gets the state when it reconnects
       return;
     }
-    if (on !== attachment.partialRefresh) {
-      ws.serializeAttachment({ ...attachment, partialRefresh: on } satisfies SocketAttachment);
+    const attachment = attachmentOf(ws);
+    if (attachment && partial !== attachment.partialRefresh) {
+      ws.serializeAttachment({ ...attachment, partialRefresh: partial } satisfies SocketAttachment);
+      const { deviceId } = attachment;
       console.log(
-        `Partial refresh ${on ? "on" : "off"} for ${getDeviceName(deviceId)} (${deviceId})`,
+        `Partial refresh ${partial ? "on" : "off"} for ${getDeviceName(deviceId)} (${deviceId})`,
       );
     }
   }
@@ -470,17 +488,18 @@ export class HymnBoard extends DurableObject<Env> {
    * reaches the boards within an alarm's interval.
    */
   private async sendChangedFlags(sockets: WebSocket[]): Promise<void> {
-    let message: string | undefined;
-    for (const ws of sockets) {
-      const attachment = attachmentOf(ws);
-      if (!attachment) {
-        continue;
-      }
-      const partial = await partialRefreshFor(this.env.FLAGS, attachment.deviceId);
-      if (partial !== attachment.partialRefresh) {
-        message ??= await this.stateMessage();
-        await this.sendState(ws, message, partial);
-      }
+    const partial = await Promise.all(sockets.map((ws) => this.partialRefreshOf(ws)));
+    // What each was told is read after the wait, as a broadcast may have told it since
+    const changed = sockets.flatMap((ws, i) => {
+      const on = partial[i];
+      return on !== undefined && on !== attachmentOf(ws)?.partialRefresh ? [{ ws, on }] : [];
+    });
+    if (changed.length === 0) {
+      return;
+    }
+    const message = await this.stateMessage();
+    for (const { ws, on } of changed) {
+      this.sendState(ws, message, on);
     }
   }
 
