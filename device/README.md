@@ -106,11 +106,17 @@ when one changes. The client is our own, on lwIP's raw TCP API
 
 The messages are short text (`src/board_messages.h`):
 
-| From   | Message                                     | Meaning                                                                                                  |
-| ------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| server | `state 1 <etag1> <etag2> <etag3> <version>` | What each screen should show and the firmware to run (`-` for none). Sent on connect and on every change |
-| board  | `ping`                                      | Every 30 s. The server answers `pong` (on Cloudflare, without waking the Durable Object)                 |
-| board  | `shown <etag1> <etag2> <etag3>`             | What the panels show now (`-` for a screen never drawn)                                                  |
+| From   | Message                                     | Meaning                                                                                                   |
+| ------ | ------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| server | `state 1 <etag1> <etag2> <etag3> <version>` | What each screen should show and the firmware to run (`-` for none). Sent on connect and on every change  |
+| board  | `ping`                                      | Every 30 s. The server answers `pong` without waking the Durable Object                                   |
+| board  | `shown <etag1> <etag2> <etag3>`             | What the panels show now (`-` for a screen never drawn)                                                   |
+| server | `redraw`                                    | Nightly: download every screen again (`GET /images/N` with `&redraw=1`) and redraw it with a full refresh |
+
+The nightly redraw is for the panels: Waveshare's manual says to refresh them
+at least once every 24 hours, or old images can stick, and a full refresh
+clears any ghosting. The server sends it between 3 AM and 5 AM where the board is (in
+Chicago if Cloudflare can't place it; see `web/README.md`), so nobody sees the panels flash.
 
 The upgrade request carries the same query string as every other request
 (`device_id`, `saved_state_writes`, `watchdog_caused_reboot`,
@@ -136,20 +142,22 @@ malloc or free runs.
 
 #### Releasing an update
 
-Build, then upload the OTA bundle (both slots' encrypted images, `ehymnboard_ota_bundle.bin`) and its version:
+Build, then upload the OTA bundle (both slots' encrypted images,
+`ehymnboard_ota_bundle.bin`) and its version, with an admin's API key (from
+your Profile page in the admin, as an admin):
 
 ```sh
-curl -u "$BASIC_AUTH_USERNAME:$BASIC_AUTH_PASSWORD" \
+curl -H "X-Api-Key: $HYMNBOARD_API_KEY" \
   -F image=@build/ehymnboard_ota_bundle.bin \
   -F version="$(cat build/firmware_version.txt)" \
   https://hymnboard.sonrise.io/firmware
 ```
 
-Every board running a different version installs it, including boards with a newer build flashed over USB: the server pushes the new version to each connected board at once. The server sends each board the image for its other slot, and slot A's to a board on pico_fota_bootloader. A single image (`ehymnboard_fota_image_encrypted.bin`, slot A's) still uploads, for a build from before the A/B bootloader; only boards on pico_fota_bootloader get it, as boards on the A/B bootloader mustn't run such firmware. A new firmware commits itself on the first `state` message it gets over its socket. Before committing it also checks that it can make an ordinary request (`/firmware/latest`): if that fails five times, half a minute apart, it gives up its trial and reboots to be rolled back. The devices page shows each board's firmware version and any rollback.
+Every board running a different version installs it, including boards with a newer build flashed over USB: the server pushes the new version to each connected board at once. The server sends each board the image for its other slot, and slot A's to a board on pico_fota_bootloader. A single image (`ehymnboard_fota_image_encrypted.bin`, slot A's) still uploads, for a build from before the A/B bootloader; only boards on pico_fota_bootloader get it, as boards on the A/B bootloader mustn't run such firmware. A new firmware commits itself on the first `state` message it gets over its socket. Before committing it also checks that it can make an ordinary request (`/firmware/latest`): if that fails five times, half a minute apart, it gives up its trial and reboots to be rolled back. The Hymn Boards page shows each board's firmware version and any rollback.
 
 Notes:
 
-- The image is AES encrypted: it contains the WiFi passphrases, and firmware from before TLS downloads it over plain HTTP. The SHA-256 is inside the encrypted image, so a corrupted or tampered image fails the check.
+- The image is AES encrypted: it contains the WiFi passphrases, and anyone can download it (`/firmware/image` takes no login). The SHA-256 is inside the encrypted image, so a corrupted or tampered image fails the check.
 - Don't change the flash layout (`boot_control.h` and the `EHB_*` variables in `CMakeLists.txt`) or the stub without a plan for moving every board over the air, as for pico_fota_bootloader.
 - The emulator runs the whole flow on an emulated board, bootloader included (see [emulator/README.md](emulator/README.md)): `ota.test.ts` (install, commit, trial boots, rollback, retry after an outage), `ota-rejects.test.ts` (bad, wrong-slot, cut off or stalled images), `power-cuts.test.ts` (a power cut during each boot record write) and `migration.test.ts` (moving off pico_fota_bootloader, with a power cut during each of its flash writes). The host tests (`test/test_boot_control.cpp`) check the bootloader's decisions through random updates with power cuts anywhere.
 
@@ -166,13 +174,16 @@ Cloudflare's edge and Let's Encrypt both serve. Later requests resume the
 first handshake's session, so a download skips the certificate check.
 
 It trusts only the root CAs in `certs/roots.pem`: every CA Cloudflare issues
-edge certificates from, and Let's Encrypt. They stay in flash and are parsed
-only for the handshake that needs one. A server whose certificate came from
-any other CA cuts the boards off until they're flashed over USB, so
-`.github/workflows/check-tls-roots.yml` checks every day that the live
-chains still verify against that file with the board's TLS settings. To add
-a root, append it with a `# Name:` line and release firmware before the
-server switches.
+edge certificates from, Let's Encrypt among them, which also lets the server
+move off Cloudflare to its own Let's Encrypt certificate without an OTA update
+first, as long as Let's Encrypt's chains end at ISRG Root X1 or X2. The roots
+stay in flash and are parsed only for the handshake that needs one. A server
+whose certificate came from any other CA cuts the boards off until they're
+flashed over USB, so `.github/workflows/check-tls-roots.yml` checks every day
+that the live chains still verify against that file with the board's TLS
+settings; it checks only the live server, so check a new one the same way
+before moving to it. To add a root, append it with a `# Name:` line and
+release firmware before the server switches.
 
 A full handshake beside the open socket peaks at about 45 KB of the 88 KB
 heap (the board logs `TLS: heap …` after each round of downloads). lwIP's

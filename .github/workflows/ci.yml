@@ -2,9 +2,8 @@ name: CI
 
 # Every check, on every push to master and every pull request, with no path
 # filters: the jobs run in parallel, so running all of them costs little time,
-# and every check reports on every commit. The firmware and the server's Docker
-# image are each built once and shared, as artifacts, with the jobs that need
-# them. The last job, all-green, passes only if every other job passed; it is
+# and every check reports on every commit. The firmware is built once and
+# shared, as an artifact, with the jobs that need it. The last job, all-green, passes only if every other job passed; it is
 # the one required status check, so adding or renaming a job needs no change
 # to the branch protection settings. check-pico-sdk.yml is separate: a weekly
 # check, not a check of a change.
@@ -21,15 +20,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  # The server the e2e tests run against: its directory (its Dockerfile is
-  # there) and its Docker build context. web/ builds from the root, where the
-  # pnpm workspace's lockfile is; a server that builds from its own directory
-  # sets both to it.
-  SERVER_DIR: web
-  SERVER_CONTEXT: .
-  # The image listens on $PORT. 5000 is what dokku gives it (the fallback
-  # server; production is the Cloudflare Worker).
-  SERVER_PORT: "5000"
   ACTIONLINT_VERSION: "1.7.12"
 
 jobs:
@@ -132,35 +122,6 @@ jobs:
       - name: Build
         if: (success() || failure()) && steps.setup.outcome == 'success'
         run: pnpm run build
-
-  # The server's Docker image, as dokku builds it. The e2e job runs this image.
-  server-image:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: docker/setup-buildx-action@v4
-
-      - name: Build server image
-        uses: docker/build-push-action@v7
-        with:
-          context: ${{ env.SERVER_CONTEXT }}
-          file: ${{ env.SERVER_DIR }}/Dockerfile
-          push: false
-          tags: ehymnboard-server:ci
-          outputs: type=docker,dest=${{ runner.temp }}/server-image.tar
-          cache-from: type=gha,scope=server
-          cache-to: type=gha,mode=max,scope=server
-
-      - name: Upload server image
-        uses: actions/upload-artifact@v7
-        with:
-          name: server-image
-          path: ${{ runner.temp }}/server-image.tar
-          # Long enough to re-run a failed e2e job alone after a weekend.
-          retention-days: 7
-          if-no-files-found: error
 
   # --- device/ --------------------------------------------------------------
 
@@ -401,15 +362,14 @@ jobs:
   # --- e2e/ -----------------------------------------------------------------
 
   # Full-stack end-to-end tests (e2e/): the firmware from the firmware job
-  # runs in the emulator and talks to the server's Docker image (from the
-  # server-image job) over its real HTTP and WebSocket, while Playwright
-  # drives the server's admin page. The emulated board's ID is all zeros (its
-  # flash has no unique ID), so the server is told to accept it with
-  # EXTRA_DEVICE_IDS. To test a replacement server, point SERVER_DIR,
-  # SERVER_CONTEXT and SERVER_PORT at it; the tests themselves shouldn't need
-  # to change.
+  # runs in the emulator and talks to the server over its real HTTP and
+  # WebSocket, while Playwright drives the server's admin page. The tests
+  # start the server themselves: web/'s build, under `wrangler dev` (the
+  # Workers runtime, locally), with the emulated board's all-zeros ID (its
+  # flash has no unique ID) allowed by EXTRA_DEVICE_IDS. Its log is in the
+  # test output, prefixed [WebServer].
   e2e:
-    needs: [firmware, server-image]
+    needs: firmware
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -423,26 +383,8 @@ jobs:
           name: firmware
           path: device/build
 
-      - uses: actions/download-artifact@v8
-        with:
-          name: server-image
-          path: ${{ runner.temp }}
-
-      - name: Start server
-        run: |
-          docker load --input "$RUNNER_TEMP/server-image.tar"
-          docker run -d --name server -p "$SERVER_PORT:$SERVER_PORT" -e PORT="$SERVER_PORT" \
-            -e BASIC_AUTH_USERNAME=e2e -e BASIC_AUTH_PASSWORD=e2e-password \
-            -e EXTRA_DEVICE_IDS=0000000000000000 \
-            ehymnboard-server:ci
-          for _ in $(seq 30); do
-            curl -fsS "http://localhost:$SERVER_PORT/ok" && exit 0
-            sleep 1
-          done
-          docker logs server
-          exit 1
-
-      # Installs the whole workspace, the emulator the tests import included
+      # Installs the whole workspace: the emulator the tests import, and web/
+      # for the server
       - uses: pnpm/setup@v3
         with:
           cache: true
@@ -452,15 +394,7 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       - name: Run end-to-end tests
-        env:
-          E2E_BASE_URL: http://localhost:${{ env.SERVER_PORT }}
-          E2E_USERNAME: e2e
-          E2E_PASSWORD: e2e-password
         run: pnpm test
-
-      - name: Server logs
-        if: failure()
-        run: docker logs server
 
       # Traces, serial logs, the board's requests and every frame its panels
       # showed, for each test.
@@ -486,7 +420,6 @@ jobs:
       - typescript
       - actionlint
       - web
-      - server-image
       - device-format
       - firmware
       - host-tests

@@ -40,7 +40,7 @@ pico_sdk_init()
 # layout and README.md ("OTA updates").
 #
 # The OTA image is AES encrypted (it contains the WiFi passphrases from
-# secrets.h, and firmware from before TLS downloads it over plain HTTP), so
+# secrets.h, and anyone can download it from the server's /firmware/image), so
 # builds need a key. Put it in secrets.cmake (see secrets.example.cmake) or
 # pass -DPFB_AES_KEY=... (the name is from pico_fota_bootloader, whose boards
 # check images with the same key).

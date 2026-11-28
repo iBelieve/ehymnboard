@@ -172,7 +172,8 @@ export class MockServer {
       if (!image) {
         return { status: 404 };
       }
-      if (req.query.etag === image.etag) {
+      // A redraw (redraw=1) gets the image even when its etag is current
+      if (req.query.etag === image.etag && req.query.redraw !== "1") {
         return { status: 304 };
       }
       return { status: 200, headers: { Etag: image.etag }, body: image.body };

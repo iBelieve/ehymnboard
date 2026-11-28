@@ -114,14 +114,16 @@ bool after_rollback()
     return false;
 }
 
-static void save_record(const boot::Records &records, const boot::Record &record)
+static bool save_record(const boot::Records &records, const boot::Record &record)
 {
     const auto page = boot::record_page(boot::next(records, record));
     const uint32_t offset = boot::RECORD_OFFSETS[records.write_sector];
     if (!flash_write_safely([&page, offset]() { boot::erase_and_program(offset, page); }))
     {
         printf("OTA: couldn't save the boot record\n");
+        return false;
     }
+    return true;
 }
 
 void commit_running_firmware()
@@ -143,9 +145,9 @@ void commit_running_firmware()
 
     const auto records = boot::read_records();
     const auto record = boot::committed(records.newest, running_slot(), running_image());
-    if (record)
+    if (record && save_record(records, *record))
     {
-        save_record(records, *record);
+        printf("OTA: committed the firmware in slot %s\n", running_slot() == boot::SLOT_A ? "A" : "B");
     }
 }
 

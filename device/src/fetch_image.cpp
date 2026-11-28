@@ -111,13 +111,14 @@ static void on_http_req_completed(void *arg, httpc_result_t httpc_result, u32_t 
     req->result = httpc_result;
 }
 
-FetchImageResult fetch_image(int image, std::string &etag)
+FetchImageResult fetch_image(int image, std::string &etag, bool redraw)
 {
     auto context = cyw43_arch_async_context();
 
     // Yeah, yeah, the etag should be a If-None-Match header, but the
     // http_client library doesn't support custom headers.
-    const std::string path = build_request_path("/images/" + std::to_string(image), current_device_status(), etag);
+    const std::string path = build_request_path("/images/" + std::to_string(image), current_device_status(), etag) +
+                             (redraw ? "&redraw=1" : "");
 
     // httpc holds on to these until it calls on_http_req_completed, which can
     // be after the wait below gives up, so they outlive this call, and a new

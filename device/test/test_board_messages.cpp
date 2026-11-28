@@ -46,6 +46,7 @@ TEST(BoardMessages, RejectsOtherMessages)
 {
     EXPECT_FALSE(parse_state_message(""));
     EXPECT_FALSE(parse_state_message("pong"));
+    EXPECT_FALSE(parse_state_message("redraw"));
     EXPECT_FALSE(parse_state_message("state 2 " + E1 + " " + E2 + " " + E3 + " v1"));
     EXPECT_FALSE(parse_state_message("state 1 " + E1 + " " + E2 + " " + E3));
     EXPECT_FALSE(parse_state_message("state 1 " + E1 + " " + E2 + " \"quoted\" v1"));
@@ -60,6 +61,7 @@ TEST(BoardMessages, Type)
 {
     EXPECT_EQ(message_type("state 1 a b c -"), "state");
     EXPECT_EQ(message_type("pong"), "pong");
+    EXPECT_EQ(message_type("redraw"), REDRAW_MESSAGE);
     EXPECT_EQ(message_type(""), "");
 }
 

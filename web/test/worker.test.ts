@@ -1,26 +1,32 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env, exports } from "cloudflare:workers";
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, test, vi } from "vitest";
 import type { BoardState } from "../src/shared/api";
 import { getFont } from "../src/shared/font";
 import { renderScreen } from "../src/shared/render";
 import { SCREEN_BYTES } from "../src/shared/screen";
 import { bundle } from "./bundle";
 import { type Ping, recordPings } from "./healthchecks";
+import { signInAsAdmin } from "./signIn";
 import worker from "../src/worker/index";
 
 const LEFT = "E6614103E71F8D26";
-const AUTH = { Authorization: `Basic ${btoa("admin:secret")}` };
+/** The session cookie of the first account, an admin. */
+let AUTH: Record<string, string>;
+
+beforeAll(async () => {
+  AUTH = await signInAsAdmin();
+});
 
 function get(path: string, headers: Record<string, string> = {}) {
-  return exports.default.fetch(new Request(`http://api.hymnboard.sonrise.io${path}`, { headers }));
+  return exports.default.fetch(new Request(`https://hymnboard.sonrise.io${path}`, { headers }));
 }
 
-function putLines(lines: string[], headers: Record<string, string> = AUTH) {
+function putLines(lines: string[], headers?: Record<string, string>) {
   return exports.default.fetch(
-    new Request("http://api.hymnboard.sonrise.io/api/lines", {
+    new Request("https://hymnboard.sonrise.io/api/lines", {
       method: "PUT",
-      headers: { ...headers, "Content-Type": "application/json" },
+      headers: { ...(headers ?? AUTH), "Content-Type": "application/json" },
       body: JSON.stringify({ lines }),
     }),
   );
@@ -97,21 +103,19 @@ describe("GET /images/:id (device protocol)", () => {
 });
 
 describe("device status", () => {
-  test("records boots, health and image fetches", async () => {
+  test("records boots and image fetches", async () => {
     expect(
       (await get(`/device_booted?device_id=${LEFT}&saved_state_writes=3&watchdog_caused_reboot=1`))
         .status,
     ).toBe(204);
-    expect((await get(`/device_healthy?device_id=${LEFT}&saved_state_writes=4`)).status).toBe(204);
     await get(`/images/3?device_id=${LEFT}&saved_state_writes=4`);
-    await get("/device_healthy?device_id=E661A4D41787452B");
+    await get("/images/2?device_id=E661A4D41787452B");
 
     await settle();
     expect(pings.map((p) => p.url.split("hc-ping.com/")[1])).toEqual([
       "a717c5f0-8a83-45f9-92a7-c79a21a437b4/failure",
-      "a717c5f0-8a83-45f9-92a7-c79a21a437b4",
       "a717c5f0-8a83-45f9-92a7-c79a21a437b4/log",
-      "6c7ef2cb-71b8-492e-9e11-4ddfacf29d0c",
+      "6c7ef2cb-71b8-492e-9e11-4ddfacf29d0c/log",
     ]);
 
     const state = await (await get("/api/state", AUTH)).json<BoardState>();
@@ -130,7 +134,7 @@ describe("device status", () => {
     async (healthchecks) => {
       const ctx = createExecutionContext();
       const res = await worker.fetch(
-        new Request(`http://api.hymnboard.sonrise.io/device_booted?device_id=${LEFT}`),
+        new Request(`https://hymnboard.sonrise.io/device_booted?device_id=${LEFT}`),
         { ...env, HEALTHCHECKS: healthchecks },
         ctx,
       );
@@ -141,8 +145,8 @@ describe("device status", () => {
   );
 
   test("ignores a saved_state_writes that isn't an integer", async () => {
-    await get(`/device_healthy?device_id=${LEFT}&saved_state_writes=9`);
-    await get(`/device_healthy?device_id=${LEFT}&saved_state_writes=lots`);
+    await get(`/images/1?device_id=${LEFT}&saved_state_writes=9`);
+    await get(`/images/1?device_id=${LEFT}&saved_state_writes=lots`);
     const state = await (await get("/api/state", AUTH)).json<BoardState>();
     expect(state.devices[0]!.saved_state_writes).toBe(9);
   });
@@ -245,19 +249,23 @@ describe("admin API", () => {
     expect((await get("/api/state", crossSite)).status).toBe(200);
   });
 
-  test("requires basic auth", async () => {
+  test("requires signing in", async () => {
     expect((await get("/api/state")).status).toBe(401);
     expect(
-      (await get("/api/state", { Authorization: `Basic ${btoa("admin:wrong")}` })).status,
+      (await get("/api/state", { Cookie: "__Secure-better-auth.session_token=forged" })).status,
     ).toBe(401);
     expect((await putLines(["1", "2", "3", "4", "5", "6"], {})).status).toBe(401);
+    expect((await get("/api/screens/1")).status).toBe(401);
   });
 
   test("rejects anything but six strings", async () => {
     expect((await putLines(["1", "2"])).status).toBe(400);
+    const long = await putLines(["x".repeat(101), "", "", "", "", ""]);
+    expect(long.status).toBe(400);
+    expect(await long.text()).toBe("Each line is at most 100 characters\n");
     for (const body of ["null", "[]", "not json", '"lines"']) {
       const res = await exports.default.fetch(
-        new Request("http://api.hymnboard.sonrise.io/api/lines", {
+        new Request("https://hymnboard.sonrise.io/api/lines", {
           method: "PUT",
           headers: { ...AUTH, "Content-Type": "application/json" },
           body,
@@ -290,7 +298,7 @@ function upload(
   const bytes = typeof image === "number" ? new Uint8Array(image).fill(7) : image;
   form.set("image", new File([bytes], "fw.bin"));
   return exports.default.fetch(
-    new Request("http://api.hymnboard.sonrise.io/firmware", {
+    new Request("https://hymnboard.sonrise.io/firmware", {
       method: "POST",
       headers: { ...AUTH, ...headers },
       body: form,

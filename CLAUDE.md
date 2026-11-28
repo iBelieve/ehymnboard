@@ -1,12 +1,11 @@
 # eHymnBoard
 
 E-ink hymn board: `device/` is Raspberry Pi Pico W firmware (C++, pico-sdk,
-CMake), `web/` is the server: a Hono Worker + Durable Object + React admin,
+CMake), `web/` is the server: a Hono Worker + Durable Object + D1 + React admin,
 in production on Cloudflare Workers (`hymnboard.sonrise.io`, deployed from
-master by Workers Builds), and self-hostable on workerd via a Docker image
-deployed with dokku, which serves as the fallback (see `web/README.md`). It
-replaced a Flask app (`server/`, last at commit 02ece7f) and keeps its device
-protocol byte-for-byte. `hardware/` is the KiCad design
+master by Workers Builds). It replaced a Flask app
+(`server/`, last at commit 02ece7f) and its device endpoints
+answer byte-for-byte as they did. `hardware/` is the KiCad design
 (no CI). `web/`, `e2e/` and `device/emulator/` are one pnpm workspace,
 rooted at the repository root (see "pnpm workspace" below).
 
@@ -14,10 +13,9 @@ rooted at the repository root (see "pnpm workspace" below).
 
 One GitHub Actions workflow, `.github/workflows/ci.yml`, runs every check on
 every push to master and every pull request, with no path filters, as
-parallel jobs. The firmware is built once (the `firmware` job) and the
-server's Docker image once (`server-image`); the emulator, Autobahn and e2e
-jobs download them as artifacts. The `All green` job passes only if every
-other job did and is the one required status check, so a new job needs no
+parallel jobs. The firmware is built once (the `firmware` job); the emulator,
+Autobahn and e2e jobs download it as an artifact. The `All green` job passes
+only if every other job did and is the one required status check, so a new job needs no
 branch protection change, only a line in its `needs` (a step there fails if a
 job is missing). `check-pico-sdk.yml` is a separate weekly job, and
 `check-tls-roots.yml` a daily one (the live server's certificate chain
@@ -129,38 +127,52 @@ All checks below must pass; run them locally before committing.
   `pnpm run build`; formatting is checked once for the whole repository
 - After changing `wrangler.jsonc`, regenerate `worker-configuration.d.ts`
   with `pnpm exec wrangler types`
+- Accounts are Better Auth's, in the D1 database bound as `DB` (see
+  `web/README.md`, "Accounts"): its tables are `ACCOUNT_MIGRATIONS` in
+  `src/worker/account-migrations.ts`, which the Worker applies itself, so a
+  Better Auth upgrade or plugin that adds fields needs a migration step there
+  (`test/account-migrations.test.ts` fails until it has one). Don't keep a
+  Better Auth instance or promise across requests: a Worker can't await one
+  another request made. Every deploy needs `BETTER_AUTH_SECRET` and
+  `SETUP_PASSWORD`
 - Don't change the device endpoints' paths, query parameters or response
-  bytes, or the `/ws` messages (`state`, `ping`/`pong`, `shown`, close
+  bytes, or the `/ws` messages (`state`, `ping`/`pong`, `shown`, `redraw`, close
   codes): the firmware hard-codes them. `/firmware/image` without `slot`
   must keep serving slot A's image (a single upload's whole image): boards
-  still on pico_fota_bootloader send no `slot`. The rasterizer is compared
-  against the old Flask server's output in `test/render.test.ts`
-- Docker: the image builds from the repository root, for the workspace's
-  lockfile: `docker build -f web/Dockerfile .` (`.dockerignore` at the root
-  sends only the root files and `web/`). CI builds it, and dokku builds it the
-  same way (see `web/README.md`)
+  still on pico_fota_bootloader send no `slot`. The rasterizer is checked bit
+  for bit against reference screens in `test/fixtures/render/`
+  (`test/render.test.ts`); regenerate them only after a deliberate rendering
+  change, with
+  `UPDATE_RENDER_FIXTURES=1 pnpm vitest run --silent=false test/render.test.ts`
+  in `web/`, and look at the screens it wrote before committing them
 
 ### e2e/
 
 Full-stack tests: the firmware in the emulator talks to a running server's
 real HTTP while Playwright drives its admin page (only through the page; no
-server internals). CI runs them against the server's Docker image
-(`SERVER_DIR`/`SERVER_CONTEXT`/`SERVER_PORT` in `ci.yml`). Same TypeScript conventions as
-the emulator.
+server internals). Unless `E2E_BASE_URL` names a server, they build `web/`
+and run it themselves under `wrangler dev` (Playwright's `webServer` in
+`playwright.config.ts`), locally and in CI alike. Same TypeScript conventions
+as the emulator.
 
 - Needs the firmware build. The tests import the emulator's source by
-  relative path; `ehymnboard-emulator` is a `workspace:*` dependency so a
-  filtered install (`pnpm install --filter ehymnboard-e2e...`) brings its
-  packages too
-- `pnpm install`, `pnpm exec playwright install chromium`, then with a server
-  running: `E2E_BASE_URL=http://localhost:8000 E2E_USERNAME=… E2E_PASSWORD=… pnpm test`.
-  The server must run with `EXTRA_DEVICE_IDS=0000000000000000` (the emulated
-  board's ID), or `/ws` refuses the board
+  relative path and run `web/`'s scripts; `ehymnboard-emulator` and
+  `ehymnboard-web` are `workspace:*` dependencies so a filtered install
+  (`pnpm install --filter ehymnboard-e2e...`) brings their packages too
+- `pnpm install`, `pnpm exec playwright install chromium`, then `pnpm test`.
+  `signIn.setup.ts` signs in through the page first, creating the first
+  account with the server's setup password if there's none (`e2e-setup` on
+  the tests' own server). Against another server:
+  `E2E_BASE_URL=… E2E_SETUP_PASSWORD=… pnpm test` (`E2E_EMAIL` and
+  `E2E_PASSWORD` default to e2e@example.com and e2e-password); it must run with `EXTRA_DEVICE_IDS=0000000000000000` (the emulated board's
+  ID), or `/ws` refuses the board
 - `pnpm run typecheck`, `pnpm run lint`
 - The selectors are what a person sees, so a rewritten admin page passes
-  unchanged if it keeps the six text boxes, Apply/Clear buttons,
-  "<board> (last seen …" line and the SVG board picture with one `<image>`
-  per screen. A test that must change for a rewrite flags a behaviour change
+  unchanged if it keeps the six text boxes, Apply/Clear buttons, the SVG
+  board picture with one `<image>` per screen, and the "Hymn Boards" link to
+  a table with a row per board under the headings Status, Last seen, Booted
+  and Firmware, above a "Latest firmware …" line. A test that must change
+  for a rewrite flags a behaviour change
 
 ### .github/workflows/
 

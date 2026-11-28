@@ -40,6 +40,11 @@ export const FIRMWARE =
 
 export const LINE_COUNT = 6;
 
+/** A server on this machine, rather than far away (a Cloudflare preview). */
+function isLocal(origin: string) {
+  return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname);
+}
+
 /**
  * Publishes a firmware release the way a release is published (`POST
  * /firmware`): its OTA bundle, both slots' images.
@@ -73,8 +78,9 @@ function buildRelease() {
 
 /**
  * The admin page, found by what a person sees on it: six text boxes in
- * order, Apply and Clear buttons, a line per board and a picture of the
- * board. Nothing depends on how the page is built.
+ * order, Apply and Clear buttons, a picture of the board, and a "Hymn
+ * Boards" link to a table row per board. Nothing depends on how the page is
+ * built.
  */
 export class AdminPage {
   readonly page: Page;
@@ -118,10 +124,27 @@ export class AdminPage {
     }
   }
 
-  /** The admin's line for a board, after a fresh load. */
-  async boardStatus(id: string) {
+  /** The Hymn Boards page, after a fresh load, reached from the board's menu. */
+  async openBoards() {
     await this.open();
-    return this.page.getByText(new RegExp(`${id} \\(last seen`));
+    await this.page.getByRole("link", { name: "Hymn Boards" }).click();
+    await expect(this.page.getByRole("heading", { name: "Hymn Boards" })).toBeVisible();
+  }
+
+  /** A board's row on the Hymn Boards page, after a fresh load. */
+  async #boardRow(id: string) {
+    await this.openBoards();
+    return this.page.getByRole("row").filter({ hasText: id });
+  }
+
+  /** One column of a board's row on the Hymn Boards page, by its heading. */
+  async boardField(id: string, column: "Status" | "Last seen" | "Booted" | "Firmware") {
+    const row = await this.#boardRow(id);
+    await expect(row).toBeVisible();
+    const headings = await this.page.getByRole("columnheader").allTextContents();
+    expect(headings).toContain(column);
+    // In page order, counting a row header (the board's name, say) as a column too
+    return row.getByRole("rowheader").or(row.getByRole("cell")).nth(headings.indexOf(column));
   }
 
   /**
@@ -212,8 +235,7 @@ export class Board {
     const verbose = !!process.env.EMULATOR_VERBOSE;
     // A server far away (a Cloudflare preview) takes a few hundred ms to
     // answer, which the default hold of the board's clock doesn't cover
-    const local = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(backend).hostname);
-    const toServer = tunnelTo(backend, local ? {} : { holdMs: 3_000 });
+    const toServer = tunnelTo(backend, isLocal(backend) ? {} : { holdMs: 3_000 });
     this.emu = new Emulator({
       firmware: FIRMWARE,
       backend,
@@ -318,6 +340,21 @@ export class Board {
  * a release left over on the server can't update a board by surprise.
  */
 export const test = base.extend<{ admin: AdminPage; backend: string; board: Board }>({
+  // Signed in with the browser's session (see signIn.setup.ts), as the page
+  // is. Its cookie is Secure, so away from this machine it's only sent over
+  // https, which the browser upgrades a preview's http:// URL to itself.
+  request: async ({ context, backend, playwright }, use) => {
+    if (isLocal(backend)) {
+      await use(context.request);
+      return;
+    }
+    const request = await playwright.request.newContext({
+      baseURL: backend.replace(/^http:/, "https:"),
+      storageState: await context.storageState(),
+    });
+    await use(request);
+    await request.dispose();
+  },
   admin: async ({ page, backend }, use) => {
     // Stay hermetic: the pages load web fonts and scripts from CDNs. The
     // browser may upgrade the server to https itself (*.workers.dev is on
