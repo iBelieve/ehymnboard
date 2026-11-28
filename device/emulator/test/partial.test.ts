@@ -126,14 +126,23 @@ test("is off unless the server turns it on, and a reboot starts with full update
   const { emu, at } = bootPartial();
   assert.equal(change(emu, 1), PARTIAL);
 
-  // Turned off: every update is full, and the images are let go
+  // Turned off: every update is full, and the images are let go. Turning it
+  // off or on redraws nothing: the panels only change when the lines do
+  let drawn = emu.displays.length;
   emu.server.setPartialRefresh(false);
   emu.waitForSerial("Partial refresh turned off", 5_000, at);
+  emu.run(60_000);
+  assert.equal(emu.displays.length, drawn, "nothing redrawn when it turns off");
   assert.equal(change(emu, 1), FULL);
   assert.equal(change(emu, 1), FULL);
 
   // Turned back on: the first update is full, as the panel's image wasn't kept
+  drawn = emu.displays.length;
+  const off = emu.serial.length;
   emu.server.setPartialRefresh(true);
+  emu.waitForSerial("Partial refresh turned on", 5_000, off);
+  emu.run(60_000);
+  assert.equal(emu.displays.length, drawn, "nothing redrawn when it turns on");
   assert.equal(change(emu, 1), FULL);
   assert.equal(change(emu, 1), PARTIAL);
 
