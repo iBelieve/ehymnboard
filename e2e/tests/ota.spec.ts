@@ -25,6 +25,15 @@
 import { OtaBuild } from "../../device/emulator/src/ota-image.ts";
 import { expect, FIRMWARE, publishRelease, test } from "./fixtures.ts";
 
+/**
+ * A Firmware cell's text on `version`. A rollback stays noted under the
+ * version until a board next installs one, as it may from a run before on
+ * a server other than the tests' own.
+ */
+function onVersion(version: string) {
+  return new RegExp(`^${version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\s|$)`);
+}
+
 test("a published release is installed over the air and reported", async ({
   admin,
   board,
@@ -40,7 +49,9 @@ test("a published release is installed over the air and reported", async ({
   // On the current release, the board stays put and shows the hymns.
   await board.untilSerial(`OTA: firmware is up to date (${build.version})`);
   await board.nextUpdate();
-  await expect(await admin.boardField(board.id, "Firmware")).toHaveText(build.version);
+  await expect(await admin.boardField(board.id, "Firmware")).toHaveText(onVersion(build.version), {
+    useInnerText: true,
+  });
   const shown = board.emu.displays.length;
   expect(shown).toBe(3);
 
@@ -62,7 +73,9 @@ test("a published release is installed over the air and reported", async ({
   expect(board.emu.reboots, "one reboot, into the new release").toBe(1);
 
   // The admin shows the board on the new release...
-  await expect(await admin.boardField(board.id, "Firmware")).toHaveText(NEXT);
+  await expect(await admin.boardField(board.id, "Firmware")).toHaveText(onVersion(NEXT), {
+    useInnerText: true,
+  });
   // ...and the update kept its saved screens: nothing downloaded or redrawn.
   const after = await board.quiet(60_000);
   expect(after.images).toEqual([]);

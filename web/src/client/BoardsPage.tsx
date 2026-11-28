@@ -10,17 +10,27 @@ const REFRESH_MS = 10_000;
 export function BoardsPage() {
   const [state, setState] = useState<BoardState>();
   const [error, setError] = useState<string>();
+  // The times are relative to this: reset with each refresh, so new times
+  // aren't measured from an older clock.
+  const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     let cancelled = false;
-    const load = () =>
-      fetchState().then(
+    // A slow answer can arrive after a later one: only the newest is shown.
+    let sent = 0;
+    let shown = 0;
+    const load = () => {
+      const request = ++sent;
+      return fetchState().then(
         (next) => {
-          if (cancelled) return;
+          if (cancelled || request < shown) return;
+          shown = request;
           setState(next);
+          setNow(new Date());
           setError(undefined);
         },
-        (e: unknown) => !cancelled && setError(String(e)),
+        (e: unknown) => !cancelled && request > shown && setError(String(e)),
       );
+    };
     void load();
     const timer = setInterval(() => void load(), REFRESH_MS);
     return () => {
@@ -30,7 +40,6 @@ export function BoardsPage() {
   }, []);
 
   // Re-render every 30 s so "just now" ages even between refreshes.
-  const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 30_000);
     return () => clearInterval(timer);
@@ -108,7 +117,7 @@ function BoardTable({ devices, now }: { devices: DeviceWithName[]; now: Date }) 
               </td>
               <td data-label="Firmware">
                 <div className="max-sm:text-right">
-                  {device.firmware_version ?? <Blank />}
+                  {device.firmware_version || <Blank />}
                   {device.ota_status === "rolled_back" && device.ota_at && (
                     <div>
                       <span className="badge badge-warning badge-sm h-auto py-0.5">
@@ -128,28 +137,31 @@ function BoardTable({ devices, now }: { devices: DeviceWithName[]; now: Date }) 
 
 /**
  * Live or Offline on its socket. A board that has never opened one (firmware
- * from before the sockets) gets neither.
+ * from before the sockets) gets neither, and a dash if there's nothing else.
  */
 function Status({ device, now }: { device: DeviceWithName; now: Date }) {
+  if (!device.live && !device.connected_at && !device.etag_stuck_at) {
+    return <Blank />;
+  }
   return (
     <div className="flex flex-wrap items-center gap-1">
       {device.live ? (
         <span className="badge badge-success" title="Connected: gets new lines at once">
           Live
         </span>
-      ) : device.connected_at ? (
-        <span
-          className="badge badge-ghost"
-          title={
-            device.disconnected_at
-              ? `Disconnected ${prettyDate(device.disconnected_at, now)}`
-              : "Not connected"
-          }
-        >
-          Offline
-        </span>
       ) : (
-        <Blank />
+        device.connected_at && (
+          <span
+            className="badge badge-ghost"
+            title={
+              device.disconnected_at
+                ? `Disconnected ${prettyDate(device.disconnected_at, now)}`
+                : "Not connected"
+            }
+          >
+            Offline
+          </span>
+        )
       )}
       {device.etag_stuck_at && (
         <span className="badge badge-warning h-auto">

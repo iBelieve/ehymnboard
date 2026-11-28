@@ -77,8 +77,9 @@ function buildRelease() {
 
 /**
  * The admin page, found by what a person sees on it: six text boxes in
- * order, Apply and Clear buttons, a line per board and a picture of the
- * board. Nothing depends on how the page is built.
+ * order, Apply and Clear buttons, a picture of the board, and a "Hymn
+ * Boards" link to a table row per board. Nothing depends on how the page is
+ * built.
  */
 export class AdminPage {
   readonly page: Page;
@@ -141,7 +142,8 @@ export class AdminPage {
     await expect(row).toBeVisible();
     const headings = await this.page.getByRole("columnheader").allTextContents();
     expect(headings).toContain(column);
-    return row.getByRole("cell").nth(headings.indexOf(column));
+    // In page order, counting a row header (the board's name, say) as a column too
+    return row.getByRole("rowheader").or(row.getByRole("cell")).nth(headings.indexOf(column));
   }
 
   /**

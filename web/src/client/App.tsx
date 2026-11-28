@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import type { BoardState, Viewer } from "../shared/api";
 import { getFont } from "../shared/font";
 import { renderScreen } from "../shared/render";
@@ -106,6 +106,14 @@ export function App({ viewer }: { viewer: Viewer }) {
     });
   }, [dirty, draft, state, stored]);
 
+  // The other pages take the editor away, and with it any edits not applied
+  // yet: ask before following a link to one.
+  function confirmLeaving(e: MouseEvent) {
+    if (dirty && !confirm("Leave without applying your changes?")) {
+      e.preventDefault();
+    }
+  }
+
   async function save(lines: Lines) {
     setSaving(true);
     setError(undefined);
@@ -128,14 +136,23 @@ export function App({ viewer }: { viewer: Viewer }) {
       <header className="z-10 flex flex-wrap items-center justify-between gap-x-8 gap-y-4">
         <h1 className="font-display text-5xl tracking-wide text-white">Hymn Board</h1>
         <nav className="flex items-center gap-1 text-sm text-white">
-          <a className="btn btn-ghost btn-sm text-white" href="#boards">
+          <a className="btn btn-ghost btn-sm text-white" href="#boards" onClick={confirmLeaving}>
             Hymn Boards
           </a>
-          <a className="btn btn-ghost btn-sm text-white" href="#profile" title="Your profile">
+          <a
+            className="btn btn-ghost btn-sm text-white"
+            href="#profile"
+            title="Your profile"
+            onClick={confirmLeaving}
+          >
             {viewer.name}
           </a>
           {viewer.role === "admin" && (
-            <a className="btn btn-ghost btn-sm text-white" href="#accounts">
+            <a
+              className="btn btn-ghost btn-sm text-white"
+              href="#accounts"
+              onClick={confirmLeaving}
+            >
               Accounts
             </a>
           )}
