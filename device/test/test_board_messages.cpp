@@ -40,6 +40,17 @@ TEST(BoardMessages, IgnoresWordsAddedLater)
     const auto state = parse_state_message("state 1 " + E1 + " " + E2 + " " + E3 + " v1 more words");
     ASSERT_TRUE(state);
     EXPECT_EQ(state->firmware_version, "v1");
+    EXPECT_FALSE(state->partial_refresh);
+}
+
+TEST(BoardMessages, ParsesThePartialOption)
+{
+    const auto base = "state 1 " + E1 + " " + E2 + " " + E3 + " v1";
+    EXPECT_FALSE(parse_state_message(base)->partial_refresh);
+    EXPECT_TRUE(parse_state_message(base + " partial")->partial_refresh);
+    // Among options added later, in any order
+    EXPECT_TRUE(parse_state_message(base + " later partial")->partial_refresh);
+    EXPECT_FALSE(parse_state_message(base + " partially")->partial_refresh);
 }
 
 TEST(BoardMessages, RejectsOtherMessages)
@@ -90,6 +101,7 @@ RC_GTEST_PROP(BoardMessages, StateRoundTrips, ())
     // "-" is how the message says "no firmware", so it can't be a version
     state.firmware_version = *rc::gen::oneOf(
         rc::gen::just(std::string()), rc::gen::suchThat(word(SAFE, 47), [](const std::string &v) { return v != "-"; }));
+    state.partial_refresh = *rc::gen::arbitrary<bool>();
 
     const auto message = format_state_message(state);
     RC_ASSERT(message.size() <= MAX_BOARD_MESSAGE);

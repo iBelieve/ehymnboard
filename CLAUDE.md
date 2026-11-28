@@ -127,9 +127,13 @@ All checks below must pass; run them locally before committing.
   Better Auth instance or promise across requests: a Worker can't await one
   another request made. Every deploy needs `BETTER_AUTH_SECRET` and
   `SETUP_PASSWORD`
+- Feature flags are Cloudflare Flagship's (the `FLAGS` binding, app
+  `hymnboard`; see `web/README.md`, "Feature flags"), evaluated per board in
+  `src/worker/flags.ts`. Locally the store is empty, so every flag is off; the
+  Worker tests put flags in it through its admin API (`test/websocket.test.ts`)
 - Don't change the device endpoints' paths, query parameters or response
-  bytes, or the `/ws` messages (`state`, `ping`/`pong`, `shown`, `redraw`, close
-  codes): the firmware hard-codes them. The rasterizer is checked bit for bit
+  bytes, or the `/ws` messages (`state` and its `partial` option, `ping`/`pong`,
+  `shown`, `redraw`, close codes): the firmware hard-codes them. The rasterizer is checked bit for bit
   against reference screens in `test/fixtures/render/` (`test/render.test.ts`);
   regenerate them only after a deliberate rendering change, with
   `UPDATE_RENDER_FIXTURES=1 pnpm vitest run --silent=false test/render.test.ts`

@@ -99,9 +99,23 @@ export class MockServer {
   answerPings = true;
   /** Send the state when a socket opens (off: a socket that never goes live). */
   sendStateOnOpen = true;
+  /** Let the boards update their panels partially (the state's "partial" option). */
+  partialRefresh = false;
 
   setImage(screen: number, version: number) {
     this.images.set(screen, { etag: `v${version}-${screen}`, body: testImage(screen, version) });
+    this.pushState();
+  }
+
+  /** Sets an image of its own for a screen, and tells the boards at once. */
+  setImageBody(screen: number, etag: string, body: Uint8Array) {
+    this.images.set(screen, { etag, body });
+    this.pushState();
+  }
+
+  /** Turns partial refresh on or off and tells the boards at once. */
+  setPartialRefresh(on: boolean) {
+    this.partialRefresh = on;
     this.pushState();
   }
 
@@ -114,7 +128,8 @@ export class MockServer {
   /** The state message the server sends a board. */
   stateMessage() {
     const etags = [1, 2, 3].map((s) => this.images.get(s)?.etag ?? "-");
-    return `state 1 ${etags.join(" ")} ${this.firmware?.version ?? "-"}`;
+    const options = this.partialRefresh ? " partial" : "";
+    return `state 1 ${etags.join(" ")} ${this.firmware?.version ?? "-"}${options}`;
   }
 
   /** The open sockets. */

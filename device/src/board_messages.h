@@ -23,7 +23,10 @@
 // parser is needed. No pico-sdk dependencies, so it's unit tested on the host
 // (see test/).
 //
-//   server -> board  "state 1 <etag1> <etag2> <etag3> <firmware version or ->"
+//   server -> board  "state 1 <etag1> <etag2> <etag3> <firmware version or -> [partial]"
+//                    ("partial": the board may update its panels with a
+//                     partial refresh, which doesn't flash; see
+//                     shown_images.h. Without it, every update is a full one)
 //   board -> server  "ping"  (answered "pong" without waking the server)
 //   board -> server  "shown <etag1> <etag2> <etag3>"
 //   server -> board  "redraw"  (nightly: download every panel's image again,
@@ -56,10 +59,15 @@ struct BoardState
     ScreenEtags etags;
     // Empty when the server has no firmware uploaded
     std::string firmware_version;
+    // Whether the server lets this board update its panels with a partial
+    // refresh (a per-board setting in the admin, so it can be rolled out and
+    // back without a firmware release)
+    bool partial_refresh = false;
 
     bool operator==(const BoardState &other) const
     {
-        return etags == other.etags && firmware_version == other.firmware_version;
+        return etags == other.etags && firmware_version == other.firmware_version &&
+               partial_refresh == other.partial_refresh;
     }
 };
 
@@ -67,7 +75,8 @@ struct BoardState
 std::string_view message_type(std::string_view message);
 
 // A version 1 state message, or nothing if `message` isn't one (or has an
-// etag or version the board couldn't keep)
+// etag or version the board couldn't keep). Words after the firmware version
+// are options; unknown ones are ignored
 std::optional<BoardState> parse_state_message(std::string_view message);
 
 std::string format_state_message(const BoardState &state);

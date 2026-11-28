@@ -104,6 +104,57 @@ test("only the gate lines set by driver output control are refreshed", () => {
   assert.equal(img[100 * ROW_BYTES], 0xff, "rows past the gates keep the old (white) image");
 });
 
+/** A partial update from `old` (RED RAM) to `next` (BW RAM), with a waveform loaded first. */
+const partialRefresh = (p: TestPanel, old: Uint8Array, next: Uint8Array) => {
+  send(p, 0x32, ...new Uint8Array(105));
+  send(p, 0x4e, 0, 0);
+  send(p, 0x4f, 0, 0);
+  send(p, 0x26, ...old);
+  send(p, 0x4e, 0, 0);
+  send(p, 0x4f, 0, 0);
+  send(p, 0x24, ...next);
+  send(p, 0x22, 0xcf);
+  send(p, 0x20);
+  p.run();
+};
+
+test("a partial update changes only the pixels where the new image differs from the old", () => {
+  const p = panel();
+  const first = new Uint8Array(RAM_BYTES).fill(0xff);
+  first[0] = 0x0f;
+  send(p, 0x24, ...first);
+  refresh(p);
+
+  const next = Uint8Array.from(first);
+  next[0] = 0xf0;
+  next[1] = 0x00;
+  partialRefresh(p, first, next);
+  assert.deepEqual(p.faults, []);
+  assert.equal(p.displayed[1]?.updateControl, 0xcf);
+  assert.deepEqual(p.displayed[1]?.image, next);
+});
+
+test("a partial update from the wrong old image leaves the wrong pixels", () => {
+  const p = panel();
+  const first = new Uint8Array(RAM_BYTES).fill(0xff);
+  first[0] = 0x00;
+  send(p, 0x24, ...first);
+  refresh(p);
+
+  // The old image given says the first byte was white: it isn't changed back
+  const white = new Uint8Array(RAM_BYTES).fill(0xff);
+  partialRefresh(p, white, white);
+  assert.equal(p.displayed[1]?.image[0], 0x00);
+});
+
+test("a partial update without a waveform is a fault", () => {
+  const p = panel();
+  send(p, 0x22, 0xcf);
+  send(p, 0x20);
+  p.run();
+  assert.match(p.faults[0] ?? "", /display mode 2 without a waveform/);
+});
+
 test("BUSY stays high through a refresh and commands during it are faults", () => {
   const p = panel();
   send(p, 0x22, 0xf7);

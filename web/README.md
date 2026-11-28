@@ -186,6 +186,29 @@ need both secrets, set once in the Previews base config
 the same for `SETUP_PASSWORD`); new previews start with them. Create the
 previews' first account on any preview with the setup password.
 
+### Feature flags (Flagship)
+
+Feature flags come from [Cloudflare Flagship](https://developers.cloudflare.com/flagship/),
+the binding `FLAGS` in `wrangler.jsonc` (production and previews share the app
+**hymnboard**, in Compute > Flagship), read in `src/worker/flags.ts`. A flag is
+evaluated with the board's `deviceId` (also the `targetingKey`, for
+percentage rollouts) and its name as `board`, so a rule can turn it on for one
+board, a few, or a share of them. A flag that can't be evaluated is off. Locally
+(`pnpm dev`, the tests and the e2e tests' server) the binding is Wrangler's
+own store, empty, so every flag is off; the Worker tests put flags in it
+through its admin API.
+
+| Flag              | What it does                                                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `partial-refresh` | Sends the board's `state` with `partial`, so it updates its panels with a partial refresh (see `device/README.md`). The admin shows a "Partial refresh" badge |
+
+The Durable Object evaluates the flag whenever it sends a board `state`, and
+at each 10-minute alarm, sending `state` again to a board whose value
+changed. A change in the dashboard takes about a minute to reach Flagship's
+edge, so turning a flag on or off (or editing a rule) reaches the boards
+within about 11 minutes, with no deploy. To roll back, turn the flag off (or
+take the board out of the rule); the board's next update is a full refresh.
+
 ### Boards on TLS
 
 The boards talk only to `https://hymnboard.sonrise.io` and

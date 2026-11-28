@@ -21,6 +21,8 @@
 #include <stdio.h>
 
 #include <array>
+#include <cstdint>
+#include <vector>
 
 #include "gpio.h"
 #include "pico/stdlib.h"
@@ -50,7 +52,19 @@ class Waveshare13K
 
     void display(const std::array<uint8_t, 81600> &buffer);
 
+    /**
+     * A partial update to `buffer` from `old_packed` (see shown_images.h),
+     * which must be what the panel shows: only the pixels that differ are
+     * driven, in about a second and without flashing. False, having drawn
+     * nothing, if `old_packed` isn't an image; then the caller does a full
+     * update. Call init() first, as for display().
+     */
+    bool displayPartial(const std::vector<uint8_t> &old_packed, const std::array<uint8_t, 81600> &buffer);
+
   private:
+    void setRamCounters();
+    void loadPartialWaveform();
+
     void sendCommand(uint8_t command);
     void sendData(uint8_t data);
     void sendData(const uint8_t *data, size_t len);

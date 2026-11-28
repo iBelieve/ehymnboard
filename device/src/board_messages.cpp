@@ -24,6 +24,7 @@
 
 static constexpr std::string_view STATE_VERSION_1 = "1";
 static constexpr std::size_t MAX_FIRMWARE_VERSION = 47;
+static constexpr std::string_view PARTIAL_OPTION = "partial";
 
 static std::vector<std::string_view> split_words(std::string_view message)
 {
@@ -80,6 +81,10 @@ std::optional<BoardState> parse_state_message(std::string_view message)
         }
         state.firmware_version = std::string(version);
     }
+    for (std::size_t i = 3 + SCREEN_COUNT; i < words.size(); i++)
+    {
+        state.partial_refresh = state.partial_refresh || words[i] == PARTIAL_OPTION;
+    }
     return state;
 }
 
@@ -94,6 +99,11 @@ std::string format_state_message(const BoardState &state)
     }
     message += ' ';
     message += state.firmware_version.empty() ? "-" : state.firmware_version;
+    if (state.partial_refresh)
+    {
+        message += ' ';
+        message += PARTIAL_OPTION;
+    }
     return message;
 }
 

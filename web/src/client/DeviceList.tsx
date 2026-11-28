@@ -57,6 +57,14 @@ export function DeviceList({
               </span>
             )
           )}
+          {device.partial_refresh && (
+            <span
+              className="badge badge-info"
+              title="Changes its panels without flashing: Flagship's partial-refresh flag is on for this board"
+            >
+              Partial refresh
+            </span>
+          )}
           {device.etag_stuck_at && (
             <span className="badge badge-warning">
               Re-downloading every poll since {prettyDate(device.etag_stuck_at, now)}
