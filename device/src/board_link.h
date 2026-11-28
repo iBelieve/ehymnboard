@@ -39,6 +39,8 @@ class BoardLink : private WsClient::Listener
         bool pong = false;
         // The server asked for a diagnostics snapshot
         bool diag = false;
+        // The server asked for every panel to be redrawn
+        bool redraw = false;
         // The socket closed, and why
         std::optional<SocketEndInfo> closed;
     };

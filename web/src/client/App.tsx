@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { BoardState } from "../shared/api";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import type { BoardState, Viewer } from "../shared/api";
 import { getFont } from "../shared/font";
 import { renderScreen } from "../shared/render";
 import {
@@ -11,13 +11,14 @@ import {
   type Lines,
 } from "../shared/screen";
 import { fetchScreen, fetchState, saveLines } from "./api";
+import { signOut } from "./auth";
 import { BoardPreview } from "./BoardPreview";
-import { DeviceList } from "./DeviceList";
+import { Background } from "./SignIn";
 
 const SCREEN_IDS = Array.from({ length: SCREEN_COUNT }, (_, i) => i + 1);
 const REFRESH_MS = 10_000;
 
-export function App() {
+export function App({ viewer }: { viewer: Viewer }) {
   const [state, setState] = useState<BoardState>();
   const [draft, setDraft] = useState<Lines>();
   const [stored, setStored] = useState<Record<number, { etag: string; buffer: Uint8Array }>>({});
@@ -44,7 +45,7 @@ export function App() {
     );
   }, []);
 
-  // Load once, then keep device status fresh (like the old 10 s htmx poll).
+  // Load once, then follow changes made elsewhere (like the old 10 s htmx poll).
   useEffect(() => {
     let cancelled = false;
     const load = (first: boolean) => {
@@ -105,6 +106,14 @@ export function App() {
     });
   }, [dirty, draft, state, stored]);
 
+  // The other pages take the editor away, and with it any edits not applied
+  // yet: ask before following a link to one.
+  function confirmLeaving(e: MouseEvent) {
+    if (dirty && !confirm("Leave without applying your changes?")) {
+      e.preventDefault();
+    }
+  }
+
   async function save(lines: Lines) {
     setSaving(true);
     setError(undefined);
@@ -120,84 +129,105 @@ export function App() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-8 px-8 py-8 lg:h-dvh lg:grid-cols-2">
-      <div
-        className="fixed inset-0 bg-cover opacity-20 brightness-75 grayscale-[0.7]"
-        style={{ backgroundImage: "url('/church-lent.jpg')" }}
-      />
-      <div className="z-10 flex flex-col">
-        <h1 className="font-display text-5xl tracking-wide text-white max-lg:mb-8">Hymn Board</h1>
-
-        {state && (
-          <DeviceList
-            devices={state.devices}
-            firmware={state.firmware}
-            // Only its boards: unlike the poll, it isn't guarded against a
-            // save in between, so its lines may be older than the save's
-            onState={(next) =>
-              setState((prev) => (prev ? { ...prev, devices: next.devices } : next))
-            }
-          />
-        )}
-
-        <div className="flex flex-grow flex-col items-center justify-center">
-          {/* Relative so the unsaved-changes note can sit under the card
+    <div className="flex flex-col gap-8 px-8 py-8 lg:h-dvh">
+      <Background />
+      {/* Across the page, above both columns, so the menu sits level with
+          the title at the right, as a site's navigation does. */}
+      <header className="z-10 flex flex-wrap items-center justify-between gap-x-8 gap-y-4">
+        <h1 className="font-display text-5xl tracking-wide text-white">Hymn Board</h1>
+        <nav className="flex items-center gap-1 text-sm text-white">
+          <a className="btn btn-ghost btn-sm text-white" href="#boards" onClick={confirmLeaving}>
+            Hymn Boards
+          </a>
+          <a
+            className="btn btn-ghost btn-sm text-white"
+            href="#profile"
+            title="Your profile"
+            onClick={confirmLeaving}
+          >
+            {viewer.name}
+          </a>
+          {viewer.role === "admin" && (
+            <a
+              className="btn btn-ghost btn-sm text-white"
+              href="#accounts"
+              onClick={confirmLeaving}
+            >
+              Accounts
+            </a>
+          )}
+          <button
+            className="btn btn-ghost btn-sm text-white"
+            type="button"
+            onClick={() => void signOut()}
+          >
+            Sign out
+          </button>
+        </nav>
+      </header>
+      <div className="grid grid-cols-1 gap-8 lg:min-h-0 lg:flex-grow lg:grid-cols-2">
+        <div className="z-10 flex flex-col">
+          <div className="flex flex-grow flex-col items-center justify-center">
+            {/* Relative so the unsaved-changes note can sit under the card
               without taking up space: the layout matches the old admin's. */}
-          <div className="relative">
-            <div className="overflow-hidden rounded-2xl border-8 border-transparent bg-white/40 shadow-lg">
-              <form
-                className="mx-auto flex max-w-sm flex-col gap-4 bg-white p-4"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (draft) void save(draft);
-                }}
-              >
-                {(draft ?? EMPTY_LINES).map((line, i) => (
-                  <input
-                    key={i}
-                    type="text"
-                    className="input input-xl input-bordered text-center"
-                    aria-label={`Line ${i + 1}`}
-                    value={line}
-                    disabled={!draft}
-                    maxLength={100}
-                    data-1p-ignore
-                    onChange={(e) => setDraft((prev) => prev && withLine(prev, i, e.target.value))}
-                  />
-                ))}
+            <div className="relative">
+              <div className="overflow-hidden rounded-2xl border-8 border-transparent bg-white/40 shadow-lg">
+                <form
+                  className="mx-auto flex max-w-sm flex-col gap-4 bg-white p-4"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (draft) void save(draft);
+                  }}
+                >
+                  {(draft ?? EMPTY_LINES).map((line, i) => (
+                    <input
+                      key={i}
+                      type="text"
+                      className="input input-xl input-bordered text-center"
+                      aria-label={`Line ${i + 1}`}
+                      value={line}
+                      disabled={!draft}
+                      maxLength={100}
+                      data-1p-ignore
+                      onChange={(e) =>
+                        setDraft((prev) => prev && withLine(prev, i, e.target.value))
+                      }
+                    />
+                  ))}
 
-                {(error ?? loadError) && (
-                  <div className="text-error text-sm">{error ?? loadError}</div>
-                )}
+                  {(error ?? loadError) && (
+                    <div className="text-error text-sm">{error ?? loadError}</div>
+                  )}
 
-                <div className="mt-4 flex gap-4">
-                  <button
-                    className="btn btn-primary btn-lg flex-grow"
-                    type="submit"
-                    disabled={!draft || saving}
-                  >
-                    Apply
-                  </button>
-                  <button
-                    className="btn btn-soft btn-error btn-lg flex-grow"
-                    type="button"
-                    disabled={!draft || saving}
-                    onClick={() => void save([...EMPTY_LINES])}
-                  >
-                    Clear
-                  </button>
-                </div>
-              </form>
-            </div>
-            {dirty && (
-              <div className="absolute inset-x-0 top-full mt-2 text-center text-sm text-white opacity-75">
-                Previewing unsaved changes
+                  <div className="mt-4 flex gap-4">
+                    <button
+                      className="btn btn-primary btn-lg flex-grow"
+                      type="submit"
+                      disabled={!draft || saving}
+                    >
+                      Apply
+                    </button>
+                    <button
+                      className="btn btn-soft btn-error btn-lg flex-grow"
+                      type="button"
+                      disabled={!draft || saving}
+                      onClick={() => void save([...EMPTY_LINES])}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </form>
               </div>
-            )}
+              {dirty && (
+                <div className="absolute inset-x-0 top-full mt-2 text-center text-sm text-white opacity-75">
+                  Previewing unsaved changes
+                </div>
+              )}
+            </div>
           </div>
         </div>
+        <BoardPreview screens={preview} />
       </div>
-      <BoardPreview screens={preview} />
     </div>
   );
 }

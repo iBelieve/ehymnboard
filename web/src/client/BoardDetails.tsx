@@ -86,7 +86,7 @@ export function BoardDetails({
   }
 
   return (
-    <div className="mt-2 mb-3 max-w-2xl rounded-xl bg-white p-4 text-base text-gray-900 shadow-lg">
+    <div className="max-w-2xl py-2 text-base text-gray-900">
       {rows.length === 0 ? (
         <p className="text-gray-600">
           This board hasn't reported any diagnostics yet: its firmware may be too old.

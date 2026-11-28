@@ -35,6 +35,7 @@
 #include "waveshare.h"
 #include "wifi.h"
 #include "ws_connection.h"
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <stdio.h>
@@ -44,6 +45,9 @@
 static constexpr uint64_t FETCH_RETRY_MS = 15'000;
 // How long downloads may keep failing before the board reboots
 static constexpr uint64_t DOWNLOADS_FAILING_REBOOT_MS = 180'000;
+// How long a redraw's downloads may keep failing before the board gives up on
+// it until the next night. It doesn't reboot: its panels show the right images
+static constexpr uint64_t REDRAW_GIVE_UP_MS = 180'000;
 // How often the main loop runs
 static constexpr uint32_t LOOP_MS = 100;
 
@@ -55,19 +59,19 @@ static uint64_t now_ms()
 
 // Downloads one screen's image and draws it if it changed. On transient HTTP
 // failures we just log and bail out; the caller retries later.
-static FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag)
+static FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag, bool redraw)
 {
     long_watchdog_update();
 
-    printf("Refreshing screen %d\n", screen_id);
+    printf("Refreshing screen %d%s\n", screen_id, redraw ? " (redraw)" : "");
     const auto ret = [&] {
         const PhaseScope phase(Phase::IMAGE_DOWNLOAD);
-        return fetch_image(screen_id, etag);
+        return fetch_image(screen_id, etag, redraw);
     }();
 
     if (ret == FetchImageResult::NEW_IMAGE)
     {
-        printf("New image for screen %d\n", screen_id);
+        printf(redraw ? "Redrawing screen %d\n" : "New image for screen %d\n", screen_id);
         const PhaseScope phase(Phase::PANEL);
         screen.init();
         screen.display(image_buffer);
@@ -96,6 +100,11 @@ struct Screens
     ScreenEtags shown;
     // The etag the server's last state message asked for
     ScreenEtags wanted;
+    // The screens to download and draw again though they show what the server
+    // wants: it asked for a redraw ("redraw"), and a full refresh clears ghosting
+    std::array<bool, SCREEN_COUNT> redraw{};
+    // When the server asked for the redraw still under way, if one is
+    std::optional<uint64_t> redraw_since_ms;
     // When to retry after a failed download
     uint64_t retry_at_ms = 0;
     // Since when downloads have kept failing, if they have
@@ -119,9 +128,70 @@ struct Board
 
 static void service(Board &board);
 
+// Whether a screen needs downloading and drawing
+static bool needs_drawing(const Screens &screens, std::size_t i)
+{
+    return screens.redraw.at(i) || screens.shown.at(i) != screens.wanted.at(i);
+}
+
+static bool any_needs_drawing(const Screens &screens)
+{
+    for (std::size_t i = 0; i < SCREEN_COUNT; i++)
+    {
+        if (needs_drawing(screens, i))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+// After a round of downloads: when to try the failed ones again, and whether
+// downloads keep failing. Only a screen that still wants a new image counts
+// as failing (a state message serviced meanwhile may have made it unwanted,
+// whatever the other screens want); a redraw that keeps failing is given up
+// instead, as the panels already show the right images.
+static void note_failures(Screens &screens, const std::array<bool, SCREEN_COUNT> &failed)
+{
+    const auto now = now_ms();
+    bool still_failing = false;
+    bool any_failed = false;
+    for (std::size_t i = 0; i < SCREEN_COUNT; i++)
+    {
+        still_failing = still_failing || (failed.at(i) && screens.wanted.at(i) != screens.shown.at(i));
+        any_failed = any_failed || (failed.at(i) && needs_drawing(screens, i));
+    }
+    if (any_failed)
+    {
+        screens.retry_at_ms = now + FETCH_RETRY_MS;
+    }
+    if (!still_failing)
+    {
+        screens.failing_since_ms.reset();
+    }
+    else if (!screens.failing_since_ms)
+    {
+        screens.failing_since_ms = now;
+    }
+
+    const auto redrawing = [&screens] {
+        return std::find(screens.redraw.begin(), screens.redraw.end(), true) != screens.redraw.end();
+    };
+    if (redrawing() && screens.redraw_since_ms && now - *screens.redraw_since_ms >= REDRAW_GIVE_UP_MS)
+    {
+        printf("Redraw kept failing for >3 minutes, giving up until the server asks again\n");
+        screens.redraw.fill(false);
+    }
+    if (!redrawing())
+    {
+        screens.redraw_since_ms.reset();
+    }
+}
+
 // Downloads and draws every screen that doesn't show what the server wants,
-// keeping the socket serviced in between. Returns true if any download got
-// an answer (a new image or a 304), so the server should hear what's shown.
+// or that it asked to redraw, keeping the socket serviced in between. Returns
+// true if any download got an answer (a new image or a 304), so the server
+// should hear what's shown.
 static bool update_screens(Board &board)
 {
     auto &screens = board.screens;
@@ -132,14 +202,21 @@ static bool update_screens(Board &board)
 
     for (std::size_t i = 0; i < SCREEN_COUNT; i++)
     {
-        if (screens.shown.at(i) == screens.wanted.at(i))
+        if (!needs_drawing(screens, i))
         {
             continue;
         }
-        const auto ret = refresh_screen(static_cast<int>(i + 1), *screens.panels.at(i), screens.shown.at(i));
+        std::string etag = screens.shown.at(i);
+        const auto ret = refresh_screen(static_cast<int>(i + 1), *screens.panels.at(i), etag, screens.redraw.at(i));
         if (ret == FetchImageResult::NEW_IMAGE || ret == FetchImageResult::NO_CHANGE)
         {
-            any_updated = any_updated || ret == FetchImageResult::NEW_IMAGE;
+            // A redraw of the same image has nothing new to save
+            if (etag != screens.shown.at(i))
+            {
+                screens.shown.at(i) = etag;
+                any_updated = true;
+            }
+            screens.redraw.at(i) = false;
             any_answered = true;
             // The server's answer is current: a 304 means the state message
             // was older than the image, and an image without a usable ETag
@@ -158,26 +235,7 @@ static bool update_screens(Board &board)
     // How close TLS came to running out of memory, downloading beside the socket
     tls_log_memory();
 
-    // A failed download only counts while its screen still wants a new image:
-    // a state message serviced meanwhile may have made it unwanted, whatever
-    // the other screens want
-    bool still_failing = false;
-    for (std::size_t i = 0; i < SCREEN_COUNT; i++)
-    {
-        still_failing = still_failing || (failed.at(i) && screens.wanted.at(i) != screens.shown.at(i));
-    }
-    if (still_failing)
-    {
-        screens.retry_at_ms = now_ms() + FETCH_RETRY_MS;
-        if (!screens.failing_since_ms)
-        {
-            screens.failing_since_ms = now_ms();
-        }
-    }
-    else
-    {
-        screens.failing_since_ms.reset();
-    }
+    note_failures(screens, failed);
 
     if (any_updated)
     {
@@ -256,12 +314,20 @@ static void service(Board &board)
         board.offered_version = events.state->firmware_version;
 
         // Let the server know what the panels show, if they're current. Then
-        // nothing needs downloading, so no download is failing either
+        // no new image needs downloading, so no download is failing either (a
+        // redraw's failures don't count)
         if (screens.wanted == screens.shown)
         {
             screens.failing_since_ms.reset();
             board.link.client().send_text(format_shown_message(screens.shown));
         }
+    }
+    if (events.redraw)
+    {
+        printf("Server asked for every screen to be redrawn\n");
+        screens.redraw.fill(true);
+        screens.redraw_since_ms = now;
+        screens.retry_at_ms = now;
     }
     if (events.pong)
     {
@@ -395,7 +461,7 @@ int main()
 
         const auto now = now_ms();
         const bool live = board.policy.state() == ConnectionPolicy::State::LIVE;
-        if (live && screens.wanted != screens.shown && now >= screens.retry_at_ms && update_screens(board))
+        if (live && any_needs_drawing(screens) && now >= screens.retry_at_ms && update_screens(board))
         {
             board.link.client().send_text(format_shown_message(screens.shown));
         }

@@ -3,22 +3,33 @@
   // Also the Cloudflare Worker's name: Workers Builds deploys master to it, the
   // production server at https://hymnboard.sonrise.io (and
   // https://hymnboard.sonrise.workers.dev; see README.md). The build writes
-  // dist/hymnboard/, which selfhost/generate-config.mjs reads.
+  // dist/hymnboard/, which `wrangler deploy` and the e2e tests' server run.
   "name": "hymnboard",
   "main": "src/worker/index.ts",
-  // Keep at or below the date the pinned workerd supports; the self-hosted
-  // Docker image reads it from the build output.
+  // Keep at or below the date every installed workerd supports: wrangler's
+  // (`wrangler dev`, the Worker tests) and the Vite plugin's (`pnpm dev`),
+  // which can be older.
   "compatibility_date": "2026-11-15",
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    // Everything goes through the Worker first so basic auth covers the admin.
+    // Everything goes through the Worker first, so the API's routes always win.
     "run_worker_first": true,
   },
   "durable_objects": {
     "bindings": [{ "name": "HYMN_BOARD", "class_name": "HymnBoard" }],
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HymnBoard"] }],
+  // Accounts and sessions (Better Auth's), for every board. The Worker brings
+  // its tables up to date itself (src/worker/account-migrations.ts), so
+  // there's no migrations_dir and no `wrangler d1 migrations apply`.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "hymnboard",
+      "database_id": "fad71737-69fa-46a7-b0b8-c1b6067057a0",
+    },
+  ],
   // Which deploy is running: the Durable Object closes boards' sockets from an
   // earlier one, whose ping times Cloudflare stops keeping (see hymn-board.ts)
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
@@ -37,16 +48,25 @@
   "preview_urls": true,
   // Worker Previews: Workers Builds deploys each non-master branch to its own
   // URL with its own, empty Durable Object. Previews don't inherit bindings or
-  // vars, so the binding is repeated here, and with no HEALTHCHECKS var they
+  // vars, so the bindings are repeated here, and with no HEALTHCHECKS var they
   // never ping healthchecks.io. Observability is spelled out too, so previews
-  // keep traces and Issues whatever the dashboard's Previews base says. Their basic-auth secrets are set
-  // with `wrangler preview base-config secret put` (see README.md).
+  // keep traces and Issues whatever the dashboard's Previews base says. Their secrets
+  // (BETTER_AUTH_SECRET, SETUP_PASSWORD) are set with
+  // `wrangler preview base-config secret put` (see README.md).
   "previews": {
     // Lets the e2e tests' emulated board connect to a preview's /ws
     "vars": { "EXTRA_DEVICE_IDS": "0000000000000000" },
     "durable_objects": {
       "bindings": [{ "name": "HYMN_BOARD", "class_name": "HymnBoard" }],
     },
+    // One accounts database that every preview shares, never production's
+    "d1_databases": [
+      {
+        "binding": "DB",
+        "database_name": "hymnboard-previews",
+        "database_id": "9150d3f6-0f13-4bf6-b2b7-93ed05657faa",
+      },
+    ],
     "version_metadata": { "binding": "CF_VERSION_METADATA" },
     "observability": {
       "enabled": true,

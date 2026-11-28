@@ -1,4 +1,4 @@
-# Dependabot covers pnpm (via the npm ecosystem), uv, Docker and GitHub
+# Dependabot covers pnpm (via the npm ecosystem), uv and GitHub
 # Actions. The Pico SDK and Arm toolchain are pinned outside any manifest, so
 # .github/workflows/check-pico-sdk.yml opens an issue when a new Pico SDK
 # release is out.
@@ -29,21 +29,6 @@ updates:
       default-days: 1
     groups:
       uv-minor-and-patch:
-        applies-to: version-updates
-        patterns:
-          - "*"
-        update-types:
-          - minor
-          - patch
-
-  - package-ecosystem: docker
-    directory: /web
-    schedule:
-      interval: weekly
-    cooldown:
-      default-days: 1
-    groups:
-      docker-minor-and-patch:
         applies-to: version-updates
         patterns:
           - "*"

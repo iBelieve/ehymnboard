@@ -1,5 +1,6 @@
 import type { BoardState, HealthSample } from "../shared/api";
 import type { Lines } from "../shared/screen";
+import { refreshViewer } from "./auth";
 
 /** Parses a response from our own API, whose shape the Worker guarantees. */
 async function json<T>(res: Response): Promise<T> {
@@ -8,6 +9,10 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 async function check(res: Response): Promise<Response> {
+  // Signed out elsewhere, or the session ran out: back to signing in.
+  if (res.status === 401) {
+    refreshViewer();
+  }
   if (!res.ok) {
     throw new Error(`${res.status} ${await res.text()}`);
   }
@@ -44,4 +49,31 @@ export async function refreshDiagnostics(deviceId: string): Promise<BoardState> 
     method: "POST",
   });
   return json<BoardState>(res);
+}
+
+/** True until the first account exists. */
+export async function fetchSetupNeeded(): Promise<boolean> {
+  return (await json<{ needed: boolean }>(await fetch("/api/setup"))).needed;
+}
+
+/**
+ * Creates the first account, an admin, with the deploy's SETUP_PASSWORD.
+ * False if an account already exists.
+ */
+export async function createFirstAccount(account: {
+  setupPassword: string;
+  name: string;
+  email: string;
+  password: string;
+}): Promise<boolean> {
+  const res = await fetch("/api/setup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(account),
+  });
+  if (res.status === 409) {
+    return false;
+  }
+  await check(res);
+  return true;
 }

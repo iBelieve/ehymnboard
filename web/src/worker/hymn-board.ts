@@ -20,6 +20,7 @@ import {
   parseDrop,
 } from "./diagnostics";
 import { migrate } from "./migrations";
+import { REDRAW_HOUR, redrawDue, redrawTimeZone } from "./redraw";
 
 // Column names are interpolated into SQL, so only these are accepted.
 const DEVICE_FIELDS = new Set([
@@ -60,11 +61,17 @@ const DIAG_TIMEOUT_MS = 10_000;
 // 30 s (answered with "pong" by the runtime, without waking this object) and
 // "shown <etag1> <etag2> <etag3>" with what its panels show, after a state
 // it already shows and after each update (even one some screens failed).
+// Once a night the server sends "redraw" (see redraw.ts): the board downloads
+// every screen again, with its ETag and `redraw=1` (so it gets the image even
+// if it's current), and redraws it with a full refresh. Boards from before
+// it ignore it, as they do any message they don't know.
+//
 // For the admin's "Refresh now", the server sends "diag" and the board
 // answers "diag uptime=... rssi=..." (see diagnostics.ts).
 const STATE_VERSION = 1;
 const PING = "ping";
 const PONG = "pong";
+const REDRAW = "redraw";
 const NO_FIRMWARE = "-";
 /** Close code for a socket that a newer one from the same board replaced. */
 export const CLOSE_REPLACED = 4000;
@@ -84,14 +91,17 @@ export const HEALTH_INTERVAL_MS = 10 * 60_000;
 /**
  * What each socket remembers through hibernation: `version` is the deploy
  * that accepted it (unset before 2026-11-24), `colo` the Cloudflare data
- * center the board's connection came in through (see coloOf()), and `gone`
- * is set once the socket's close is dealt with, so it's dealt with once.
+ * center the board's connection came in through (see coloOf()), `timeZone`
+ * the time zone Cloudflare places the board's IP address in (see
+ * timeZoneOf(); it sets the hour of the nightly redraw), and `gone` is set
+ * once the socket's close is dealt with, so it's dealt with once.
  */
 type SocketAttachment = {
   deviceId: string;
   connectedAt: number;
   version?: string;
   colo?: string;
+  timeZone?: string;
   gone?: boolean;
 };
 
@@ -113,6 +123,8 @@ export type ImageResult =
       buffer: ArrayBuffer;
       /** True only on the download that newly flags the board as stuck. */
       etagStuck: boolean;
+      /** The board asked for the image it shows, to redraw it (see REDRAW). */
+      redraw: boolean;
     };
 
 /**
@@ -197,17 +209,22 @@ export class HymnBoard extends DurableObject<Env> {
   }
 
   /**
-   * A device polling for a screen. Answers 304 when its etag is current, and
-   * records that the device was seen either way.
+   * A device polling for a screen. Answers 304 when its etag is current,
+   * unless it's redrawing the screen (`redraw`), and records that the device
+   * was seen either way.
    */
   async fetchImage(
     id: number,
     etag: string | undefined,
     status: DeviceStatusParams,
+    redraw = false,
   ): Promise<ImageResult> {
     const screen = await this.getScreen(id);
     const now = new Date().toISOString();
     const updated = etag !== screen.etag;
+    // The image the board has, sent again to redraw: nothing new, and it
+    // kept its ETag
+    const redrawn = redraw && !updated;
 
     let etagStuck = false;
     if (status.device_id) {
@@ -219,8 +236,8 @@ export class HymnBoard extends DurableObject<Env> {
       etagStuck = this.trackDownload(status.device_id, id, updated ? screen.etag : undefined, now);
     }
 
-    return updated
-      ? { status: 200, etag: screen.etag, buffer: screen.buffer, etagStuck }
+    return updated || redrawn
+      ? { status: 200, etag: screen.etag, buffer: screen.buffer, etagStuck, redraw: redrawn }
       : { status: 304, etag: screen.etag };
   }
 
@@ -490,6 +507,7 @@ export class HymnBoard extends DurableObject<Env> {
       connectedAt: now,
       version: this.env.CF_VERSION_METADATA.id,
       colo,
+      timeZone: timeZoneOf(request),
     } satisfies SocketAttachment);
 
     const at = new Date(now).toISOString();
@@ -590,8 +608,8 @@ export class HymnBoard extends DurableObject<Env> {
 
   /**
    * Every 10 minutes while any board is connected: pings healthchecks.io for
-   * each live board (the board itself no longer does), and closes sockets
-   * that stopped pinging.
+   * each live board (the board itself no longer does), closes sockets that
+   * stopped pinging, and asks each board due its nightly redraw for it.
    */
   override async alarm(): Promise<void> {
     // First, as these sockets' ping times would fool the check below
@@ -607,6 +625,7 @@ export class HymnBoard extends DurableObject<Env> {
         continue;
       }
       live.add(attachment.deviceId);
+      this.redrawIfDue(ws, attachment);
     }
     const at = new Date().toISOString();
     for (const deviceId of live) {
@@ -620,8 +639,35 @@ export class HymnBoard extends DurableObject<Env> {
   }
 
   /**
+   * Asks the board on a live socket to redraw its panels, if it's the redraw
+   * window where it is and it hasn't been asked in this one already. When it
+   * was last asked is kept per board, as a board can reconnect meanwhile.
+   */
+  private redrawIfDue(ws: WebSocket, { deviceId, timeZone }: SocketAttachment): void {
+    const key = `redraw_at:${deviceId}`;
+    const last = this.ctx.storage.kv.get<number>(key);
+    const now = Date.now();
+    if (!redrawDue(now, timeZone, last)) {
+      return;
+    }
+    try {
+      ws.send(REDRAW);
+    } catch {
+      // Closing; the next alarm in the redraw window asks again
+      return;
+    }
+    this.ctx.storage.kv.put(key, now);
+    // The time zone it was due in: Chicago if its own is missing or unknown here
+    const zone = redrawTimeZone(timeZone);
+    const unknown = zone === timeZone ? "" : `, as ${timeZone ?? "its own"} isn't known`;
+    console.log(
+      `Asked ${getDeviceName(deviceId)} (${deviceId}) to redraw its panels (after ${REDRAW_HOUR} AM ${zone}${unknown})`,
+    );
+  }
+
+  /**
    * Closes the boards' sockets that an earlier deploy accepted, so they
-   * reconnect to this one. On Cloudflare, sockets stay open across a deploy,
+   * reconnect to this one. Sockets stay open across a deploy,
    * but the runtime stops updating their auto-response timestamps (pings
    * are still answered): seen 2026-11-24, when the alarm took both boards'
    * live sockets for silent. Called from each event that could read those
@@ -770,6 +816,10 @@ function attachmentOf(ws: WebSocket): SocketAttachment | undefined {
           : undefined,
       colo:
         "colo" in attachment && typeof attachment.colo === "string" ? attachment.colo : undefined,
+      timeZone:
+        "timeZone" in attachment && typeof attachment.timeZone === "string"
+          ? attachment.timeZone
+          : undefined,
       gone: "gone" in attachment && attachment.gone === true,
     };
   }
@@ -781,19 +831,26 @@ function seconds(ms: number): number {
   return Math.round(ms / 1000);
 }
 
-/**
- * The Cloudflare data center a request came in through: `request.cf` on
- * Cloudflare, or the end of its CF-Ray header ("8e31e5ea4a4cf507-ORD") behind
- * Cloudflare's proxy elsewhere, as on dokku. Undefined without either.
- */
+/** The Cloudflare data center a request came in through, from `request.cf`. */
 export function coloOf(request: Request): string | undefined {
+  return cfString(request, "colo");
+}
+
+/**
+ * The time zone Cloudflare places a request's IP address in, from
+ * `request.cf` (an IANA name such as "America/Chicago").
+ */
+export function timeZoneOf(request: Request): string | undefined {
+  return cfString(request, "timezone");
+}
+
+function cfString(request: Request, key: "colo" | "timezone"): string | undefined {
   const cf: unknown = request.cf;
-  if (typeof cf === "object" && cf !== null && "colo" in cf) {
-    if (typeof cf.colo === "string" && cf.colo !== "") {
-      return cf.colo;
-    }
+  if (typeof cf !== "object" || cf === null) {
+    return undefined;
   }
-  return /-([A-Z]{3})$/.exec(request.headers.get("cf-ray") ?? "")?.[1];
+  const value: unknown = Object.entries(cf).find(([name]) => name === key)?.[1];
+  return typeof value === "string" && value !== "" ? value : undefined;
 }
 
 /** Closes a socket, ignoring one that's already closed or a code it can't send. */

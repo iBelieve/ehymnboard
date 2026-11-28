@@ -110,3 +110,14 @@ export type BoardState = {
   devices: DeviceWithName[];
   firmware: FirmwareInfo | null;
 };
+
+/**
+ * Who's signed in to the admin. Admins also manage accounts and upload
+ * firmware; everyone can change the lines.
+ */
+export type Viewer = {
+  id: string;
+  name: string;
+  email: string;
+  role: "admin" | "user";
+};
