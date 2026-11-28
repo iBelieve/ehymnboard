@@ -542,7 +542,12 @@ describe("the nightly redraw", () => {
     });
     expect(logged()).toContainEqual(`Device Left Hymn Board (${LEFT}) redrawing image 2 (${etag})`);
     await settle();
-    expect(pings.filter((p) => p.url.endsWith("/log") || p.url.endsWith("/failure"))).toEqual([]);
+    // The object can hear of an earlier test's socket closing only now, and
+    // log it: that's not about the downloads
+    const aboutDownloads = pings.filter((p) => !p.body.startsWith("Socket closed"));
+    expect(
+      aboutDownloads.filter((p) => p.url.endsWith("/log") || p.url.endsWith("/failure")),
+    ).toEqual([]);
   });
 
   test("a redraw's download with an outdated etag is an update", async () => {
