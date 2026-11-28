@@ -1,12 +1,23 @@
 import { useState, type ReactNode } from "react";
 import { Background } from "./SignIn";
 
-/** A page of settings: its title, a link back to the board, and sections. */
-export function SettingsPage({ title, children }: { title: string; children: ReactNode }) {
+/**
+ * A page of settings: its title, a link back to the board, and sections.
+ * Wide makes room for a table.
+ */
+export function SettingsPage({
+  title,
+  wide = false,
+  children,
+}: {
+  title: string;
+  wide?: boolean;
+  children: ReactNode;
+}) {
   return (
     <div className="flex min-h-dvh justify-center p-8">
       <Background />
-      <div className="z-10 flex w-full max-w-2xl flex-col gap-8">
+      <div className={`z-10 flex w-full flex-col gap-8 ${wide ? "max-w-5xl" : "max-w-2xl"}`}>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <h1 className="font-display text-5xl tracking-wide text-white">{title}</h1>
           <a className="btn btn-ghost text-white" href="#">
@@ -19,10 +30,10 @@ export function SettingsPage({ title, children }: { title: string; children: Rea
   );
 }
 
-export function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Section({ title, children }: { title?: string; children: ReactNode }) {
   return (
     <section className="rounded-2xl bg-white p-6 shadow-lg">
-      <h2 className="mb-4 text-xl font-semibold">{title}</h2>
+      {title && <h2 className="mb-4 text-xl font-semibold">{title}</h2>}
       {children}
     </section>
   );

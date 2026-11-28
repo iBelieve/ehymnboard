@@ -12,10 +12,10 @@ run locally by `wrangler dev` (the Workers runtime under Miniflare, as in
 production), so they need nothing running first. CI (the `e2e` job in
 `.github/workflows/ci.yml`) runs them the same way.
 
-| Test file       | Covers                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hymns.spec.ts` | Lines typed on the admin page are pushed to the board within a second and reach the right screen and band, each change is downloaded and drawn once and only for the screens it touches, no downloads in between (no polling), the admin's board picture matches the panels pixel for pixel, Clear, a power cut keeps the ETags, and a board cut off from the server catches up when it's back (Live and Offline on the admin page) |
-| `ota.spec.ts`   | A release published with `POST /firmware` is pushed to the board, downloaded, installed through the bootloader, committed and reported on the admin page, with the screens kept                                                                                                                                                                                                                                                     |
+| Test file       | Covers                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hymns.spec.ts` | Lines typed on the admin page are pushed to the board within a second and reach the right screen and band, each change is downloaded and drawn once and only for the screens it touches, no downloads in between (no polling), the admin's board picture matches the panels pixel for pixel, Clear, a power cut keeps the ETags, and a board cut off from the server catches up when it's back (Live and Offline on the Hymn Boards page) |
+| `ota.spec.ts`   | A release published with `POST /firmware` is pushed to the board, downloaded, installed through the bootloader, committed and reported on the Hymn Boards page, with the screens kept                                                                                                                                                                                                                                                     |
 
 ## How it fits together
 
@@ -35,8 +35,10 @@ flash. The board's serial output, its requests and a PNG of every frame its
 panels showed are attached to the report.
 
 The selectors stick to what a person sees on the admin page: six text boxes
-in order, Apply and Clear buttons, a line per board ("… (last seen …") and an
-SVG picture of the board with one `<image>` per screen. A new admin page
+in order, Apply and Clear buttons, an SVG picture of the board with one
+`<image>` per screen, and a "Hymn Boards" link to a page with a table row
+per board (found by the board's ID, its columns by their headings: Status,
+Last seen, Booted, Firmware) and a "Latest firmware …" line. A new admin page
 that keeps those passes unchanged.
 
 Before the tests, `signIn.setup.ts` signs in on the page (Email, Password,

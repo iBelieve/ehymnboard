@@ -63,10 +63,9 @@ test("hymns typed on the admin page are pushed to the board and drawn once", asy
   }
   await expectSettled(board);
 
-  // The board shows up on the admin page, live on its socket.
-  const status = await admin.boardStatus(board.id);
-  await expect(status).toContainText("last seen just now");
-  await expect(status).toContainText("Live");
+  // The board shows up on the Hymn Boards page, live on its socket.
+  await expect(await admin.boardField(board.id, "Last seen")).toHaveText("just now");
+  await expect(await admin.boardField(board.id, "Status")).toContainText("Live");
 
   // New hymns: each screen is redrawn once with its two lines.
   await admin.apply(HYMNS);
@@ -146,7 +145,7 @@ test("a board that loses power keeps its screens and doesn't download them again
   // pushes, so nothing is downloaded.
   await board.untilSerial("WS: live");
   await expectSettled(board);
-  await expect(await admin.boardStatus(board.id)).toContainText("booted just now");
+  await expect(await admin.boardField(board.id, "Booted")).toHaveText("just now");
 
   // E-paper keeps its image without power, so nothing needed redrawing, and
   // the next change still arrives.
@@ -161,12 +160,12 @@ test("a board cut off from the server catches up on a change made meanwhile", as
 }) => {
   await admin.apply(HYMNS);
   await board.nextUpdate();
-  await expect(await admin.boardStatus(board.id)).toContainText("Live");
+  await expect(await admin.boardField(board.id, "Status")).toContainText("Live");
 
   // The network drops the board. Its next ping fails and it starts retrying.
   board.setOffline(true);
   await board.untilSerial("WS: socket closed, retrying in", 60_000);
-  await expect(await admin.boardStatus(board.id)).toContainText("Offline");
+  await expect(await admin.boardField(board.id, "Status")).toContainText("Offline");
 
   // The hymns change while it's away: nothing reaches it.
   await admin.apply(HYMNS.with(5, "789"));
@@ -181,5 +180,5 @@ test("a board cut off from the server catches up on a change made meanwhile", as
   expect(statuses(caughtUp)).toEqual([[3, 200]]);
   expect(redrawn(caughtUp)).toEqual([3]);
   expect(board.emu.reboots).toBe(0);
-  await expect(await admin.boardStatus(board.id)).toContainText("Live");
+  await expect(await admin.boardField(board.id, "Status")).toContainText("Live");
 });
