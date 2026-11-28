@@ -7,7 +7,12 @@ export default defineConfig({
       {
         test: {
           name: "node",
-          include: ["test/render.test.ts", "test/prettyDate.test.ts", "test/redraw.test.ts"],
+          include: [
+            "test/render.test.ts",
+            "test/prettyDate.test.ts",
+            "test/redraw.test.ts",
+            "test/flags.test.ts",
+          ],
           environment: "node",
         },
       },

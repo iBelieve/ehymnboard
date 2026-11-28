@@ -68,6 +68,16 @@ picotool load -x build/ehymnboard.uf2
 
 The first boot starts with fresh saved state, so the screens redraw once. After this, `picotool load -x build/ehymnboard.uf2` (in BOOTSEL mode) still works for flashing over USB.
 
+### When the panels change
+
+Only when someone changes the lines in the admin: the board draws a screen
+only when the server's `state` names an image it isn't showing. Nothing else
+redraws a panel, partially or fully: not a reconnect, a reboot or an OTA
+update (the board keeps what it shows in flash), and not a change of the
+`partial` option. The two exceptions are the nightly `redraw` between 3 and
+5 AM (below) and the first boot on fresh flash. During a service the boards
+must sit still, so keep it that way.
+
 ### Talking to the server
 
 The board keeps a WebSocket open to the server (`wss://hymnboard.sonrise.io/ws`,
@@ -80,17 +90,34 @@ when one changes. The client is our own, on lwIP's raw TCP API
 
 The messages are short text (`src/board_messages.h`):
 
-| From   | Message                                     | Meaning                                                                                                   |
-| ------ | ------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| server | `state 1 <etag1> <etag2> <etag3> <version>` | What each screen should show and the firmware to run (`-` for none). Sent on connect and on every change  |
-| board  | `ping`                                      | Every 30 s. The server answers `pong` without waking the Durable Object                                   |
-| board  | `shown <etag1> <etag2> <etag3>`             | What the panels show now (`-` for a screen never drawn)                                                   |
-| server | `redraw`                                    | Nightly: download every screen again (`GET /images/N` with `&redraw=1`) and redraw it with a full refresh |
+| From   | Message                                               | Meaning                                                                                                                                                                       |
+| ------ | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| server | `state 1 <etag1> <etag2> <etag3> <version> [partial]` | What each screen should show and the firmware to run (`-` for none), and whether to update the panels with a partial refresh (see below). Sent on connect and on every change |
+| board  | `ping`                                                | Every 30 s. The server answers `pong` without waking the Durable Object                                                                                                       |
+| board  | `shown <etag1> <etag2> <etag3>`                       | What the panels show now (`-` for a screen never drawn)                                                                                                                       |
+| server | `redraw`                                              | Nightly: download every screen again (`GET /images/N` with `&redraw=1`) and redraw it with a full refresh                                                                     |
 
 The nightly redraw is for the panels: Waveshare's manual says to refresh them
 at least once every 24 hours, or old images can stick, and a full refresh
 clears any ghosting. The server sends it between 3 AM and 5 AM where the board is (in
 Chicago if Cloudflare can't place it; see `web/README.md`), so nobody sees the panels flash.
+
+### Partial refresh
+
+With the state's `partial` option (a Flagship flag on the server, per board;
+see `web/README.md`), the board updates a panel with the panel's partial
+waveform, which changes only the pixels that differ and doesn't flash,
+instead of a full refresh. The waveform (`PARTIAL_LUT` in `src/waveshare.cpp`)
+and the register writes are Waveshare's own, from their 13.3" (K) driver.
+The controller compares the new image (BW RAM) with the old one (RED RAM),
+but the board cuts the panel's power after every update, which loses both,
+so the board keeps what each panel shows, packed as runs of pixels
+(`src/shown_images.cpp`): a screen of hymn numbers packs to a few KB, and
+all three get at most 20 KB of RAM, which leaves TLS the spare heap it needs. An image that doesn't fit is let go and
+that panel's next update is a full one. So is the first update after a boot
+or after the server turns the option on, every fifth update (to clear any
+ghosting), and the nightly `redraw`, which also starts that count again. Older
+firmware ignores the option.
 
 The upgrade request carries the same query string as every other request
 (`device_id`, `saved_state_writes`, `watchdog_caused_reboot`,

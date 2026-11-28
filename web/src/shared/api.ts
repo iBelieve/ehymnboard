@@ -22,8 +22,12 @@ export type Device = {
   shown_etags: string | null;
 };
 
-/** What the admin shows for a board: its row, plus whether its socket is up now. */
-export type DeviceWithName = Device & { name: string; live: boolean };
+/**
+ * What the admin shows for a board: its row, whether its socket is up now,
+ * and whether the server last told that socket it may update its panels
+ * partially (Flagship's partial-refresh flag).
+ */
+export type DeviceWithName = Device & { name: string; live: boolean; partial_refresh: boolean };
 
 /** Query parameters every device request carries. */
 export type DeviceStatusParams = {

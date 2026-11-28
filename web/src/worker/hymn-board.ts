@@ -4,6 +4,7 @@ import { renderScreen } from "../shared/render";
 import { EMPTY_LINES, isLines, linesForScreen, SCREEN_COUNT, type Lines } from "../shared/screen";
 import type { Device, DeviceStatusParams, FirmwareInfo } from "../shared/api";
 import { getDeviceName, healthchecksOn, pingHealthcheck } from "./devices";
+import { partialRefreshFor } from "./flags";
 import { migrate } from "./migrations";
 import { REDRAW_HOUR, redrawDue, redrawTimeZone } from "./redraw";
 
@@ -22,7 +23,7 @@ const DEVICE_FIELDS = new Set([
 ]);
 
 // The board protocol over the WebSocket (see device/src/board_messages.h):
-// the server sends "state 1 <etag1> <etag2> <etag3> <firmware or ->" when the
+// the server sends "state 1 <etag1> <etag2> <etag3> <firmware or -> [partial]" when the
 // socket opens and whenever any of it changes; the board sends "ping" every
 // 30 s (answered with "pong" by the runtime, without waking this object) and
 // "shown <etag1> <etag2> <etag3>" with what its panels show, after a state
@@ -36,6 +37,8 @@ const PING = "ping";
 const PONG = "pong";
 const REDRAW = "redraw";
 const NO_FIRMWARE = "-";
+// The state's option that lets a board update its panels partially (see flags.ts)
+const PARTIAL_OPTION = "partial";
 /** Close code for a socket that a newer one from the same board replaced. */
 export const CLOSE_REPLACED = 4000;
 /** Close code for a socket that stopped pinging. */
@@ -56,8 +59,10 @@ export const HEALTH_INTERVAL_MS = 10 * 60_000;
  * that accepted it (unset before 2026-11-24), `colo` the Cloudflare data
  * center the board's connection came in through (see coloOf()), `timeZone`
  * the time zone Cloudflare places the board's IP address in (see
- * timeZoneOf(); it sets the hour of the nightly redraw), and `gone` is set
- * once the socket's close is dealt with, so it's dealt with once.
+ * timeZoneOf(); it sets the hour of the nightly redraw), `partialRefresh`
+ * whether its last state message let it update its panels partially (the
+ * Flagship flag, see flags.ts), and `gone` is set once the socket's close is
+ * dealt with, so it's dealt with once.
  */
 type SocketAttachment = {
   deviceId: string;
@@ -65,6 +70,7 @@ type SocketAttachment = {
   version?: string;
   colo?: string;
   timeZone?: string;
+  partialRefresh?: boolean;
   gone?: boolean;
 };
 
@@ -98,6 +104,14 @@ export type ImageResult =
  */
 export class HymnBoard extends DurableObject<Env> {
   private readonly sql: SqlStorage;
+  /**
+   * Orders the states sent while Flagship is asked: each send takes a ticket
+   * before its wait, and a socket never gets a state with an older ticket
+   * than one it already got (see sendState). In memory: a wait keeps the
+   * object awake.
+   */
+  private lastStateTicket = 0;
+  private readonly sentStateTickets = new WeakMap<WebSocket, number>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -284,16 +298,20 @@ export class HymnBoard extends DurableObject<Env> {
    * Every board the server has heard from, with whether its socket is live.
    * A live board's last ping counts as seeing it.
    */
-  getDevices(): (Device & { live: boolean })[] {
+  getDevices(): (Device & { live: boolean; partial_refresh: boolean })[] {
     // While the admin is open it asks every 10 seconds, so after a deploy the
     // old sockets go soon; with nobody there, the alarm closes them
     this.closeOutdatedSockets();
     const seen = new Map<string, number>();
+    const partial = new Set<string>();
     for (const ws of this.openSockets()) {
       const attachment = attachmentOf(ws);
       const at = this.lastHeardFrom(ws);
       if (attachment && at !== undefined && Date.now() - at < SOCKET_SILENT_MS) {
         seen.set(attachment.deviceId, Math.max(at, seen.get(attachment.deviceId) ?? 0));
+        if (attachment.partialRefresh) {
+          partial.add(attachment.deviceId);
+        }
       }
     }
     return this.sql
@@ -306,7 +324,12 @@ export class HymnBoard extends DurableObject<Env> {
           pinged !== undefined && pinged > stored
             ? new Date(pinged).toISOString()
             : device.last_seen;
-        return { ...device, last_seen: lastSeen, live: pinged !== undefined };
+        return {
+          ...device,
+          last_seen: lastSeen,
+          live: pinged !== undefined,
+          partial_refresh: partial.has(device.id),
+        };
       });
   }
 
@@ -393,14 +416,22 @@ export class HymnBoard extends DurableObject<Env> {
     console.log(`Device socket connected: ${name} (${deviceId}) via ${colo ?? "?"}`);
     this.ctx.waitUntil(this.ping(deviceId, "", "Socket connected"));
 
-    server.send(await this.stateMessage());
+    // The flag first: the state is built after the wait (see sendState)
+    // Off if Flagship can't say: the board's next update is then a full one,
+    // which is always safe (its old socket, which would say, is usually gone)
+    const ticket = ++this.lastStateTicket;
+    const partial = (await partialRefreshFor(this.env.FLAGS, deviceId)) ?? false;
+    this.sendState(server, await this.stateMessage(), partial, ticket);
     if ((await this.ctx.storage.getAlarm()) === null) {
       await this.ctx.storage.setAlarm(now + HEALTH_INTERVAL_MS);
     }
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  /** The state message every board gets: its screens and the firmware to run. */
+  /**
+   * The state message every board gets: its screens and the firmware to run.
+   * sendState() adds each board's own options.
+   */
   async stateMessage(): Promise<string> {
     const screens = await Promise.all(
       Array.from({ length: SCREEN_COUNT }, (_, i) => this.getScreen(i + 1)),
@@ -415,13 +446,59 @@ export class HymnBoard extends DurableObject<Env> {
     if (sockets.length === 0) {
       return;
     }
+    // The flags first: the state is built after the wait (see sendState)
+    const ticket = ++this.lastStateTicket;
+    const partial = await Promise.all(sockets.map((ws) => this.partialRefreshOf(ws)));
     const message = await this.stateMessage();
-    for (const ws of sockets) {
-      try {
-        ws.send(message);
-      } catch {
-        // Closing; the board gets the state when it reconnects
-      }
+    for (const [i, ws] of sockets.entries()) {
+      this.sendState(ws, message, partial[i] ?? false, ticket);
+    }
+  }
+
+  /**
+   * Flagship's partial refresh flag for the board on a socket (none without
+   * one), or what the board was last told if Flagship can't say. Evaluated
+   * with every state, and only then: a board's panels only change after a
+   * state, so a flag turned on or off reaches it before its next update.
+   */
+  private async partialRefreshOf(ws: WebSocket): Promise<boolean | undefined> {
+    const attachment = attachmentOf(ws);
+    if (!attachment) {
+      return undefined;
+    }
+    const partial = await partialRefreshFor(this.env.FLAGS, attachment.deviceId);
+    // Read again after the wait: a broadcast may have told it since
+    return partial ?? attachmentOf(ws)?.partialRefresh;
+  }
+
+  /**
+   * Sends a board the state, with "partial" if Flagship lets it update its
+   * panels partially (`partial`, the flag just evaluated for its board), and
+   * notes on its socket which it was told. Synchronous, so called once the
+   * flag is in hand: a state built before a wait on Flagship could reach the
+   * board after a newer one, and the note could be of what it wasn't told.
+   * `ticket` is when the flag was asked for: a state whose Flagship answer
+   * came after a later-asked one's isn't sent, as that one has the newer
+   * flag and a state no older (every change sends a state of its own after).
+   */
+  private sendState(ws: WebSocket, message: string, partial: boolean, ticket: number): void {
+    if ((this.sentStateTickets.get(ws) ?? 0) > ticket) {
+      return;
+    }
+    try {
+      ws.send(partial ? `${message} ${PARTIAL_OPTION}` : message);
+    } catch {
+      // Closing; the board gets the state when it reconnects
+      return;
+    }
+    this.sentStateTickets.set(ws, ticket);
+    const attachment = attachmentOf(ws);
+    if (attachment && partial !== attachment.partialRefresh) {
+      ws.serializeAttachment({ ...attachment, partialRefresh: partial } satisfies SocketAttachment);
+      const { deviceId } = attachment;
+      console.log(
+        `Partial refresh ${partial ? "on" : "off"} for ${getDeviceName(deviceId)} (${deviceId})`,
+      );
     }
   }
 
@@ -647,6 +724,7 @@ function attachmentOf(ws: WebSocket): SocketAttachment | undefined {
         "timeZone" in attachment && typeof attachment.timeZone === "string"
           ? attachment.timeZone
           : undefined,
+      partialRefresh: "partialRefresh" in attachment && attachment.partialRefresh === true,
       gone: "gone" in attachment && attachment.gone === true,
     };
   }

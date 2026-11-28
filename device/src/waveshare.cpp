@@ -18,6 +18,25 @@
 
 #include "waveshare.h"
 
+#include "shown_images.h"
+
+// Waveshare's waveform for partial updates of this panel, from their
+// epd13in3k drivers (github.com/waveshareteam/e-Paper, Lut_Partial): 105
+// bytes for the LUT register (0x32), then the gate (0x03), source (0x04) and
+// VCOM (0x2C) voltages it was made for. The OTP's own waveforms are for full
+// updates only.
+static constexpr std::array<uint8_t, 105> PARTIAL_LUT = {
+    0x15, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x2A, 0x88, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x15, 0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x01,
+    0x00, 0x0A, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x01, 0x22, 0x22, 0x22, 0x22, 0x22,
+};
+static constexpr uint8_t PARTIAL_GATE_VOLTAGE = 0x17;
+static constexpr std::array<uint8_t, 3> PARTIAL_SOURCE_VOLTAGES = {0x41, 0xA8, 0x32};
+static constexpr uint8_t PARTIAL_VCOM = 0x18;
+
 void Waveshare13K::init()
 {
     printf("[%d] -> Initializing display...\n", id);
@@ -66,6 +85,11 @@ void Waveshare13K::init()
     sendCommand(0x18);
     sendData(0x80);
 
+    setRamCounters();
+}
+
+void Waveshare13K::setRamCounters()
+{
     // Set RAM X address counter
     sendCommand(0x4E);
     sendData(0x00);
@@ -102,6 +126,65 @@ void Waveshare13K::display(const std::array<uint8_t, 81600> &buffer)
     sendCommand(0x24);
     sendData(buffer.data(), buffer.size());
     turnOnDisplay();
+}
+
+// As Waveshare's EPD_13IN3K_Init_Part does after a full init
+void Waveshare13K::loadPartialWaveform()
+{
+    // Border waveform: leave the border as it is
+    sendCommand(0x3C);
+    sendData(0x80);
+
+    sendCommand(0x32);
+    sendData(PARTIAL_LUT.data(), PARTIAL_LUT.size());
+    sendCommand(0x03);
+    sendData(PARTIAL_GATE_VOLTAGE);
+    sendCommand(0x04);
+    sendData(PARTIAL_SOURCE_VOLTAGES.data(), PARTIAL_SOURCE_VOLTAGES.size());
+    sendCommand(0x2C);
+    sendData(PARTIAL_VCOM);
+
+    // Write register for display option: as Waveshare's (RAM ping-pong for
+    // display mode 2, which doesn't matter here: both images are written)
+    sendCommand(0x37);
+    static constexpr std::array<uint8_t, 10> DISPLAY_OPTION = {0x00, 0x00, 0x00, 0x00, 0x00,
+                                                               0x40, 0x00, 0x00, 0x00, 0x00};
+    sendData(DISPLAY_OPTION.data(), DISPLAY_OPTION.size());
+
+    // Enable the clock and analog circuits
+    sendCommand(0x22);
+    sendData(0xC0);
+    sendCommand(0x20);
+    waitUntilIdle();
+}
+
+bool Waveshare13K::displayPartial(const std::vector<uint8_t> &old_packed, const std::array<uint8_t, 81600> &buffer)
+{
+    printf("[%d] -> Displaying image (partial)...\n", id);
+    // The old image goes in the "red" RAM, which display mode 2 compares
+    // the new one in the black and white RAM with. Checked first, so a bad
+    // one draws nothing
+    if (!unpack_pixel_runs(old_packed, buffer.size(), [](const uint8_t *, std::size_t) {}))
+    {
+        printf("[%d] -> The panel's old image doesn't unpack\n", id);
+        return false;
+    }
+    loadPartialWaveform();
+    sendCommand(0x26);
+    unpack_pixel_runs(old_packed, buffer.size(),
+                      [this](const uint8_t *chunk, std::size_t length) { sendData(chunk, length); });
+    setRamCounters();
+    sendCommand(0x24);
+    sendData(buffer.data(), buffer.size());
+
+    printf("[%d] -> Turning on display (partial)...\n", id);
+    // Display update control: clock and analog on, display mode 2 with the
+    // waveform loaded above, then analog and clock off (Waveshare's 0xCF)
+    sendCommand(0x22);
+    sendData(0xCF);
+    sendCommand(0x20);
+    waitUntilIdle();
+    return true;
 }
 
 void Waveshare13K::sendCommand(uint8_t command)

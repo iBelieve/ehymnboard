@@ -33,6 +33,9 @@
   // Which deploy is running: the Durable Object closes boards' sockets from an
   // earlier one, whose ping times Cloudflare stops keeping (see hymn-board.ts)
   "version_metadata": { "binding": "CF_VERSION_METADATA" },
+  // Feature flags: the Flagship app "hymnboard" (see src/worker/flags.ts).
+  // Previews share it, so a flag can target the e2e tests' emulated board.
+  "flagship": [{ "binding": "FLAGS", "app_id": "014d5ef4-b1c1-4724-a53f-a516a8eb0bf4" }],
   "observability": {
     "enabled": true,
     "traces": { "enabled": true },
@@ -56,6 +59,7 @@
   "previews": {
     // Lets the e2e tests' emulated board connect to a preview's /ws
     "vars": { "EXTRA_DEVICE_IDS": "0000000000000000" },
+    "flagship": [{ "binding": "FLAGS", "app_id": "014d5ef4-b1c1-4724-a53f-a516a8eb0bf4" }],
     "durable_objects": {
       "bindings": [{ "name": "HYMN_BOARD", "class_name": "HymnBoard" }],
     },

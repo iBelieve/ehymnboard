@@ -9,6 +9,18 @@ answer byte-for-byte as they did. `hardware/` is the KiCad design
 (no CI). `web/`, `e2e/` and `device/emulator/` are one pnpm workspace,
 rooted at the repository root (see "pnpm workspace" below).
 
+## The panels change only when the lines do
+
+This is the hard requirement: a panel never updates (not even a flashless
+partial refresh, and not for a new feature, a reconnect, an OTA update or a
+flag change) except when someone changes the lines in the admin. During a
+service the boards must sit still. The two exceptions are the nightly full
+redraw, between 3 and 5 AM board time (Waveshare's once-a-day refresh), and
+the first boot on fresh flash, which has nothing on the panels yet. Any change
+that could make a board draw something else needs Michael's say-so first. The
+e2e tests' `expectSettled`, and the emulator tests that run the board for a
+while and count `emu.displays`, check this; keep them doing so.
+
 ## CI
 
 One GitHub Actions workflow, `.github/workflows/ci.yml`, runs every check on
@@ -127,9 +139,15 @@ All checks below must pass; run them locally before committing.
   Better Auth instance or promise across requests: a Worker can't await one
   another request made. Every deploy needs `BETTER_AUTH_SECRET` and
   `SETUP_PASSWORD`
+- Feature flags are Cloudflare Flagship's (the `FLAGS` binding, app
+  `hymnboard`; see `web/README.md`, "Feature flags"), evaluated per board in
+  `src/worker/flags.ts`. Locally the store starts empty, so every flag is off
+  until made in it: the Worker tests make flags through its admin API
+  (`test/websocket.test.ts`), and the e2e tests' server makes `partial-refresh`
+  on for every board
 - Don't change the device endpoints' paths, query parameters or response
-  bytes, or the `/ws` messages (`state`, `ping`/`pong`, `shown`, `redraw`, close
-  codes): the firmware hard-codes them. The rasterizer is checked bit for bit
+  bytes, or the `/ws` messages (`state` and its `partial` option, `ping`/`pong`,
+  `shown`, `redraw`, close codes): the firmware hard-codes them. The rasterizer is checked bit for bit
   against reference screens in `test/fixtures/render/` (`test/render.test.ts`);
   regenerate them only after a deliberate rendering change, with
   `UPDATE_RENDER_FIXTURES=1 pnpm vitest run --silent=false test/render.test.ts`
@@ -141,8 +159,9 @@ Full-stack tests: the firmware in the emulator talks to a running server's
 real HTTP while Playwright drives its admin page (only through the page; no
 server internals). Unless `E2E_BASE_URL` names a server, they build `web/`
 and run it themselves under `wrangler dev` (Playwright's `webServer` in
-`playwright.config.ts`), locally and in CI alike. Same TypeScript conventions
-as the emulator.
+`playwright.config.ts`), locally and in CI alike, with Flagship's
+`partial-refresh` flag on in `wrangler dev`'s local flag store, so the panels
+update partially as in production. Same TypeScript conventions as the emulator.
 
 - Needs the firmware build. The tests import the emulator's source by
   relative path and run `web/`'s scripts; `ehymnboard-emulator` and

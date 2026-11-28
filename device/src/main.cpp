@@ -28,6 +28,7 @@
 #include "pico/stdlib.h"
 #include "pico/unique_id.h"
 #include "request_path.h"
+#include "shown_images.h"
 #include "state.h"
 #include "tls.h"
 #include "utils.h"
@@ -55,9 +56,27 @@ static uint64_t now_ms()
     return to_ms_since_boot(get_absolute_time());
 }
 
-// Downloads one screen's image and draws it if it changed. On transient HTTP
-// failures we just log and bail out; the caller retries later.
-static FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag, bool redraw)
+// Draws the downloaded image on a panel: with a partial update from `old`,
+// the packed image it shows, if there is one, otherwise (or if `old` doesn't
+// unpack) with a full one. Returns whether it was partial.
+static bool draw(Waveshare13K &screen, const std::vector<uint8_t> *old)
+{
+    screen.init();
+    const bool partial = old != nullptr && screen.displayPartial(*old, image_buffer);
+    if (!partial)
+    {
+        screen.display(image_buffer);
+    }
+    screen.shutdown();
+    return partial;
+}
+
+// Downloads one screen's image and draws it if it changed, partially from
+// `old` if there is one (see draw), setting `partial` to how it was drawn.
+// On transient HTTP failures we just log and bail out; the caller retries
+// later.
+static FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std::string &etag, bool redraw,
+                                       const std::vector<uint8_t> *old, bool &partial)
 {
     long_watchdog_update();
 
@@ -67,9 +86,7 @@ static FetchImageResult refresh_screen(int screen_id, Waveshare13K &screen, std:
     if (ret == FetchImageResult::NEW_IMAGE)
     {
         printf(redraw ? "Redrawing screen %d\n" : "New image for screen %d\n", screen_id);
-        screen.init();
-        screen.display(image_buffer);
-        screen.shutdown();
+        partial = draw(screen, old);
     }
     else if (ret == FetchImageResult::NO_CHANGE)
     {
@@ -99,6 +116,11 @@ struct Screens
     std::array<bool, SCREEN_COUNT> redraw{};
     // When the server asked for the redraw still under way, if one is
     std::optional<uint64_t> redraw_since_ms;
+    // Whether the server lets the board update panels partially (the
+    // "partial" option of its state message), and what they show, packed for
+    // that. A redraw is always a full update, to clear any ghosting
+    bool partial_refresh = false;
+    ShownImages images;
     // When to retry after a failed download
     uint64_t retry_at_ms = 0;
     // Since when downloads have kept failing, if they have
@@ -182,6 +204,22 @@ static void note_failures(Screens &screens, const std::array<bool, SCREEN_COUNT>
     }
 }
 
+// Keeps the image just drawn on screen `i` for its next partial update
+static void remember_drawn(ShownImages &images, std::size_t i, bool partial)
+{
+    images.drawn(i, image_buffer.data(), image_buffer.size(), partial);
+    const auto *kept = images.for_partial(i);
+    if (kept != nullptr)
+    {
+        printf("Screen %d's image kept for partial refresh (%u bytes packed, %u in all)\n", static_cast<int>(i + 1),
+               static_cast<unsigned>(kept->size()), static_cast<unsigned>(images.packed_bytes()));
+    }
+    else
+    {
+        printf("Screen %d's next update is a full one\n", static_cast<int>(i + 1));
+    }
+}
+
 // Downloads and draws every screen that doesn't show what the server wants,
 // or that it asked to redraw, keeping the socket serviced in between. Returns
 // true if any download got an answer (a new image or a 304), so the server
@@ -201,7 +239,14 @@ static bool update_screens(Board &board)
             continue;
         }
         std::string etag = screens.shown.at(i);
-        const auto ret = refresh_screen(static_cast<int>(i + 1), *screens.panels.at(i), etag, screens.redraw.at(i));
+        const bool redraw = screens.redraw.at(i);
+        const auto *old = screens.partial_refresh && !redraw ? screens.images.for_partial(i) : nullptr;
+        bool partial = false;
+        const auto ret = refresh_screen(static_cast<int>(i + 1), *screens.panels.at(i), etag, redraw, old, partial);
+        if (ret == FetchImageResult::NEW_IMAGE && screens.partial_refresh)
+        {
+            remember_drawn(screens.images, i, partial);
+        }
         if (ret == FetchImageResult::NEW_IMAGE || ret == FetchImageResult::NO_CHANGE)
         {
             // A redraw of the same image has nothing new to save
@@ -295,6 +340,13 @@ static void service(Board &board)
         }
         screens.wanted = events.state->etags;
         screens.retry_at_ms = now;
+        if (events.state->partial_refresh != screens.partial_refresh)
+        {
+            printf("Partial refresh turned %s\n", events.state->partial_refresh ? "on" : "off");
+            screens.partial_refresh = events.state->partial_refresh;
+            // Its next updates are all full ones: their memory is free again
+            screens.images.forget();
+        }
         board.offered_version = events.state->firmware_version;
 
         // Let the server know what the panels show, if they're current. Then

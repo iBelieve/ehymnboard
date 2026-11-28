@@ -26,7 +26,10 @@
 // bytes, and it drives BUSY through setBusy(). What it shows is the BW RAM as
 // addressed through the RAM window and address counters, so a wrong window,
 // data entry mode or byte count shows up as a wrong image, not just a wrong
-// byte stream. Breaking a rule from the manual (a command while BUSY is high,
+// byte stream. A partial update (display mode 2) changes only the pixels
+// where the BW RAM differs from the RED RAM, as the differential waveform
+// does, so a wrong old image in the RED RAM leaves the wrong pixels on the
+// panel. Breaking a rule from the manual (a command while BUSY is high,
 // a short parameter list, a write while unpowered) is recorded in `faults`.
 
 export const WIDTH = 960;
@@ -36,6 +39,9 @@ export const RAM_BYTES = ROW_BYTES * HEIGHT; // 81600
 
 // Typical full update time at 23 C, manual section 7.2.
 export const REFRESH_MS = 4000;
+// Not in the manual, which has no partial waveform: about what GxEPD2
+// measures for this glass (GDEM133T91).
+export const PARTIAL_REFRESH_MS = 600;
 // Not in the manual: the reference sequence only says to wait for BUSY.
 const RESET_BUSY_MS = 1;
 const SWRESET_BUSY_MS = 10;
@@ -71,8 +77,11 @@ const COMMANDS = new Map<number, [name: string, dataBytes: number]>([
   [0x4f, ["set RAM Y address counter", 2]],
 ]);
 
-// Display update control 2 (0x22): bit 2 runs the display pattern.
+// Display update control 2 (0x22): bit 2 runs the display pattern, bit 3
+// picks display mode 2 (partial), and bit 4 loads the waveform from OTP.
 const UPDATE_DISPLAY = 0x04;
+const DISPLAY_MODE_2 = 0x08;
+const LOAD_OTP_LUT = 0x10;
 
 const hex = (n: number) => `0x${n.toString(16).padStart(2, "0")}`;
 const word10 = (lo: number, hi: number) => lo | ((hi & 0x03) << 8);
@@ -88,6 +97,8 @@ interface Registers {
   y: number;
   border: number;
   updateControl: number | null;
+  /** A waveform was written to the LUT register (0x32) since the last reset. */
+  lut: boolean;
 }
 
 /** A command collecting its data bytes. */
@@ -123,6 +134,7 @@ function porRegisters(): Registers {
     y: 0,
     border: 0xc0,
     updateControl: null,
+    lut: false,
   };
 }
 
@@ -142,6 +154,7 @@ export class EPaperPanel {
   busy = false;
   generation = 0; // bumped on power-off and reset, so stale timers do nothing
   ram = new Uint8Array(RAM_BYTES);
+  red = new Uint8Array(RAM_BYTES);
   shown = new Uint8Array(RAM_BYTES).fill(0xff); // a blank (white) panel
   regs = porRegisters();
   deepSleep = false;
@@ -178,6 +191,7 @@ export class EPaperPanel {
     this.setBusy(false);
     if (on) {
       this.ram.fill(POWER_ON_RAM);
+      this.red.fill(POWER_ON_RAM);
       this.regs = porRegisters();
       this.deepSleep = false;
     }
@@ -334,6 +348,9 @@ export class EPaperPanel {
       case 0x22:
         r.updateControl = d(0);
         break;
+      case 0x32:
+        r.lut = true;
+        break;
       case 0x3c:
         r.border = d(0);
         break;
@@ -379,11 +396,8 @@ export class EPaperPanel {
   ramWrite(c: PendingCommand, value: number) {
     const r = this.regs;
     c.ramBytes++;
-    if (c.code !== 0x24) {
-      return; // the red RAM isn't shown by a black and white update
-    }
     if (r.x < WIDTH && r.y < HEIGHT) {
-      this.ram[r.y * ROW_BYTES + (r.x >> 3)] = value;
+      (c.code === 0x24 ? this.ram : this.red)[r.y * ROW_BYTES + (r.x >> 3)] = value;
     }
     const xStep = r.entryMode & 0x01 ? 8 : -8;
     const yStep = r.entryMode & 0x02 ? 1 : -1;
@@ -423,11 +437,25 @@ export class EPaperPanel {
       this.busyFor(UPDATE_WITHOUT_DISPLAY_MS);
       return;
     }
+    const partial = (control & DISPLAY_MODE_2) !== 0;
+    if (partial && !(control & LOAD_OTP_LUT) && !this.regs.lut) {
+      this.fault("display mode 2 without a waveform written to the LUT register (0x32)");
+    }
     // Only the first `gates` rows are scanned; the rest keep their old image.
+    // A partial update drives only the pixels where the new image (BW RAM)
+    // differs from the old one (RED RAM).
     const image = Uint8Array.from(this.ram);
+    const old = Uint8Array.from(this.red);
     const rows = Math.min(this.regs.gates, HEIGHT) * ROW_BYTES;
-    this.busyFor(this.refreshMs, () => {
-      this.shown.set(image.subarray(0, rows));
+    this.busyFor(partial ? Math.min(PARTIAL_REFRESH_MS, this.refreshMs) : this.refreshMs, () => {
+      if (partial) {
+        for (let i = 0; i < rows; i++) {
+          const changed = (image[i] ?? 0) ^ (old[i] ?? 0);
+          this.shown[i] = ((this.shown[i] ?? 0) & ~changed) | ((image[i] ?? 0) & changed);
+        }
+      } else {
+        this.shown.set(image.subarray(0, rows));
+      }
       this.refreshes++;
       this.onDisplay({ image: Uint8Array.from(this.shown), updateControl: control });
     });

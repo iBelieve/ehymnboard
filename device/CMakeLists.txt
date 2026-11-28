@@ -119,6 +119,7 @@ add_executable(ehymnboard
         src/ota.cpp
         src/request_path.cpp
         src/saved_state.cpp
+        src/shown_images.cpp
         src/state.cpp
         src/tls.cpp
         src/utils.cpp

@@ -163,6 +163,14 @@ function Status({ device, now }: { device: DeviceWithName; now: Date }) {
           </span>
         )
       )}
+      {device.partial_refresh && (
+        <span
+          className="badge badge-info"
+          title="The board was told it may change its panels without flashing (Flagship's partial-refresh flag), with its last state. A change of the flag shows here once lines or firmware next change, or the board reconnects. Firmware from before partial refresh ignores it."
+        >
+          Partial refresh
+        </span>
+      )}
       {device.etag_stuck_at && (
         <span className="badge badge-warning h-auto">
           Re-downloading every poll since {prettyDate(device.etag_stuck_at, now)}

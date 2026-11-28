@@ -11,6 +11,7 @@ import {
   coloOf,
   timeZoneOf,
 } from "../src/worker/hymn-board";
+import { PARTIAL_REFRESH_FLAG } from "../src/worker/flags";
 import { REDRAW_HOUR, localHour } from "../src/worker/redraw";
 import { type Ping, recordPings } from "./healthchecks";
 import { signInAsAdmin } from "./signIn";
@@ -483,6 +484,126 @@ function zoneWhereItIs(hour: number): string {
   }
   throw new Error(`no zone where it's ${hour}`);
 }
+
+/** What the tests use of miniflare's admin API for its local Flagship store. */
+type FlagshipAdmin = {
+  putFlag(flag: {
+    key: string;
+    enabled: boolean;
+    variations: Record<string, boolean>;
+    default_variation: string;
+    rules: {
+      priority: number;
+      conditions: { attribute: string; operator: string; value: string[] }[];
+      serve_variation: string;
+    }[];
+  }): Promise<unknown>;
+  deleteFlag(key: string): Promise<void>;
+};
+
+// An RPC stub: its methods are only there when asked for, not to `in`
+function isFlagshipAdmin(value: unknown): value is FlagshipAdmin {
+  return (
+    (typeof value === "object" || typeof value === "function") &&
+    value !== null &&
+    typeof Reflect.get(value, "putFlag") === "function" &&
+    typeof Reflect.get(value, "deleteFlag") === "function"
+  );
+}
+
+/**
+ * Wrangler's local Flagship store, which the binding evaluates from, through
+ * the admin API miniflare gives the binding (Local Explorer uses it).
+ */
+function flagshipAdmin(): FlagshipAdmin {
+  const open: unknown = Reflect.get(env.FLAGS, "FlagshipBinding::admin_api");
+  if (typeof open !== "function") {
+    throw new Error("miniflare's Flagship binding has no admin API");
+  }
+  const admin: unknown = Reflect.apply(open, env.FLAGS, []);
+  if (!isFlagshipAdmin(admin)) {
+    throw new Error("miniflare's Flagship admin API changed");
+  }
+  return admin;
+}
+
+/** Applies `lines` as the admin does. */
+async function putLines(lines: string[]) {
+  const response = await exports.default.fetch(
+    new Request(`${BASE}/api/lines`, {
+      method: "PUT",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify({ lines }),
+    }),
+  );
+  expect(response.ok).toBe(true);
+}
+
+describe("partial refresh, from Flagship", () => {
+  const flags = flagshipAdmin;
+  /** The flag, on for `boards` (or no board, though on). */
+  const setFlag = (boards: string[]) =>
+    flags().putFlag({
+      key: PARTIAL_REFRESH_FLAG,
+      enabled: true,
+      variations: { on: true, off: false },
+      default_variation: "off",
+      rules:
+        boards.length === 0
+          ? []
+          : [
+              {
+                priority: 1,
+                conditions: [{ attribute: "deviceId", operator: "in", value: boards }],
+                serve_variation: "on",
+              },
+            ],
+    });
+  afterEach(async () => {
+    await flags()
+      .deleteFlag(PARTIAL_REFRESH_FLAG)
+      .catch(() => undefined);
+  });
+
+  test("a board the flag is on for gets the partial option, and the admin shows it", async () => {
+    await setFlag([LEFT]);
+    const left = await connect(LEFT);
+    const right = await connect(RIGHT);
+    expect(await left.next(0)).toMatch(/^state 1 (\S+ ){4}partial$/);
+    expect(STATE.test(await right.next(0))).toBe(true);
+    const s = await state();
+    expect(device(s)?.partial_refresh).toBe(true);
+    expect(device(s, RIGHT)?.partial_refresh).toBe(false);
+
+    // A change of lines keeps each board's own option
+    await putLines(["321", "", "", "", "", ""]);
+    expect(await left.next(1)).toMatch(/ partial$/);
+    expect(STATE.test(await right.next(1))).toBe(true);
+  });
+
+  test("a change of the flag reaches a board with its next state, not before", async () => {
+    const board = await connect(LEFT);
+    expect(STATE.test(await board.next(0))).toBe(true);
+    const logged = spyOnLog();
+
+    // Turned on: the alarm doesn't send anything for it
+    await setFlag([LEFT]);
+    expect(await runDurableObjectAlarm(env.HYMN_BOARD.getByName("main"))).toBe(true);
+    expect(await board.ask("ping")).toBe("pong");
+    expect(board.messages).toHaveLength(2);
+
+    // The next state, before the board's next update, carries it
+    await putLines(["111", "", "", "", "", ""]);
+    expect(await board.next(2)).toMatch(/ partial$/);
+    expect(logged()).toContain(`Partial refresh on for Left Hymn Board (${LEFT})`);
+
+    await setFlag([]);
+    await putLines(["222", "", "", "", "", ""]);
+    expect(STATE.test(await board.next(3))).toBe(true);
+    expect(logged()).toContain(`Partial refresh off for Left Hymn Board (${LEFT})`);
+    expect(device(await state())?.partial_refresh).toBe(false);
+  });
+});
 
 describe("the nightly redraw", () => {
   // Storage outlives a test, and the board was asked in an earlier one

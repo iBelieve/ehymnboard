@@ -186,6 +186,34 @@ need both secrets, set once in the Previews base config
 the same for `SETUP_PASSWORD`); new previews start with them. Create the
 previews' first account on any preview with the setup password.
 
+### Feature flags (Flagship)
+
+Feature flags come from [Cloudflare Flagship](https://developers.cloudflare.com/flagship/),
+the binding `FLAGS` in `wrangler.jsonc` (production and previews share the app
+**hymnboard**, in Compute > Flagship), read in `src/worker/flags.ts`. A flag is
+evaluated with the board's `deviceId` (also the `targetingKey`, for
+percentage rollouts) and its name as `board`, so a rule can turn it on for one
+board, a few, or a share of them. A flag that isn't in the app is off; while
+Flagship can't evaluate one, a connected board keeps what it was last told, and
+a board connecting gets it off. Locally
+(`pnpm dev`, the tests and the e2e tests' server) the binding is Wrangler's
+own store, which starts empty, so every flag is off until one is made there:
+the Worker tests put flags in it through its admin API, and the e2e tests'
+server makes `partial-refresh` on for every board (see `e2e/README.md`).
+
+| Flag              | What it does                                                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `partial-refresh` | Sends the board's `state` with `partial`, so it updates its panels with a partial refresh (see `device/README.md`). The admin shows a "Partial refresh" badge |
+
+The Durable Object evaluates the flag whenever it sends a board `state`
+(when lines or firmware change, or the board connects), and only then: a
+board's panels only change after a `state`, so turning the flag on or off (or
+editing a rule) in the dashboard reaches a board before its next update, with
+no deploy. A change takes about a minute to reach Flagship's edge. To roll
+back, turn the flag off (or take the board out of the rule); the board's next
+update is a full refresh. The admin's badge shows what the board was last
+told, so it changes with the next `state` too.
+
 ### Boards on TLS
 
 The boards talk only to `https://hymnboard.sonrise.io` and
