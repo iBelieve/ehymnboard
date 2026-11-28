@@ -77,8 +77,9 @@ function buildRelease() {
 
 /**
  * The admin page, found by what a person sees on it: six text boxes in
- * order, Apply and Clear buttons, a line per board and a picture of the
- * board. Nothing depends on how the page is built.
+ * order, Apply and Clear buttons, a picture of the board, and a "Hymn
+ * Boards" link to a table row per board. Nothing depends on how the page is
+ * built.
  */
 export class AdminPage {
   readonly page: Page;
@@ -122,10 +123,27 @@ export class AdminPage {
     }
   }
 
-  /** The admin's line for a board, after a fresh load. */
-  async boardStatus(id: string) {
+  /** The Hymn Boards page, after a fresh load, reached from the board's menu. */
+  async openBoards() {
     await this.open();
-    return this.page.getByText(new RegExp(`${id} \\(last seen`));
+    await this.page.getByRole("link", { name: "Hymn Boards" }).click();
+    await expect(this.page.getByRole("heading", { name: "Hymn Boards" })).toBeVisible();
+  }
+
+  /** A board's row on the Hymn Boards page, after a fresh load. */
+  async #boardRow(id: string) {
+    await this.openBoards();
+    return this.page.getByRole("row").filter({ hasText: id });
+  }
+
+  /** One column of a board's row on the Hymn Boards page, by its heading. */
+  async boardField(id: string, column: "Status" | "Last seen" | "Booted" | "Firmware") {
+    const row = await this.#boardRow(id);
+    await expect(row).toBeVisible();
+    const headings = await this.page.getByRole("columnheader").allTextContents();
+    expect(headings).toContain(column);
+    // In page order, counting a row header (the board's name, say) as a column too
+    return row.getByRole("rowheader").or(row.getByRole("cell")).nth(headings.indexOf(column));
   }
 
   /**

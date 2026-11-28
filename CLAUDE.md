@@ -161,9 +161,11 @@ as the emulator.
   ID), or `/ws` refuses the board
 - `pnpm run typecheck`, `pnpm run lint`
 - The selectors are what a person sees, so a rewritten admin page passes
-  unchanged if it keeps the six text boxes, Apply/Clear buttons,
-  "<board> (last seen …" line and the SVG board picture with one `<image>`
-  per screen. A test that must change for a rewrite flags a behaviour change
+  unchanged if it keeps the six text boxes, Apply/Clear buttons, the SVG
+  board picture with one `<image>` per screen, and the "Hymn Boards" link to
+  a table with a row per board under the headings Status, Last seen, Booted
+  and Firmware, above a "Latest firmware …" line. A test that must change
+  for a rewrite flags a behaviour change
 
 ### .github/workflows/
 
