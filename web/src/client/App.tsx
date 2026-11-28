@@ -13,7 +13,6 @@ import {
 import { fetchScreen, fetchState, saveLines } from "./api";
 import { signOut } from "./auth";
 import { BoardPreview } from "./BoardPreview";
-import { DeviceList } from "./DeviceList";
 import { Background } from "./SignIn";
 
 const SCREEN_IDS = Array.from({ length: SCREEN_COUNT }, (_, i) => i + 1);
@@ -46,7 +45,7 @@ export function App({ viewer }: { viewer: Viewer }) {
     );
   }, []);
 
-  // Load once, then keep device status fresh (like the old 10 s htmx poll).
+  // Load once, then follow changes made elsewhere (like the old 10 s htmx poll).
   useEffect(() => {
     let cancelled = false;
     const load = (first: boolean) => {
@@ -129,6 +128,9 @@ export function App({ viewer }: { viewer: Viewer }) {
       <header className="z-10 flex flex-wrap items-center justify-between gap-x-8 gap-y-4">
         <h1 className="font-display text-5xl tracking-wide text-white">Hymn Board</h1>
         <nav className="flex items-center gap-1 text-sm text-white">
+          <a className="btn btn-ghost btn-sm text-white" href="#boards">
+            Hymn Boards
+          </a>
           <a className="btn btn-ghost btn-sm text-white" href="#profile" title="Your profile">
             {viewer.name}
           </a>
@@ -148,8 +150,6 @@ export function App({ viewer }: { viewer: Viewer }) {
       </header>
       <div className="grid grid-cols-1 gap-8 lg:min-h-0 lg:flex-grow lg:grid-cols-2">
         <div className="z-10 flex flex-col">
-          {state && <DeviceList devices={state.devices} firmware={state.firmware} />}
-
           <div className="flex flex-grow flex-col items-center justify-center">
             {/* Relative so the unsaved-changes note can sit under the card
               without taking up space: the layout matches the old admin's. */}

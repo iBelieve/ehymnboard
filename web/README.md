@@ -12,7 +12,7 @@ Cloudflare as the Worker `hymnboard`, at `hymnboard.sonrise.io` (see
 | Path          | What it is                                                                                                   |
 | ------------- | ------------------------------------------------------------------------------------------------------------ |
 | `src/worker/` | Hono routes (`index.ts`), the `HymnBoard` Durable Object, device names and healthchecks.io pings             |
-| `src/client/` | The React admin: line editor, live board preview, device status                                              |
+| `src/client/` | The React admin: line editor, live board preview, the Hymn Boards status page                                |
 | `src/shared/` | Code both sides run: screen geometry, API types, and the 1-bit text rasterizer (opentype.js + scanline fill) |
 | `test/`       | Rasterizer tests against reference screens (`fixtures/render/`) and endpoint tests in the Workers runtime    |
 
@@ -51,8 +51,8 @@ first: the admin's next look at the boards, a board connecting or sending
 boards reconnect. A socket opening and closing is logged to the board's check
 too (pings need `HEALTHCHECKS=on`, which the production
 Worker and the Worker tests (with `fetch` mocked) set, and previews,
-`pnpm dev` and the e2e tests' server don't), and the admin shows each board as
-Live or Offline.
+`pnpm dev` and the e2e tests' server don't), and the admin's Hymn Boards page
+(`#boards`) shows each board as Live or Offline.
 
 ## Development
 

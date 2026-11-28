@@ -35,8 +35,10 @@ flash. The board's serial output, its requests and a PNG of every frame its
 panels showed are attached to the report.
 
 The selectors stick to what a person sees on the admin page: six text boxes
-in order, Apply and Clear buttons, a line per board ("… (last seen …") and an
-SVG picture of the board with one `<image>` per screen. A new admin page
+in order, Apply and Clear buttons, an SVG picture of the board with one
+`<image>` per screen, and a "Hymn Boards" link to a page with a table row
+per board (found by the board's ID, its columns by their headings: Status,
+Last seen, Booted, Firmware) and a "Latest firmware …" line. A new admin page
 that keeps those passes unchanged.
 
 Before the tests, `signIn.setup.ts` signs in on the page (Email, Password,

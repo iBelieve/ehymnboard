@@ -40,13 +40,13 @@ test("a published release is installed over the air and reported", async ({
   // On the current release, the board stays put and shows the hymns.
   await board.untilSerial(`OTA: firmware is up to date (${build.version})`);
   await board.nextUpdate();
-  await expect(await admin.boardStatus(board.id)).toContainText(`firmware ${build.version}`);
+  await expect(await admin.boardField(board.id, "Firmware")).toHaveText(build.version);
   const shown = board.emu.displays.length;
   expect(shown).toBe(3);
 
   // A new release is published.
   await publishRelease(request, NEXT, build.imageFor(NEXT));
-  await admin.open();
+  await admin.openBoards();
   await expect(admin.page.getByText(`Latest firmware ${NEXT}`)).toBeVisible();
 
   // The server pushes the new version to the board at once; it downloads and
@@ -62,7 +62,7 @@ test("a published release is installed over the air and reported", async ({
   expect(board.emu.reboots, "one reboot, into the new release").toBe(1);
 
   // The admin shows the board on the new release...
-  await expect(await admin.boardStatus(board.id)).toContainText(`firmware ${NEXT}`);
+  await expect(await admin.boardField(board.id, "Firmware")).toHaveText(NEXT);
   // ...and the update kept its saved screens: nothing downloaded or redrawn.
   const after = await board.quiet(60_000);
   expect(after.images).toEqual([]);
