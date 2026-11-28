@@ -40,6 +40,18 @@ export const FIRMWARE =
 
 export const LINE_COUNT = 6;
 
+/**
+ * Whether the server turns on partial refresh for the board (Flagship's
+ * partial-refresh flag): on for the tests' own server, which makes the flag
+ * in its local store, and off for another unless E2E_PARTIAL_REFRESH=on.
+ */
+export const PARTIAL_REFRESH =
+  (process.env.E2E_PARTIAL_REFRESH ?? (process.env.E2E_BASE_URL === undefined ? "on" : "off")) ===
+  "on";
+
+/** The panel's update control for a partial update (0xf7 is a full one). */
+const PARTIAL_UPDATE = 0xcf;
+
 /** A server on this machine, rather than far away (a Cloudflare preview). */
 function isLocal(origin: string) {
   return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname);
@@ -216,7 +228,8 @@ export class AdminPage {
 /** What the board fetched and redrew over a stretch of time. */
 export interface Loop {
   images: { screen: number; status: number | undefined }[];
-  displays: { screen: number; frame: Uint8Array }[];
+  /** `partial` if the panel updated only the pixels that changed, without flashing. */
+  displays: { screen: number; frame: Uint8Array; partial: boolean }[];
 }
 
 /**
@@ -280,9 +293,11 @@ export class Board {
         const screen = /^\/images\/(\d)$/.exec(r.path)?.[1];
         return screen ? [{ screen: Number(screen), status: r.status }] : [];
       }),
-      displays: this.emu.displays
-        .slice(this.#displays)
-        .map(({ screen, frame }) => ({ screen, frame })),
+      displays: this.emu.displays.slice(this.#displays).map(({ screen, frame, updateControl }) => ({
+        screen,
+        frame,
+        partial: updateControl === PARTIAL_UPDATE,
+      })),
     };
     this.#requests = this.emu.net.requests.length;
     this.#displays = this.emu.displays.length;

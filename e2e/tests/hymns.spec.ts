@@ -21,13 +21,15 @@
 // downloads and draws only the screens it touches, within a second or two.
 // In between, it sends nothing but pings.
 import { BOTTOM, inkIn, rows, TOP, WIDTH } from "./frames.ts";
-import { type Board, expect, type Loop, test } from "./fixtures.ts";
+import { type Board, expect, type Loop, PARTIAL_REFRESH, test } from "./fixtures.ts";
 
 const HYMNS = ["Hymn", "123", "Psalm", "23", "Offertory", "456"];
 
 /** The screens redrawn, in order. */
 const redrawn = (loop: Loop) => loop.displays.map((d) => d.screen);
 const statuses = (loop: Loop) => loop.images.map((i) => [i.screen, i.status]);
+/** Whether each redraw was a partial update. */
+const partial = (loop: Loop) => loop.displays.map((d) => d.partial);
 
 /** A minute goes by with no downloads and no redraws: the board isn't polling. */
 async function expectSettled(board: Board) {
@@ -61,11 +63,19 @@ test("hymns typed on the admin page are pushed to the board and drawn once", asy
   for (const { frame } of first.displays) {
     expect(inkIn(frame, { from: 0, to: 680 }).count, "a blank screen").toBe(0);
   }
+  // Nothing is known about the panels after a boot: full updates
+  expect(partial(first)).toEqual([false, false, false]);
   await expectSettled(board);
 
   // The board shows up on the Hymn Boards page, live on its socket.
   await expect(await admin.boardField(board.id, "Last seen")).toHaveText("just now");
-  await expect(await admin.boardField(board.id, "Status")).toContainText("Live");
+  const status = await admin.boardField(board.id, "Status");
+  await expect(status).toContainText("Live");
+  if (PARTIAL_REFRESH) {
+    await expect(status).toContainText("Partial refresh");
+  } else {
+    await expect(status).not.toContainText("Partial refresh");
+  }
 
   // New hymns: each screen is redrawn once with its two lines.
   await admin.apply(HYMNS);
@@ -76,6 +86,8 @@ test("hymns typed on the admin page are pushed to the board and drawn once", asy
     [3, 200],
   ]);
   expect(redrawn(posted)).toEqual([1, 2, 3]);
+  // From here on, with partial refresh, the panels change without flashing
+  expect(partial(posted)).toEqual(Array(3).fill(PARTIAL_REFRESH));
   for (const { frame } of posted.displays) {
     expectText(frame, TOP);
     expectText(frame, BOTTOM);
@@ -98,6 +110,7 @@ test("hymns typed on the admin page are pushed to the board and drawn once", asy
   const changed = await board.nextUpdate(30_000);
   expect(statuses(changed)).toEqual([[2, 200]]);
   expect(redrawn(changed)).toEqual([2]);
+  expect(partial(changed)).toEqual([PARTIAL_REFRESH]);
   const [before, after] = [posted.displays[1].frame, changed.displays[0].frame];
   expect(Buffer.from(rows(after, TOP)).equals(Buffer.from(rows(before, TOP)))).toBe(true);
   expect(Buffer.from(rows(after, BOTTOM)).equals(Buffer.from(rows(before, BOTTOM)))).toBe(false);
@@ -108,6 +121,7 @@ test("hymns typed on the admin page are pushed to the board and drawn once", asy
   await admin.clear();
   const cleared = await board.nextUpdate(30_000);
   expect(redrawn(cleared)).toEqual([1, 2, 3]);
+  expect(partial(cleared)).toEqual(Array(3).fill(PARTIAL_REFRESH));
   for (const { frame } of cleared.displays) {
     expect(inkIn(frame, { from: 0, to: 680 }).count).toBe(0);
   }

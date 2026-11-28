@@ -62,9 +62,12 @@ pnpm test
 
 `pnpm test` builds `web/`, starts it with `wrangler dev` on port 8790 with
 empty data, `SETUP_PASSWORD` `e2e-setup` (and a test-only
-`BETTER_AUTH_SECRET`), `HEALTHCHECKS` off and the
-emulated board allowed (`EXTRA_DEVICE_IDS=0000000000000000`), runs the
-tests and stops it. The server's state is kept in
+`BETTER_AUTH_SECRET`), `HEALTHCHECKS` off, the
+emulated board allowed (`EXTRA_DEVICE_IDS=0000000000000000`) and the
+Flagship flag `partial-refresh` on for every board (made in `wrangler dev`'s
+local flag store, so no Cloudflare sign-in is needed), runs the
+tests and stops it. The board's panels then update partially, as they will
+in production, and the tests check which updates were partial. The server's state is kept in
 `web/.wrangler/e2e-state` until the next run. In CI its log is printed with
 the tests' (prefixed `[WebServer]`).
 
@@ -80,14 +83,15 @@ them at a server in use. Each test publishes the build under test as the server'
 before its board boots and again when it ends, so a release left on the
 server can't update a board by surprise.
 
-| Variable                    | Default                                                 |
-| --------------------------- | ------------------------------------------------------- |
-| `E2E_BASE_URL`              | none: the tests start `web/` on `http://127.0.0.1:8790` |
-| `E2E_EMAIL`, `E2E_PASSWORD` | `e2e@example.com`, `e2e-password`                       |
-| `E2E_SETUP_PASSWORD`        | `e2e-setup` for their own server; none otherwise        |
-| `FIRMWARE_UF2`              | `../device/build/ehymnboard.uf2`                        |
-| `E2E_CHROMIUM_EXECUTABLE`   | Playwright's own Chromium                               |
-| `EMULATOR_VERBOSE=1`        | prints the firmware's serial output                     |
+| Variable                    | Default                                                                  |
+| --------------------------- | ------------------------------------------------------------------------ |
+| `E2E_BASE_URL`              | none: the tests start `web/` on `http://127.0.0.1:8790`                  |
+| `E2E_EMAIL`, `E2E_PASSWORD` | `e2e@example.com`, `e2e-password`                                        |
+| `E2E_SETUP_PASSWORD`        | `e2e-setup` for their own server; none otherwise                         |
+| `FIRMWARE_UF2`              | `../device/build/ehymnboard.uf2`                                         |
+| `E2E_PARTIAL_REFRESH`       | `on` for their own server; `off` otherwise (what the server's flag says) |
+| `E2E_CHROMIUM_EXECUTABLE`   | Playwright's own Chromium                                                |
+| `EMULATOR_VERBOSE=1`        | prints the firmware's serial output                                      |
 
 `FIRMWARE_UF2` must sit in its build directory, which also holds the
 bootloader, `firmware_version.txt` and the encrypted OTA image. The OTA test

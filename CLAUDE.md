@@ -145,8 +145,9 @@ Full-stack tests: the firmware in the emulator talks to a running server's
 real HTTP while Playwright drives its admin page (only through the page; no
 server internals). Unless `E2E_BASE_URL` names a server, they build `web/`
 and run it themselves under `wrangler dev` (Playwright's `webServer` in
-`playwright.config.ts`), locally and in CI alike. Same TypeScript conventions
-as the emulator.
+`playwright.config.ts`), locally and in CI alike, with Flagship's
+`partial-refresh` flag on in `wrangler dev`'s local flag store, so the panels
+update partially as in production. Same TypeScript conventions as the emulator.
 
 - Needs the firmware build. The tests import the emulator's source by
   relative path and run `web/`'s scripts; `ehymnboard-emulator` and

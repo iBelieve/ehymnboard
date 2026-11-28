@@ -19,6 +19,7 @@
 // Full-stack end-to-end tests: the real firmware in the emulator talks to a
 // running hymn board server while a browser drives its admin page. Without
 // E2E_BASE_URL, the tests start the server themselves (see README.md).
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { defineConfig } from "@playwright/test";
 
@@ -46,6 +47,14 @@ const vars = {
   HEALTHCHECKS: "off",
 };
 const state = ".wrangler/e2e-state";
+// The Flagship app the Worker is bound to: `wrangler dev` evaluates its flags
+// against a local store, in `state`, which starts empty (so every flag off)
+const flagshipApp = /"app_id":\s*"([^"]+)"/.exec(
+  readFileSync(path.join(import.meta.dirname, "../web/wrangler.jsonc"), "utf8"),
+)?.[1];
+if (!flagshipApp) {
+  throw new Error("no Flagship app_id in web/wrangler.jsonc");
+}
 /** `value` as one sh word, whatever it holds (the command runs in a shell). */
 function shellWord(value: string) {
   return `'${value.replaceAll("'", `'\\''`)}'`;
@@ -53,6 +62,10 @@ function shellWord(value: string) {
 const serverCommand = [
   "pnpm run build",
   `rm -rf ${state}`,
+  // Partial refresh on for every board, as it will be in production: the
+  // tests then run the Flagship flag, the state's "partial" and the
+  // firmware's partial updates end to end (see tests/fixtures.ts)
+  `pnpm exec wrangler flagship flags create ${flagshipApp} partial-refresh --default on --local --persist-to ${state}`,
   [
     // No --config: wrangler follows .wrangler/deploy/config.json to the
     // Worker the build just wrote, whatever wrangler.jsonc names it
