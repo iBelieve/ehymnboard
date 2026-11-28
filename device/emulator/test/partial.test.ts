@@ -89,7 +89,7 @@ function bootPartial() {
   return { emu, at };
 }
 
-test("updates partially once it knows what a panel shows, fully every 5th time and on a redraw", () => {
+test("updates partially once it knows what a panel shows, fully every 5th time and on a redraw, which starts the count again", () => {
   const { emu } = bootPartial();
   // Nothing is known about the panels after a boot
   assert.deepEqual(
@@ -118,7 +118,12 @@ test("updates partially once it knows what a panel shows, fully every 5th time a
     emu.displays.slice(before).map((d) => d.updateControl),
     [FULL, FULL, FULL],
   );
-  assert.equal(change(emu, 1), PARTIAL);
+  // It starts the count again: screen 2 had one partial update before it,
+  // and now has four more before its next full one
+  assert.deepEqual(
+    Array.from({ length: 5 }, () => change(emu, 2)),
+    [PARTIAL, PARTIAL, PARTIAL, PARTIAL, FULL],
+  );
   assertNoPanelFaults(emu);
 });
 

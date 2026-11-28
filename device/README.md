@@ -116,7 +116,8 @@ so the board keeps what each panel shows, packed as runs of pixels
 all three get at most 20 KB of RAM, which leaves TLS the spare heap it needs. An image that doesn't fit is let go and
 that panel's next update is a full one. So is the first update after a boot
 or after the server turns the option on, every fifth update (to clear any
-ghosting), and the nightly `redraw`. Older firmware ignores the option.
+ghosting), and the nightly `redraw`, which also starts that count again. Older
+firmware ignores the option.
 
 The upgrade request carries the same query string as every other request
 (`device_id`, `saved_state_writes`, `watchdog_caused_reboot`,
