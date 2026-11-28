@@ -19,9 +19,8 @@
 // A release goes out over the air: it's uploaded to the server the way a
 // release is published (POST /firmware, as in device/README.md), a board
 // running the previous release is told about it over its WebSocket, downloads
-// it, installs it through
-// the bootloader, reboots into it and commits it, and the admin page shows
-// the board on the new version.
+// the image for the A/B bootloader's other slot, reboots into it and commits
+// it, and the admin page shows the board on the new version.
 import { OtaBuild } from "../../device/emulator/src/ota-image.ts";
 import { expect, FIRMWARE, publishRelease, test } from "./fixtures.ts";
 
@@ -56,16 +55,16 @@ test("a published release is installed over the air and reported", async ({
   expect(shown).toBe(3);
 
   // A new release is published.
-  await publishRelease(request, NEXT, build.imageFor(NEXT));
+  await publishRelease(request, NEXT, build.bundleFor(NEXT));
   await admin.openBoards();
   await expect(admin.page.getByText(`Latest firmware ${NEXT}`)).toBeVisible();
 
   // The server pushes the new version to the board at once; it downloads and
-  // verifies it, and the bootloader swaps it in.
+  // verifies it, and the bootloader starts it from slot B.
   await board.untilSerial(`OTA: updating from ${build.version} to ${NEXT}`, 30_000);
   await board.untilSerial("OTA: downloaded and verified", 180_000);
-  await board.untilSerial("[BOOTLOADER] Swapping images...", 60_000);
   await board.untilSerial(`Firmware version: ${NEXT}`, 60_000);
+  await board.untilSerial("OTA: running from slot B, A/B bootloader", 30_000);
   await board.untilSerial("OTA: running newly installed firmware", 30_000);
   // Once its socket is live on the new release, it commits it.
   await board.untilSerial("OTA: firmware is healthy, committing", 120_000);
@@ -83,5 +82,7 @@ test("a published release is installed over the air and reported", async ({
 
   // It stays on the new release: no second download.
   const downloads = board.emu.net.requests.filter((r) => r.path === "/firmware/image");
-  expect(downloads.map((r) => [r.query.target_version, r.status])).toEqual([[NEXT, 200]]);
+  expect(downloads.map((r) => [r.query.target_version, r.query.slot, r.status])).toEqual([
+    [NEXT, "b", 200],
+  ]);
 });

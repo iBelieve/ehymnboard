@@ -44,16 +44,11 @@ let sharedTls: TlsServer | undefined;
 const STREAM_SLICE_MS = 50;
 
 /**
- * pico_fota_bootloader's UF2 from the same build: an OTA build's firmware
- * can't boot without it.
+ * The A/B bootloader's UF2 from the same build: the firmware, linked to run
+ * from one of its slots, can't boot without it.
  */
 function bootloaderFor(uf2: string) {
-  const bootloader = path.join(
-    path.dirname(uf2),
-    "lib",
-    "pico_fota_bootloader",
-    "pico_fota_bootloader.uf2",
-  );
+  const bootloader = path.join(path.dirname(uf2), "ehymnboard_bootloader.uf2");
   return fs.existsSync(bootloader) ? fs.readFileSync(bootloader) : undefined;
 }
 
@@ -67,10 +62,13 @@ export function testImage(screen: number, version: number) {
   return new Uint8Array(IMAGE_BYTES).fill((screen * 16 + version) & 0xff);
 }
 
-/** A firmware update the server offers: its version and encrypted OTA image. */
+/**
+ * A firmware update the server offers: its version and an encrypted OTA image
+ * for each slot, [A, B].
+ */
 export interface FirmwareUpdate {
   version: string;
-  image: Uint8Array;
+  images: readonly [Uint8Array, Uint8Array];
 }
 
 /** Close code for a socket that another one from the same board replaced. */
@@ -208,7 +206,9 @@ export class MockServer {
       return {
         status: 200,
         headers: { "Content-Type": "application/octet-stream" },
-        body: firmware.image,
+        // As the real server: slot A's for a board that doesn't say (one on
+        // pico_fota_bootloader, which only runs slot A)
+        body: firmware.images[req.query.slot === "b" ? 1 : 0],
       };
     }
     return { status: 404 };
@@ -239,7 +239,7 @@ export interface EmulatorOptions {
    */
   tlsCert?: TestCert;
   /**
-   * pico_fota_bootloader's UF2, flashed first. Defaults to the one in the
+   * A bootloader's UF2, flashed first. Defaults to the A/B bootloader in the
    * firmware's build directory, if there is one.
    */
   bootloader?: string;

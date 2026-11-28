@@ -9,15 +9,13 @@ import {
   pingHealthcheck,
 } from "./devices";
 
+import { slotImage, uploadError } from "./firmware";
 import { STUCK_ETAG_DOWNLOADS } from "./hymn-board";
 import * as accounts from "./accounts";
 
 export { HymnBoard } from "./hymn-board";
 
-// Must match the device: OTA images are written to flash in 256-byte pages,
-// the download slot is 1000 KB, and versions are at most 47 characters.
-const FIRMWARE_PAGE_SIZE = 256;
-const FIRMWARE_MAX_SIZE = 1000 * 1024;
+// Must match the device: versions are at most 47 characters.
 const FIRMWARE_VERSION_PATTERN = /^[0-9A-Za-z._-]{1,47}$/;
 
 const MAX_LINE_LENGTH = 100;
@@ -252,7 +250,8 @@ app.get("/firmware/latest", async (c) => {
 });
 
 // The image is AES encrypted with the boards' key, so it's safe to serve
-// publicly.
+// publicly. `slot` is the A/B bootloader's slot the board installs into (see
+// firmware.ts).
 app.get("/firmware/image", async (c) => {
   const deviceId = c.req.query("device_id");
   const firmware = await board(c.env).getFirmwareImage();
@@ -264,13 +263,23 @@ app.get("/firmware/image", async (c) => {
   if (c.req.query("target_version") !== firmware.version) {
     return c.body(null, 409);
   }
+  const slot = c.req.query("slot");
+  const image = slotImage(new Uint8Array(firmware.image), slot);
+  if (!image) {
+    return c.body(null, 404);
+  }
 
+  const into = slot === "b" ? "slot B" : "slot A";
   console.log(
-    `Device ${getDeviceName(deviceId)} (${deviceId}) downloading firmware ${firmware.version}`,
+    `Device ${getDeviceName(deviceId)} (${deviceId}) downloading firmware ${firmware.version} for ${into}`,
   );
   ping(c, deviceId, "/log", `Downloading firmware ${firmware.version}`);
 
-  return c.body(firmware.image, 200, { "Content-Type": "application/octet-stream" });
+  // The firmware needs the length up front
+  return c.body(image, 200, {
+    "Content-Type": "application/octet-stream",
+    "Content-Length": String(image.byteLength),
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -394,9 +403,10 @@ app.get("/api/screens/:id{[0-9]+}", requireViewer, async (c) => {
   });
 });
 
-// Upload the OTA image (build/ehymnboard_fota_image_encrypted.bin) and its
-// version (build/firmware_version.txt). Every board running a different
-// version installs it.
+// Upload the OTA bundle (build/ehymnboard_ota_bundle.bin, or a single image
+// from a build before the A/B bootloader; see firmware.ts) and its version
+// (build/firmware_version.txt). Every board running a different version
+// installs it.
 app.post("/firmware", requireAdmin, async (c) => {
   const form = await c.req.parseBody();
   const version = typeof form.version === "string" ? form.version.trim() : "";
@@ -411,14 +421,9 @@ app.post("/firmware", requireAdmin, async (c) => {
   }
 
   const data = await image.arrayBuffer();
-  if (data.byteLength === 0) {
-    return c.text("Image is empty\n", 400);
-  }
-  if (data.byteLength % FIRMWARE_PAGE_SIZE !== 0) {
-    return c.text(`Image size must be a multiple of ${FIRMWARE_PAGE_SIZE} bytes\n`, 400);
-  }
-  if (data.byteLength > FIRMWARE_MAX_SIZE) {
-    return c.text(`Image is larger than ${FIRMWARE_MAX_SIZE} bytes\n`, 400);
+  const error = uploadError(new Uint8Array(data));
+  if (error) {
+    return c.text(`${error}\n`, 400);
   }
 
   const info = await board(c.env).saveFirmware(version, data);

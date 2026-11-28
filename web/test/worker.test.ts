@@ -5,6 +5,7 @@ import type { BoardState } from "../src/shared/api";
 import { getFont } from "../src/shared/font";
 import { renderScreen } from "../src/shared/render";
 import { SCREEN_BYTES } from "../src/shared/screen";
+import { bundle } from "./bundle";
 import { type Ping, recordPings } from "./healthchecks";
 import { signInAsAdmin } from "./signIn";
 import worker from "../src/worker/index";
@@ -287,10 +288,15 @@ describe("admin API", () => {
   });
 });
 
-function upload(version: string, size: number, headers: Record<string, string> = {}) {
+function upload(
+  version: string,
+  image: number | Uint8Array<ArrayBuffer>,
+  headers: Record<string, string> = {},
+) {
   const form = new FormData();
   form.set("version", version);
-  form.set("image", new File([new Uint8Array(size).fill(7)], "fw.bin"));
+  const bytes = typeof image === "number" ? new Uint8Array(image).fill(7) : image;
+  form.set("image", new File([bytes], "fw.bin"));
   return exports.default.fetch(
     new Request("https://hymnboard.sonrise.io/firmware", {
       method: "POST",
@@ -298,6 +304,12 @@ function upload(version: string, size: number, headers: Record<string, string> =
       body: form,
     }),
   );
+}
+
+/** The image a board downloads for `version`, with `slot` (`&slot=…`) or not */
+async function download(version: string, slot: string) {
+  const response = await get(`/firmware/image?device_id=${LEFT}&target_version=${version}${slot}`);
+  return response.bytes();
 }
 
 describe("OTA firmware", () => {
@@ -321,5 +333,34 @@ describe("OTA firmware", () => {
     const image = await get(`/firmware/image?device_id=${LEFT}&target_version=v2`);
     expect(image.status).toBe(200);
     expect((await image.arrayBuffer()).byteLength).toBe(512);
+    // A single image is from before the A/B bootloader: nothing for a board
+    // on it, in either slot
+    for (const slot of ["a", "b"]) {
+      const response = await get(
+        `/firmware/image?device_id=${LEFT}&target_version=v2&slot=${slot}`,
+      );
+      expect(response.status).toBe(404);
+    }
+  });
+
+  test("serves each slot its image from a bundle", async () => {
+    const a = new Uint8Array(512).fill(0xa);
+    const b = new Uint8Array(768).fill(0xb);
+    expect((await upload("v3", bundle(a, b))).status).toBe(201);
+    expect(await download("v3", "&slot=a")).toEqual(a);
+    expect(await download("v3", "&slot=b")).toEqual(b);
+    // The firmware needs the length up front
+    const response = await get(`/firmware/image?device_id=${LEFT}&target_version=v3&slot=b`);
+    expect(response.headers.get("Content-Length")).toBe("768");
+    await response.arrayBuffer();
+    // A board on pico_fota_bootloader names no slot
+    expect(await download("v3", "")).toEqual(a);
+  });
+
+  test("refuses a bundle that's cut short", async () => {
+    const whole = bundle(new Uint8Array(512), new Uint8Array(512));
+    const response = await upload("v4", whole.subarray(0, 700));
+    expect(response.status).toBe(400);
+    expect(await response.text()).toMatch(/cut short/);
   });
 });

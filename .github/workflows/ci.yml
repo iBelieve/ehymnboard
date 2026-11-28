@@ -159,15 +159,19 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: firmware
-          # The OTA image, its version and the bootloader are for the
-          # emulator's and e2e's OTA tests; ehymnboard_autobahn for the
-          # Autobahn job.
+          # The A/B bootloader starts the firmware; both slots' OTA images,
+          # the bundle and the version are for the emulator's and e2e's OTA
+          # tests, and pico_fota_bootloader for the emulator's test of moving
+          # off it; ehymnboard_autobahn for the Autobahn job.
           path: |
             device/build/ehymnboard.uf2
             device/build/ehymnboard.elf
+            device/build/ehymnboard_bootloader.uf2
             device/build/ehymnboard_autobahn.uf2
             device/build/ehymnboard_autobahn.elf
             device/build/ehymnboard_fota_image_encrypted.bin
+            device/build/ehymnboard_b_fota_image_encrypted.bin
+            device/build/ehymnboard_ota_bundle.bin
             device/build/firmware_version.txt
             device/build/lib/pico_fota_bootloader/pico_fota_bootloader.uf2
           if-no-files-found: error
@@ -220,7 +224,7 @@ jobs:
       - name: Check CRAP scores
         run: >
           uv run python ../tools/crap.py --coverage build-test/coverage.xml
-          src/board_messages.cpp src/http_headers.cpp src/request_path.cpp
+          src/board_messages.cpp src/boot_control.cpp src/http_headers.cpp src/request_path.cpp
           src/saved_state.cpp src/ws_connection.cpp src/ws_frame.cpp src/ws_handshake.cpp
 
   # Boots the built firmware in rp2040js with a fake WiFi chip, access point,

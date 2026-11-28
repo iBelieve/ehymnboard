@@ -18,11 +18,10 @@
 
 #include "state.h"
 
+#include "flash_write.h"
 #include "hardware/flash.h"
 #include "hardware/sync.h"
-#include "pico/flash.h"
 #include "utils.h"
-#include <functional>
 #include <string.h>
 
 constexpr auto FLASH_TARGET_OFFSET = PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
@@ -31,16 +30,6 @@ constexpr auto FLASH_TARGET_OFFSET = PICO_FLASH_SIZE_BYTES - FLASH_SECTOR_SIZE;
 const SavedState *flash_saved_state = (const SavedState *)(XIP_BASE + FLASH_TARGET_OFFSET);
 
 static_assert(sizeof(SavedState) <= FLASH_PAGE_SIZE, "SavedState must fit in one flash page");
-
-static int flash_safe_execute(std::function<void()> func, uint32_t enter_exit_timeout_ms)
-{
-    return flash_safe_execute(
-        [](void *arg) {
-            auto func = static_cast<std::function<void()> *>(arg);
-            (*func)();
-        },
-        &func, enter_exit_timeout_ms);
-}
 
 void save_ota_state(const std::string &attempted_version, const std::string &rejected_version)
 {
@@ -53,16 +42,14 @@ void SavedState::save()
 
     memcpy(page_buf, this, sizeof(SavedState));
 
-    const int res = flash_safe_execute(
-        [page_buf]() {
-            flash_range_erase(FLASH_TARGET_OFFSET, FLASH_SECTOR_SIZE);
-            flash_range_program(FLASH_TARGET_OFFSET, page_buf, FLASH_PAGE_SIZE);
-        },
-        10000);
+    const bool saved = flash_write_safely([page_buf]() {
+        flash_range_erase(FLASH_TARGET_OFFSET, FLASH_SECTOR_SIZE);
+        flash_range_program(FLASH_TARGET_OFFSET, page_buf, FLASH_PAGE_SIZE);
+    });
 
-    if (res != PICO_OK)
+    if (!saved)
     {
-        printf("Failed to save state: %d\n", res);
+        printf("Failed to save state\n");
         reset_pico();
     }
 }

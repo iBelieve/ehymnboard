@@ -286,6 +286,9 @@ test("keeps pinging while it downloads screens one after another", () => {
 
 test("redraws every screen with a full update when the server asks, without saving to flash", () => {
   const { emu, at } = bootLive();
+  // A board flashed over USB writes its first boot record once it's live;
+  // let it, so only what the redraw writes is counted
+  emu.waitForSerial("OTA: committed the firmware in slot A", 5_000, at);
   const [socket] = emu.server.sockets;
   const requests = emu.net.requests.length;
   const shown = socket.received.filter((m) => m.startsWith("shown ")).length;

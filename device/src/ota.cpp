@@ -24,37 +24,24 @@
 #include <string>
 
 #include "firmware_version.h"
+#include "http_headers.h"
 #include "long_watchdog.h"
 #include "lwip/apps/http_client.h"
+#include "ota_slots.h"
 #include "pico/async_context.h"
 #include "pico/cyw43_arch.h"
-#include "pico_fota_bootloader/core.h"
 #include "state.h"
 #include "tls.h"
 #include "utils.h"
 
-// Defined by the bootloader's linker script; the symbol's address is the size
-// of each flash slot. Declared in the library's private linker_definitions.h.
-// NOLINTNEXTLINE(bugprone-reserved-identifier,cert-dcl37-c,cert-dcl51-cpp)
-extern "C" uint32_t __FLASH_SWAP_SPACE_LENGTH;
-
 namespace
 {
-
-// What lwIP's http_client passes as the content length when the response has
-// no Content-Length header (private to http_client.c)
-constexpr u32_t HTTPC_CONTENT_LEN_INVALID = 0xFFFFFFFF;
 
 // Give up on a download that makes no progress for this long, or takes longer
 // than this overall
 constexpr int64_t DOWNLOAD_STALL_TIMEOUT_US = 30LL * 1000 * 1000;
 constexpr int64_t DOWNLOAD_TOTAL_TIMEOUT_US = 5LL * 60 * 1000 * 1000;
 constexpr int64_t VERSION_CHECK_TIMEOUT_US = 60LL * 1000 * 1000;
-
-size_t download_slot_size()
-{
-    return reinterpret_cast<size_t>(&__FLASH_SWAP_SPACE_LENGTH);
-}
 
 std::string ota_query()
 {
@@ -203,7 +190,9 @@ std::optional<std::string> fetch_target_version()
 // layer counts them against the window until we acknowledge them.)
 constexpr size_t STAGING_SIZE = 18 * 1024;
 static_assert(STAGING_SIZE >= TCP_WND, "Staging buffer must hold a full TCP window");
-static_assert(STAGING_SIZE % PFB_ALIGN_SIZE == 0, "Staging buffer must hold whole flash pages");
+// Flash pages, which are also whole AES blocks
+constexpr size_t PAGE_SIZE = 256;
+static_assert(STAGING_SIZE % PAGE_SIZE == 0, "Staging buffer must hold whole flash pages");
 
 struct DownloadRequest
 {
@@ -237,14 +226,25 @@ err_t on_download_headers(httpc_state_t *connection, void *arg, struct pbuf *hdr
         return ERR_OK;
     }
 
-    if (content_len == HTTPC_CONTENT_LEN_INVALID || content_len == 0 || content_len % PFB_ALIGN_SIZE != 0 ||
-        content_len > download_slot_size())
+    // lwIP only finds "Content-Length: " in that case, so read it here (the
+    // headers can span several pbufs, so copy the block out first)
+    std::string headers(hdr_len, '\0');
+    headers.resize(pbuf_copy_partial(hdr, headers.data(), hdr_len, 0));
+    const auto length = find_content_length(headers);
+    if (!length || *length == 0 || *length % PAGE_SIZE != 0 || *length > slot_capacity())
     {
-        printf("OTA: invalid firmware image size %lu\n", (unsigned long)content_len);
+        if (length)
+        {
+            printf("OTA: invalid firmware image size %lu\n", static_cast<unsigned long>(*length));
+        }
+        else
+        {
+            printf("OTA: invalid firmware image size (no usable Content-Length)\n");
+        }
         return ERR_VAL; // aborts the request
     }
 
-    req->content_length = content_len;
+    req->content_length = *length;
     req->accepting = true;
 
     return ERR_OK;
@@ -332,7 +332,9 @@ bool start_download(const std::string &version)
     settings.result_fn = on_download_completed;
     settings.altcp_allocator = server_tls_allocator();
 
-    const std::string path = "/firmware/image" + ota_query() + "&target_version=" + version;
+    // The image linked for the slot it goes into
+    const std::string path =
+        "/firmware/image" + ota_query() + "&target_version=" + version + "&slot=" + slot_name(update_slot());
 
     cyw43_arch_lwip_begin();
     const auto ret =
@@ -355,10 +357,9 @@ bool write_staged(size_t offset, size_t length)
 {
     // The callbacks only append past `buffered`, so this part of the buffer
     // is ours until we hand it back below
-    const int ret = pfb_write_to_flash_aligned_256_bytes(download.buffer.data(), offset, length);
-    if (ret != 0)
+    if (!write_update(download.buffer.data(), offset, length))
     {
-        printf("OTA: error writing to flash at offset %u: %d\n", (unsigned)offset, ret);
+        printf("OTA: error writing to flash at offset %u\n", (unsigned)offset);
         return false;
     }
 
@@ -386,7 +387,7 @@ size_t stream_download()
     while (true)
     {
         cyw43_arch_lwip_begin();
-        const size_t to_write = download.buffered - (download.buffered % PFB_ALIGN_SIZE);
+        const size_t to_write = download.buffered - (download.buffered % PAGE_SIZE);
         const bool complete = download.complete;
         const bool overflow = download.overflow;
         cyw43_arch_lwip_end();
@@ -461,22 +462,31 @@ size_t download_image(const std::string &version)
 
 } // namespace
 
+// What the bootloader said on this boot (read once: committing changes it)
+static bool booted_after_update = false;
+
 void ota_handle_boot()
 {
     printf("Firmware version: %s\n", FIRMWARE_VERSION);
+    printf("OTA: running from slot %s, %s\n", running_slot() == 0 ? "A" : "B",
+           can_install_updates() ? "A/B bootloader" : "before the A/B bootloader");
 
     const auto attempted = flash_saved_state->attempted_version();
+    booted_after_update = after_firmware_update();
 
     // The bootloader leaves the "after rollback" flag set until the next
-    // successful update, so only act on it while an attempt is recorded
-    if (pfb_is_after_rollback() && !attempted.empty())
+    // install, so only act on it while an attempt is recorded
+    if (after_rollback() && !attempted.empty())
     {
         printf("OTA: update to %s failed and was rolled back, won't retry it\n", attempted.c_str());
         ota_boot_status = "rolled_back";
         ota_boot_version = attempted;
         save_ota_state("", attempted);
+        // Reported: so the next update's attempt isn't taken for this
+        // rollback if the power goes before its install is recorded
+        forget_rollback();
     }
-    else if (pfb_is_after_firmware_update())
+    else if (booted_after_update)
     {
         printf("OTA: running newly installed firmware, will commit once healthy\n");
         ota_boot_status = "updated";
@@ -486,8 +496,9 @@ void ota_handle_boot()
 
 static bool firmware_committed = false;
 
-// Tells the bootloader this firmware works, so it won't be rolled back. Only
-// writes to flash on the first call after an update.
+// Tells the bootloader this firmware works, so it won't be rolled back (and
+// moves the board to the A/B bootloader if it isn't on it). Only writes to
+// flash when that changes something.
 static void ota_commit_firmware()
 {
     if (firmware_committed)
@@ -496,14 +507,14 @@ static void ota_commit_firmware()
     }
 
     firmware_committed = true;
+    commit_running_firmware();
 
-    if (!pfb_is_after_firmware_update())
+    if (!booted_after_update)
     {
         return;
     }
 
     printf("OTA: firmware is healthy, committing\n");
-    pfb_firmware_commit();
 
     const auto rejected = flash_saved_state->rejected_version();
     if (!flash_saved_state->attempted_version().empty() || rejected == FIRMWARE_VERSION)
@@ -517,15 +528,15 @@ static void ota_commit_firmware()
 // back
 static bool awaiting_commit()
 {
-    return !firmware_committed && pfb_is_after_firmware_update();
+    return !firmware_committed && booted_after_update;
 }
 
 // Whether newly installed firmware can make an https:// request (a version
 // check), tried every half minute while the socket is live. Any answer from
 // the server will do, even an error status: that's the server's trouble, not
 // the firmware's. If the board keeps getting none, even with its socket up,
-// the firmware is broken in a way the socket doesn't show, so reboot: the
-// bootloader then rolls it back.
+// the firmware is broken in a way the socket doesn't show, so it ends its
+// trial and reboots: the bootloader then rolls it back.
 static bool commit_check_passed()
 {
     constexpr int64_t RETRY_US = 30LL * 1000 * 1000;
@@ -550,7 +561,8 @@ static bool commit_check_passed()
     }
     if (++failures >= MAX_FAILURES)
     {
-        printf("OTA: new firmware can't make requests, rebooting to roll it back\n");
+        printf("OTA: new firmware can't make requests, rolling it back\n");
+        abandon_update();
         reset_pico();
     }
     return false;
@@ -585,53 +597,93 @@ static bool ota_check_for_update()
         return true;
     }
 
+    if (!can_install_updates())
+    {
+        // Moving to the A/B bootloader failed when this firmware committed;
+        // try again, and update next time
+        commit_running_firmware();
+        printf("OTA: not on the A/B bootloader yet, not updating to %s\n", version.c_str());
+        return true;
+    }
+
     printf("OTA: updating from %s to %s\n", FIRMWARE_VERSION, version.c_str());
 
-    // Erasing the whole download slot keeps interrupts disabled for a few
-    // seconds, longer than the hardware watchdog allows
-    printf("OTA: erasing download slot...\n");
-    long_watchdog_pause();
-    const int init_ret = pfb_initialize_download_slot();
-    long_watchdog_resume();
-
-    if (init_ret != 0)
+    if (!begin_update())
     {
-        printf("OTA: error initializing download slot: %d\n", init_ret);
+        printf("OTA: couldn't set up decryption\n");
         return false;
     }
 
     const auto size = download_image(version);
     if (size == 0)
     {
+        // A 404: the server has no image for this slot (a single image, for
+        // boards on pico_fota_bootloader), so it's no use asking again soon
+        if (download.complete && download.status_code == 404)
+        {
+            printf("OTA: the server has no image of %s for slot %s\n", version.c_str(), update_slot() == 0 ? "A" : "B");
+            return true;
+        }
         return false;
     }
 
     long_watchdog_update();
 
-    if (pfb_firmware_sha256_check(size) != 0)
+    if (!verify_update(size))
     {
         printf("OTA: SHA-256 check failed, discarding image\n");
+        return false;
+    }
+
+    if (!update_runs_in_its_slot())
+    {
+        printf("OTA: image isn't built for slot %s, discarding it\n", update_slot() == 0 ? "A" : "B");
         return false;
     }
 
     printf("OTA: downloaded and verified %u bytes, installing %s\n", (unsigned)size, version.c_str());
 
     save_ota_state(version, flash_saved_state->rejected_version());
-    pfb_mark_download_slot_as_valid();
 
-    // Reboots into the bootloader, which swaps in the new firmware
-    pfb_perform_update();
+    // Reboots into the bootloader, which starts the new firmware on trial
+    install_update(size);
+}
+
+// Whether the socket has been live on this boot
+static bool been_live = false;
+
+void ota_before_offline_reboot()
+{
+    // Back from a rollback and offline the whole time since: the network was
+    // probably down for the new firmware too, so it may not be broken
+    if (ota_boot_status == "rolled_back" && !been_live && !flash_saved_state->rejected_version().empty())
+    {
+        printf("OTA: offline since the rollback, will try %s again\n", ota_boot_version.c_str());
+        save_ota_state("", "");
+    }
+}
+
+// Whether a state message's offered version is one to check now: each offer
+// is checked once
+static bool new_offer(bool live, const std::string &offered_version)
+{
+    static std::string last_offer;
+    if (!live || offered_version.empty() || offered_version == FIRMWARE_VERSION || offered_version == last_offer ||
+        offered_version == flash_saved_state->rejected_version())
+    {
+        return false;
+    }
+    last_offer = offered_version;
     return true;
 }
 
 void ota_loop(bool live, const std::string &offered_version)
 {
+    been_live = been_live || live;
     constexpr int64_t CHECK_INTERVAL_US = 60LL * 60 * 1000 * 1000;
     // After a check that failed part way (the server or WiFi was down)
     constexpr int64_t RETRY_INTERVAL_US = 5LL * 60 * 1000 * 1000;
     static std::optional<absolute_time_t> next_check;
-    // The last version a state message offered, so each offer is checked once
-    static std::string last_offer;
 
     if (!firmware_committed && live)
     {
@@ -639,7 +691,7 @@ void ota_loop(bool live, const std::string &offered_version)
         // over wss://; one finished https:// request (this version check)
         // proves its requests work too. Until it's committed, any reboot
         // rolls it back.
-        if (!pfb_is_after_firmware_update() || commit_check_passed())
+        if (!booted_after_update || commit_check_passed())
         {
             ota_commit_firmware();
         }
@@ -650,15 +702,8 @@ void ota_loop(bool live, const std::string &offered_version)
         return;
     }
 
-    const bool new_offer = live && !offered_version.empty() && offered_version != FIRMWARE_VERSION &&
-                           offered_version != last_offer && offered_version != flash_saved_state->rejected_version();
-    if (new_offer)
-    {
-        last_offer = offered_version;
-    }
-
     const auto now = get_absolute_time();
-    if (new_offer || !next_check || absolute_time_diff_us(*next_check, now) >= 0)
+    if (new_offer(live, offered_version) || !next_check || absolute_time_diff_us(*next_check, now) >= 0)
     {
         const bool done = ota_check_for_update();
         next_check = delayed_by_us(get_absolute_time(), done ? CHECK_INTERVAL_US : RETRY_INTERVAL_US);

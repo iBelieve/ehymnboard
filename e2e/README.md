@@ -15,7 +15,7 @@ production), so they need nothing running first. CI (the `e2e` job in
 | Test file       | Covers                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `hymns.spec.ts` | Lines typed on the admin page are pushed to the board within a second and reach the right screen and band, each change is downloaded and drawn once and only for the screens it touches, no downloads in between (no polling), the admin's board picture matches the panels pixel for pixel, Clear, a power cut keeps the ETags, and a board cut off from the server catches up when it's back (Live and Offline on the Hymn Boards page) |
-| `ota.spec.ts`   | A release published with `POST /firmware` is pushed to the board, downloaded, installed through the bootloader, committed and reported on the Hymn Boards page, with the screens kept                                                                                                                                                                                                                                                     |
+| `ota.spec.ts`   | A release published with `POST /firmware` is pushed to the board, downloaded into the A/B bootloader's other slot, committed and reported on the Hymn Boards page, with the screens kept                                                                                                                                                                                                                                                  |
 
 ## How it fits together
 
@@ -89,10 +89,11 @@ server can't update a board by surprise.
 | `E2E_CHROMIUM_EXECUTABLE`   | Playwright's own Chromium                               |
 | `EMULATOR_VERBOSE=1`        | prints the firmware's serial output                     |
 
-`FIRMWARE_UF2` must sit in its build directory, which also holds the
-bootloader, `firmware_version.txt` and the encrypted OTA image. The OTA test
-relabels that image as a new release with the emulator's `OtaBuild`, so the
-build's key must match `device/secrets.cmake` (or the example key).
+`FIRMWARE_UF2` must sit in its build directory, which also holds the A/B
+bootloader, `firmware_version.txt`, both slots' encrypted OTA images and the
+bundle the server gets. The OTA test relabels those images as a new release
+with the emulator's `OtaBuild`, so the build's key must match
+`device/secrets.cmake` (or the example key).
 
 Checks, all run in CI (`.github/workflows/ci.yml`):
 

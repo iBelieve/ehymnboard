@@ -16,13 +16,15 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-// Makes OTA images for the firmware under test. The build makes one
-// (ehymnboard_fota_image_encrypted.bin): the firmware's binary, a 256 byte
-// trailer ending in the binary's SHA-256, all AES-256-ECB encrypted with the
-// key from secrets.cmake (padded to 32 characters with 'x'). A "new" firmware
-// is that image with its version string swapped for another of the same
-// length, re-hashed and re-encrypted, so it's the same code reporting a
-// different version.
+// Makes OTA images for the firmware under test. The build makes one for each
+// of the A/B bootloader's slots (ehymnboard_fota_image_encrypted.bin for slot
+// A, ehymnboard_b_fota_image_encrypted.bin for B, the same code linked to run
+// from each): the firmware's binary, a 256 byte trailer ending in the binary's
+// SHA-256, all AES-256-ECB encrypted with the key from secrets.cmake (padded
+// to 32 characters with 'x'). A "new" firmware is those images with their
+// version string swapped for another of the same length, re-hashed and
+// re-encrypted, so it's the same code reporting a different version. The
+// server is sent both in one bundle (ehymnboard_ota_bundle.bin).
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -30,6 +32,7 @@ import path from "node:path";
 const TRAILER_BYTES = 256;
 const SHA256_BYTES = 32;
 const AES_KEY_CHARS = 32;
+const BUNDLE_MAGIC = Buffer.from("EHBOTA2\0");
 
 const DEVICE_DIR = path.join(import.meta.dirname, "..", "..");
 
@@ -71,28 +74,42 @@ export function sealImage(binary: Uint8Array, key: Buffer = aesKey()) {
   return aes(key, plain, true);
 }
 
-/** The build's OTA image, decrypted and checked. */
+/** Both slots' OTA images in one file, as the server takes them. */
+export function bundle(imageA: Uint8Array, imageB: Uint8Array) {
+  const lengths = Buffer.alloc(8);
+  lengths.writeUInt32LE(imageA.length, 0);
+  lengths.writeUInt32LE(imageB.length, 4);
+  return new Uint8Array(Buffer.concat([BUNDLE_MAGIC, lengths, imageA, imageB]));
+}
+
+/** An image decrypted, its SHA-256 checked, without its trailer. */
+function openImage(file: string, key: Buffer) {
+  const plain = aes(key, fs.readFileSync(file), false);
+  const binary = plain.subarray(0, plain.length - TRAILER_BYTES);
+  const expected = Buffer.from(plain.subarray(plain.length - SHA256_BYTES));
+  if (!expected.equals(sha256(binary))) {
+    throw new Error(`${path.basename(file)} doesn't decrypt with this PFB_AES_KEY`);
+  }
+  return binary;
+}
+
+/** The build's OTA images, decrypted and checked. */
 export class OtaBuild {
   readonly version: string;
-  readonly binary: Uint8Array;
+  /** Each slot's binary: [A, B]. */
+  readonly binaries: readonly [Uint8Array, Uint8Array];
   readonly key: Buffer;
 
-  /** Reads the image and version from the build directory of `uf2`. */
+  /** Reads the images and version from the build directory of `uf2`. */
   constructor(uf2: string, key: Buffer = aesKey()) {
     const dir = path.dirname(uf2);
     const base = path.basename(uf2, ".uf2");
     this.version = fs.readFileSync(path.join(dir, "firmware_version.txt"), "utf8").trim();
     this.key = key;
-    const plain = aes(
-      key,
-      fs.readFileSync(path.join(dir, `${base}_fota_image_encrypted.bin`)),
-      false,
-    );
-    this.binary = plain.subarray(0, plain.length - TRAILER_BYTES);
-    const expected = Buffer.from(plain.subarray(plain.length - SHA256_BYTES));
-    if (!expected.equals(sha256(this.binary))) {
-      throw new Error(`${base}_fota_image_encrypted.bin doesn't decrypt with this PFB_AES_KEY`);
-    }
+    this.binaries = [
+      openImage(path.join(dir, `${base}_fota_image_encrypted.bin`), key),
+      openImage(path.join(dir, `${base}_b_fota_image_encrypted.bin`), key),
+    ];
   }
 
   /**
@@ -103,12 +120,12 @@ export class OtaBuild {
     return (tag + this.version.slice(tag.length)).slice(0, this.version.length);
   }
 
-  /** This build's image, reporting `version` instead of its own. */
-  imageFor(version: string) {
+  /** This build's binary for `slot` (0 for A, 1 for B), reporting `version` instead of its own. */
+  binaryFor(version: string, slot: 0 | 1 = 0) {
     if (version.length !== this.version.length) {
       throw new Error(`"${version}" isn't ${this.version.length} characters long`);
     }
-    const binary = Buffer.from(this.binary);
+    const binary = Buffer.from(this.binaries[slot]);
     const from = Buffer.from(this.version + "\0");
     const to = Buffer.from(version + "\0");
     let found = 0;
@@ -119,6 +136,21 @@ export class OtaBuild {
     if (!found) {
       throw new Error(`version "${this.version}" isn't in the firmware binary`);
     }
-    return sealImage(binary, this.key);
+    return new Uint8Array(binary);
+  }
+
+  /** This build's OTA image for `slot` (0 for A, 1 for B), reporting `version` instead of its own. */
+  imageFor(version: string, slot: 0 | 1 = 0) {
+    return sealImage(this.binaryFor(version, slot), this.key);
+  }
+
+  /** Both slots' images reporting `version`: [A, B]. */
+  imagesFor(version: string): [Uint8Array, Uint8Array] {
+    return [this.imageFor(version, 0), this.imageFor(version, 1)];
+  }
+
+  /** The bundle to upload for this build reporting `version`. */
+  bundleFor(version: string) {
+    return bundle(...this.imagesFor(version));
   }
 }

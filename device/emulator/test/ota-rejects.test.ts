@@ -36,9 +36,9 @@ const NEXT = build.nextVersion("ota2");
 function offer(image: Uint8Array | HttpResponse, failure: string) {
   const emu = boot();
   if (image instanceof Uint8Array) {
-    emu.server.firmware = { version: NEXT, image };
+    emu.server.firmware = { version: NEXT, images: [image, image] };
   } else {
-    emu.server.firmware = { version: NEXT, image: new Uint8Array() };
+    emu.server.firmware = { version: NEXT, images: [new Uint8Array(), new Uint8Array()] };
     emu.server.override = (req) => (req.path === "/firmware/image" ? image : undefined);
   }
   const at = emu.waitForSerial(`OTA: updating from ${build.version} to ${NEXT}`, 60_000);
@@ -52,12 +52,12 @@ function assertStillRunning(emu: Emulator) {
   emu.run(60_000);
   assert.equal(emu.server.openSockets.length, 1, "live on its socket");
   assert.equal(emu.reboots, 0);
-  assert.equal(count(emu, "[BOOTLOADER] Nothing to swap"), 1, "only the first boot");
+  assert.equal(count(emu, "OTA: running from slot A"), 1, "only the first boot");
   assert.equal(count(emu, "Firmware version:"), 1);
 }
 
 test("rejects an image that doesn't match its SHA-256", () => {
-  const image = build.imageFor(NEXT);
+  const image = build.imageFor(NEXT, 1);
   // Flipping a bit garbles one 16 byte AES block of the decrypted image.
   image[image.length >> 1] ^= 0x01;
 
@@ -65,9 +65,16 @@ test("rejects an image that doesn't match its SHA-256", () => {
 });
 
 test("rejects an image encrypted with another key", () => {
-  const image = sealImage(build.binary, Buffer.from("anotherkey".padEnd(32, "x")));
+  const image = sealImage(build.binaries[1], Buffer.from("anotherkey".padEnd(32, "x")));
 
   assertStillRunning(offer(image, "OTA: SHA-256 check failed, discarding image"));
+});
+
+test("rejects an image built for the other slot", () => {
+  // Slot A's image, which the board in slot A can't run from slot B
+  const image = build.imageFor(NEXT, 0);
+
+  assertStillRunning(offer(image, "OTA: image isn't built for slot B, discarding it"));
 });
 
 test("rejects an image that isn't whole flash pages", () => {
@@ -76,14 +83,14 @@ test("rejects an image that isn't whole flash pages", () => {
   assertStillRunning(offer(image, "OTA: invalid firmware image size 1000"));
 });
 
-test("rejects an image too big for the download slot", () => {
+test("rejects an image too big for a slot", () => {
   const image = new Uint8Array(1001 * 1024);
 
   assertStillRunning(offer(image, `OTA: invalid firmware image size ${image.length}`));
 });
 
 test("gives up on a download cut off part way", () => {
-  const image = build.imageFor(NEXT);
+  const image = build.imageFor(NEXT, 1);
   const cut: HttpResponse = { status: 200, body: image, truncateAt: 100_000 };
 
   assertStillRunning(offer(cut, "OTA: download failed"));

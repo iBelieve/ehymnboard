@@ -45,33 +45,34 @@ function isLocal(origin: string) {
   return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(origin).hostname);
 }
 
-/** Publishes a firmware release the way a release is published (`POST /firmware`). */
+/**
+ * Publishes a firmware release the way a release is published (`POST
+ * /firmware`): its OTA bundle, both slots' images.
+ */
 export async function publishRelease(
   request: APIRequestContext,
   version: string,
-  image: Uint8Array,
+  bundle: Uint8Array,
 ) {
   const response = await request.post("/firmware", {
     multipart: {
       version,
       image: {
-        name: "ehymnboard_fota_image_encrypted.bin",
+        name: "ehymnboard_ota_bundle.bin",
         mimeType: "application/octet-stream",
-        buffer: Buffer.from(image),
+        buffer: Buffer.from(bundle),
       },
     },
   });
   expect(response.status(), await response.text()).toBe(201);
 }
 
-/** The version and encrypted OTA image of the firmware under test, from its build directory. */
+/** The version and OTA bundle of the firmware under test, from its build directory. */
 function buildRelease() {
   const dir = path.dirname(FIRMWARE);
   return {
     version: fs.readFileSync(path.join(dir, "firmware_version.txt"), "utf8").trim(),
-    image: fs.readFileSync(
-      path.join(dir, `${path.basename(FIRMWARE, ".uf2")}_fota_image_encrypted.bin`),
-    ),
+    bundle: fs.readFileSync(path.join(dir, `${path.basename(FIRMWARE, ".uf2")}_ota_bundle.bin`)),
   };
 }
 
@@ -372,7 +373,7 @@ export const test = base.extend<{ admin: AdminPage; backend: string; board: Boar
   },
   board: async ({ backend, request }, use, testInfo) => {
     const release = buildRelease();
-    await publishRelease(request, release.version, release.image);
+    await publishRelease(request, release.version, release.bundle);
     const board = new Board(backend);
     await use(board);
     // Gone, as a board that lost power is: the next test's board is new
@@ -380,7 +381,7 @@ export const test = base.extend<{ admin: AdminPage; backend: string; board: Boar
     await board.attachTo(testInfo);
     // Leave the server offering the build under test, not a release a test
     // published, for whatever checks in next.
-    await publishRelease(request, release.version, release.image);
+    await publishRelease(request, release.version, release.bundle);
   },
 });
 
