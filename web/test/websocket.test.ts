@@ -527,6 +527,18 @@ function flagshipAdmin(): FlagshipAdmin {
   return admin;
 }
 
+/** Applies `lines` as the admin does. */
+async function putLines(lines: string[]) {
+  const response = await exports.default.fetch(
+    new Request(`${BASE}/api/lines`, {
+      method: "PUT",
+      headers: { ...AUTH, "Content-Type": "application/json" },
+      body: JSON.stringify({ lines }),
+    }),
+  );
+  expect(response.ok).toBe(true);
+}
+
 describe("partial refresh, from Flagship", () => {
   const flags = flagshipAdmin;
   /** The flag, on for `boards` (or no board, though on). */
@@ -564,37 +576,30 @@ describe("partial refresh, from Flagship", () => {
     expect(device(s, RIGHT)?.partial_refresh).toBe(false);
 
     // A change of lines keeps each board's own option
-    await exports.default.fetch(
-      new Request(`${BASE}/api/lines`, {
-        method: "PUT",
-        headers: { ...AUTH, "Content-Type": "application/json" },
-        body: JSON.stringify({ lines: ["321", "", "", "", "", ""] }),
-      }),
-    );
+    await putLines(["321", "", "", "", "", ""]);
     expect(await left.next(1)).toMatch(/ partial$/);
     expect(STATE.test(await right.next(1))).toBe(true);
   });
 
-  test("the alarm sends the state again when the flag changes, and only then", async () => {
+  test("a change of the flag reaches a board with its next state, not before", async () => {
     const board = await connect(LEFT);
-    const first = await board.next(0);
-    expect(STATE.test(first)).toBe(true);
-    const stub = env.HYMN_BOARD.getByName("main");
+    expect(STATE.test(await board.next(0))).toBe(true);
     const logged = spyOnLog();
 
+    // Turned on: the alarm doesn't send anything for it
     await setFlag([LEFT]);
-    expect(await runDurableObjectAlarm(stub)).toBe(true);
-    expect(await board.next(1)).toBe(`${first} partial`);
+    expect(await runDurableObjectAlarm(env.HYMN_BOARD.getByName("main"))).toBe(true);
+    expect(await board.ask("ping")).toBe("pong");
+    expect(board.messages).toHaveLength(2);
+
+    // The next state, before the board's next update, carries it
+    await putLines(["111", "", "", "", "", ""]);
+    expect(await board.next(2)).toMatch(/ partial$/);
     expect(logged()).toContain(`Partial refresh on for Left Hymn Board (${LEFT})`);
 
-    // Unchanged: nothing more
-    expect(await runDurableObjectAlarm(stub)).toBe(true);
-    expect(await board.ask("ping")).toBe("pong");
-    expect(board.messages).toHaveLength(3);
-
     await setFlag([]);
-    expect(await runDurableObjectAlarm(stub)).toBe(true);
-    expect(await board.next(3)).toBe(first);
+    await putLines(["222", "", "", "", "", ""]);
+    expect(STATE.test(await board.next(3))).toBe(true);
     expect(logged()).toContain(`Partial refresh off for Left Hymn Board (${LEFT})`);
     expect(device(await state())?.partial_refresh).toBe(false);
   });

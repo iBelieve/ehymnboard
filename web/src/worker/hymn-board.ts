@@ -446,7 +446,9 @@ export class HymnBoard extends DurableObject<Env> {
 
   /**
    * Flagship's partial refresh flag for the board on a socket (none without
-   * one), or what the board was last told if Flagship can't say.
+   * one), or what the board was last told if Flagship can't say. Evaluated
+   * with every state, and only then: a board's panels only change after a
+   * state, so a flag turned on or off reaches it before its next update.
    */
   private async partialRefreshOf(ws: WebSocket): Promise<boolean | undefined> {
     const attachment = attachmentOf(ws);
@@ -479,27 +481,6 @@ export class HymnBoard extends DurableObject<Env> {
       console.log(
         `Partial refresh ${partial ? "on" : "off"} for ${getDeviceName(deviceId)} (${deviceId})`,
       );
-    }
-  }
-
-  /**
-   * Sends the state again to each live board whose partial refresh flag
-   * changed in Flagship since it was last told, so turning it on or off
-   * reaches the boards within an alarm's interval.
-   */
-  private async sendChangedFlags(sockets: WebSocket[]): Promise<void> {
-    const partial = await Promise.all(sockets.map((ws) => this.partialRefreshOf(ws)));
-    // What each was told is read after the wait, as a broadcast may have told it since
-    const changed = sockets.flatMap((ws, i) => {
-      const on = partial[i];
-      return on !== undefined && on !== attachmentOf(ws)?.partialRefresh ? [{ ws, on }] : [];
-    });
-    if (changed.length === 0) {
-      return;
-    }
-    const message = await this.stateMessage();
-    for (const { ws, on } of changed) {
-      this.sendState(ws, message, on);
     }
   }
 
@@ -551,7 +532,6 @@ export class HymnBoard extends DurableObject<Env> {
     // First, as these sockets' ping times would fool the check below
     this.closeOutdatedSockets();
     const live = new Set<string>();
-    const liveSockets: WebSocket[] = [];
     for (const ws of this.openSockets()) {
       const attachment = attachmentOf(ws);
       const at = this.lastHeardFrom(ws);
@@ -562,10 +542,8 @@ export class HymnBoard extends DurableObject<Env> {
         continue;
       }
       live.add(attachment.deviceId);
-      liveSockets.push(ws);
       this.redrawIfDue(ws, attachment);
     }
-    await this.sendChangedFlags(liveSockets);
     const at = new Date().toISOString();
     for (const deviceId of live) {
       this.updateDevice(deviceId, { last_seen: at });

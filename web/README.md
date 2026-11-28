@@ -204,12 +204,14 @@ through its admin API.
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `partial-refresh` | Sends the board's `state` with `partial`, so it updates its panels with a partial refresh (see `device/README.md`). The admin shows a "Partial refresh" badge |
 
-The Durable Object evaluates the flag whenever it sends a board `state`, and
-at each 10-minute alarm, sending `state` again to a board whose value
-changed. A change in the dashboard takes about a minute to reach Flagship's
-edge, so turning a flag on or off (or editing a rule) reaches the boards
-within about 11 minutes, with no deploy. To roll back, turn the flag off (or
-take the board out of the rule); the board's next update is a full refresh.
+The Durable Object evaluates the flag whenever it sends a board `state`
+(when lines or firmware change, or the board connects), and only then: a
+board's panels only change after a `state`, so turning the flag on or off (or
+editing a rule) in the dashboard reaches a board before its next update, with
+no deploy. A change takes about a minute to reach Flagship's edge. To roll
+back, turn the flag off (or take the board out of the rule); the board's next
+update is a full refresh. The admin's badge shows what the board was last
+told, so it changes with the next `state` too.
 
 ### Boards on TLS
 
