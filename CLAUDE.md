@@ -9,6 +9,18 @@ answer byte-for-byte as they did. `hardware/` is the KiCad design
 (no CI). `web/`, `e2e/` and `device/emulator/` are one pnpm workspace,
 rooted at the repository root (see "pnpm workspace" below).
 
+## The panels change only when the lines do
+
+This is the hard requirement: a panel never updates (not even a flashless
+partial refresh, and not for a new feature, a reconnect, an OTA update or a
+flag change) except when someone changes the lines in the admin. During a
+service the boards must sit still. The two exceptions are the nightly full
+redraw, between 3 and 5 AM board time (Waveshare's once-a-day refresh), and
+the first boot on fresh flash, which has nothing on the panels yet. Any change
+that could make a board draw something else needs Michael's say-so first. The
+e2e tests' `expectSettled`, and the emulator tests that run the board for a
+while and count `emu.displays`, check this; keep them doing so.
+
 ## CI
 
 One GitHub Actions workflow, `.github/workflows/ci.yml`, runs every check on

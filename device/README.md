@@ -68,6 +68,16 @@ picotool load -x build/ehymnboard.uf2
 
 The first boot starts with fresh saved state, so the screens redraw once. After this, `picotool load -x build/ehymnboard.uf2` (in BOOTSEL mode) still works for flashing over USB.
 
+### When the panels change
+
+Only when someone changes the lines in the admin: the board draws a screen
+only when the server's `state` names an image it isn't showing. Nothing else
+redraws a panel, partially or fully: not a reconnect, a reboot or an OTA
+update (the board keeps what it shows in flash), and not a change of the
+`partial` option. The two exceptions are the nightly `redraw` between 3 and
+5 AM (below) and the first boot on fresh flash. During a service the boards
+must sit still, so keep it that way.
+
 ### Talking to the server
 
 The board keeps a WebSocket open to the server (`wss://hymnboard.sonrise.io/ws`,
