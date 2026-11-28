@@ -18,7 +18,9 @@
 
 #include "shown_images.h"
 
-// A run is at most every bit of the image: 652,800 for a panel, 3 varint bytes
+// A run is at most every bit of the image: 652,800 for a panel, which takes 3
+// varint bytes. One more is let through (any run under 2^28 bits); a longer
+// varint is garbage
 static constexpr unsigned MAX_VARINT_BYTES = 4;
 
 // Calls `run(length)` for each run of equal bits in the image, alternately 1s

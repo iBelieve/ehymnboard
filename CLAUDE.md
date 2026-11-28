@@ -141,8 +141,10 @@ All checks below must pass; run them locally before committing.
   `SETUP_PASSWORD`
 - Feature flags are Cloudflare Flagship's (the `FLAGS` binding, app
   `hymnboard`; see `web/README.md`, "Feature flags"), evaluated per board in
-  `src/worker/flags.ts`. Locally the store is empty, so every flag is off; the
-  Worker tests put flags in it through its admin API (`test/websocket.test.ts`)
+  `src/worker/flags.ts`. Locally the store starts empty, so every flag is off
+  until made in it: the Worker tests make flags through its admin API
+  (`test/websocket.test.ts`), and the e2e tests' server makes `partial-refresh`
+  on for every board
 - Don't change the device endpoints' paths, query parameters or response
   bytes, or the `/ws` messages (`state` and its `partial` option, `ping`/`pong`,
   `shown`, `redraw`, close codes): the firmware hard-codes them. The rasterizer is checked bit for bit

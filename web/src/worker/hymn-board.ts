@@ -104,6 +104,14 @@ export type ImageResult =
  */
 export class HymnBoard extends DurableObject<Env> {
   private readonly sql: SqlStorage;
+  /**
+   * Orders the states sent while Flagship is asked: each send takes a ticket
+   * before its wait, and a socket never gets a state with an older ticket
+   * than one it already got (see sendState). In memory: a wait keeps the
+   * object awake.
+   */
+  private lastStateTicket = 0;
+  private readonly sentStateTickets = new WeakMap<WebSocket, number>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -409,9 +417,11 @@ export class HymnBoard extends DurableObject<Env> {
     this.ctx.waitUntil(this.ping(deviceId, "", "Socket connected"));
 
     // The flag first: the state is built after the wait (see sendState)
-    // Off if Flagship can't say: nothing is known about the panels yet
+    // Off if Flagship can't say: the board's next update is then a full one,
+    // which is always safe (its old socket, which would say, is usually gone)
+    const ticket = ++this.lastStateTicket;
     const partial = (await partialRefreshFor(this.env.FLAGS, deviceId)) ?? false;
-    this.sendState(server, await this.stateMessage(), partial);
+    this.sendState(server, await this.stateMessage(), partial, ticket);
     if ((await this.ctx.storage.getAlarm()) === null) {
       await this.ctx.storage.setAlarm(now + HEALTH_INTERVAL_MS);
     }
@@ -437,10 +447,11 @@ export class HymnBoard extends DurableObject<Env> {
       return;
     }
     // The flags first: the state is built after the wait (see sendState)
+    const ticket = ++this.lastStateTicket;
     const partial = await Promise.all(sockets.map((ws) => this.partialRefreshOf(ws)));
     const message = await this.stateMessage();
     for (const [i, ws] of sockets.entries()) {
-      this.sendState(ws, message, partial[i] ?? false);
+      this.sendState(ws, message, partial[i] ?? false, ticket);
     }
   }
 
@@ -466,14 +477,21 @@ export class HymnBoard extends DurableObject<Env> {
    * notes on its socket which it was told. Synchronous, so called once the
    * flag is in hand: a state built before a wait on Flagship could reach the
    * board after a newer one, and the note could be of what it wasn't told.
+   * `ticket` is when the flag was asked for: a state whose Flagship answer
+   * came after a later-asked one's isn't sent, as that one has the newer
+   * flag and a state no older (every change sends a state of its own after).
    */
-  private sendState(ws: WebSocket, message: string, partial: boolean): void {
+  private sendState(ws: WebSocket, message: string, partial: boolean, ticket: number): void {
+    if ((this.sentStateTickets.get(ws) ?? 0) > ticket) {
+      return;
+    }
     try {
       ws.send(partial ? `${message} ${PARTIAL_OPTION}` : message);
     } catch {
       // Closing; the board gets the state when it reconnects
       return;
     }
+    this.sentStateTickets.set(ws, ticket);
     const attachment = attachmentOf(ws);
     if (attachment && partial !== attachment.partialRefresh) {
       ws.serializeAttachment({ ...attachment, partialRefresh: partial } satisfies SocketAttachment);

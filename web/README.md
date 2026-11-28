@@ -197,8 +197,9 @@ board, a few, or a share of them. A flag that isn't in the app is off; while
 Flagship can't evaluate one, a connected board keeps what it was last told, and
 a board connecting gets it off. Locally
 (`pnpm dev`, the tests and the e2e tests' server) the binding is Wrangler's
-own store, empty, so every flag is off; the Worker tests put flags in it
-through its admin API.
+own store, which starts empty, so every flag is off until one is made there:
+the Worker tests put flags in it through its admin API, and the e2e tests'
+server makes `partial-refresh` on for every board (see `e2e/README.md`).
 
 | Flag              | What it does                                                                                                                                                  |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
